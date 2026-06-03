@@ -1,0 +1,43 @@
+# Copy to config/settings.yaml to override defaults. All keys are optional.
+# This file is git-ignored, so machine-specific paths are safe to keep here.
+# CLI flags always override the values set here.
+
+# --- Operational defaults (so you don't retype them every run) ---
+
+# miniMRP database to check stock against (same as --check-stock). Leave unset to disable.
+# minimrp_path: "/home/you/Dropbox/Invector/miniMRP/Data/mrp5data"
+
+# build_qty: 100          # default number of boards (--build-qty)
+# currency: SEK           # default pricing currency (--currency); else .env locale currency
+# output_dir: "reports"   # where to write report workbooks; default is next to the input BOM
+
+# --- Matching / purchasing behaviour ---
+
+# Lines scoring at or above this confidence are auto-resolved; below it they are
+# kept but flagged for human review in the output workbook.
+confidence_threshold: 0.75
+
+# Buy a full reel when the whole reel costs under this (in the locale currency);
+# otherwise order cut tape for the exact quantity needed. Set 0 to always use cut tape.
+reel_threshold: 10000.0
+
+candidates_per_line: 5   # how many Digi-Key results to score per line
+alternates_kept: 3       # alternates recorded alongside the chosen part
+
+# Relative importance of each signal when scoring a candidate against a spec.
+weights:
+  value: 0.40
+  package: 0.25
+  in_stock: 0.20
+  lifecycle: 0.10
+  type: 0.05
+
+# Assumptions applied to deliberately under-specified passives. Every assumption
+# applied to a line causes it to be flagged for review.
+default_resistor_tolerance: "1%"
+default_capacitor_dielectric_small: "C0G"   # for <= 1 nF
+default_capacitor_dielectric_bulk: "X7R"
+default_capacitor_voltage: "16V"
+
+# Values that mean "do not mount" (line is reported but not purchased).
+dnp_values: [DNM, DNP, DNI, NF, NOTFITTED, NOPOP, NA]

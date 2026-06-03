@@ -1,0 +1,30 @@
+# Resolve recurring *generic* EAGLE device names that are not real manufacturer
+# part numbers (LEDs by colour, tactile switches, headers, …) into a usable
+# Digi-Key search. Rules are tried in order; the first match wins.
+#
+# Each rule matches on `device` (regex, case-insensitive) and may also require a
+# `value` regex. Provide EITHER:
+#   mpn:   an exact manufacturer part number  -> searched as a confident MPN match
+#   query: a keyword search string            -> best in-stock part, flagged for review
+# Placeholders {value}, {package}, {device} are substituted into mpn/query.
+#
+# Tip: as you identify the real part you actually buy for a generic line, replace
+# its `query:` rule with an `mpn:` rule so it resolves confidently every time.
+
+rules:
+  - device: "LEDCHIPLED_0402"
+    query: "{value} LED 0402 SMD"
+  - device: "LEDCHIPLED_0603"
+    query: "{value} LED 0603 SMD"
+  - device: "LEDCHIPLED_0805"
+    query: "{value} LED 0805 SMD"
+  - device: "LEDCHIPLED_1206"
+    query: "{value} LED 1206 SMD"
+
+  # C&K KMR2 series 6 mm SMT tactile switch
+  - device: "KMR2"
+    query: "KMR2 tactile switch SMD"
+
+  # Generic 2.54 mm pin headers (EAGLE MAxx-y devices)
+  - device: "^MA\\d"
+    query: "pin header 2.54mm"

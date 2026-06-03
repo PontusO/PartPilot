@@ -1,0 +1,38 @@
+# Canonical field  ->  list of accepted source header names (case-insensitive).
+# Used to map varied BOM layouts (EAGLE, KiCad, Altium, hand-rolled) onto BomLine.
+# Header auto-detection also fuzzy-matches against these aliases.
+
+refdes:
+  - parts
+  - refdes
+  - reference
+  - references
+  - designator
+  - designators
+qty:
+  - qty
+  - quantity
+  - count
+value:
+  - value
+  - val
+device:
+  - device
+  - part
+  - component
+package:
+  - package
+  - footprint
+  - pkg
+  - case
+description:
+  - description
+  - desc
+  - comment description
+comment:
+  - comment
+  - kommentar
+  - note
+  - notes
+  - inkop
+  - "inköp"
