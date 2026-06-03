@@ -45,6 +45,22 @@ def auth_test(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind address. Use 0.0.0.0 to allow LAN access."),
+    port: int = typer.Option(8000, help="Port to listen on."),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
+):
+    """Run the PartPilot web app (upload a BOM, quote it in the browser)."""
+    import uvicorn
+
+    console.print(
+        f"Starting PartPilot on [bold]http://{host}:{port}[/] "
+        f"{'(LAN-accessible)' if host == '0.0.0.0' else '(local only — use --host 0.0.0.0 for LAN)'}"
+    )
+    uvicorn.run("digisearch.web.app:create_app", host=host, port=port, factory=True, reload=reload)
+
+
+@app.command()
 def resolve(
     input: Path = typer.Argument(..., exists=True, readable=True, help="BOM file (.csv/.xlsx)."),
     build_qty: Optional[int] = typer.Option(None, "--build-qty", "-q", help="Number of boards to build."),

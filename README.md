@@ -17,6 +17,28 @@ uv run digisearch auth-test          # verify API credentials (production by def
 uv run digisearch resolve slice-vb.csv --build-qty 100 -o slice-vb-resolved.xlsx
 ```
 
+## Web app (PartPilot)
+
+DigiSearch also ships a small **web front-end** so colleagues can run quotes from a browser
+instead of the CLI — the first step toward an in-house tool the whole company uses.
+
+```bash
+uv run digisearch serve                 # local only: http://127.0.0.1:8000
+uv run digisearch serve --host 0.0.0.0  # allow other machines on the LAN to connect
+```
+
+It's an *internal* app: one machine on your network runs a single process, everyone points a
+browser at it. On first run it prints an initial **admin** username/password (override with
+`PARTPILOT_ADMIN_USER` / `PARTPILOT_ADMIN_PASSWORD`). Log in, upload a BOM, pick a build
+quantity, and you get the resolved quote table plus downloadable Excel report and distributor
+cart CSVs — the same engine as the CLI.
+
+Access is **role-based**: only the `admin`/`quoter` roles can run quotes (warehouse/shipping/
+purchasing roles are reserved for screens still to come). Users, uploaded BOMs and generated
+files live under `data/` (git-ignored); back up `data/partpilot.db`. Set
+`PARTPILOT_SECRET_KEY` to keep logins valid across restarts. For production, run it behind a
+`systemd` unit on one LAN machine.
+
 ## Checking what's already in stock (miniMRP)
 
 If you keep inventory in [miniMRP](https://minimrp.com/), point DigiSearch at its database to

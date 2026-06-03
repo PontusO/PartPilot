@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Quote · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Quote — {{ source_name }}</h1>
+  <p class="note">
+    {{ result.build_qty }} board(s){% if result.stock_checked %}, miniMRP stock checked{% endif %}{% if result.mouser_enabled %}, Mouser fallback enabled{% endif %}.
+  </p>
+
+  {% for w in result.warnings %}<div class="err">{{ w }}</div>{% endfor %}
+
+  <div class="cards">
+    {% for status, count in result.summary.items() %}
+      <div class="card"><b>{{ count }}</b><small>{{ status.replace('_',' ') }}</small></div>
+    {% endfor %}
+    <div class="card"><b>{{ "%.2f"|format(result.total_cost) }}</b><small>{{ result.currency }} total</small></div>
+  </div>
+
+  <div class="downloads">
+    {% for label, name in downloads %}
+      <a href="/download/{{ job_id }}/{{ name }}">⬇ {{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <div style="overflow-x:auto; margin-top:1.25rem;">
+    <table>
+      <thead>
+        <tr>
+          <th>RefDes</th><th>Original</th><th>Status</th><th>Supplier</th>
+          <th>MPN</th><th>Order P/N</th><th>Pkg</th>
+          <th class="num">Buy</th><th class="num">Unit</th><th class="num">Line cost</th>
+          <th class="num">Conf</th><th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in result.resolved %}
+        <tr>
+          <td>{{ r.line.refdes_str }}</td>
+          <td>{{ r.line.value or r.line.device or '' }}</td>
+          <td><span class="badge {{ status_class.get(r.status, 'muted') }}">{{ r.status.value.replace('_',' ') }}</span></td>
+          <td>{{ r.chosen.supplier if r.chosen else '' }}</td>
+          <td>
+            {% if r.chosen %}
+              {% if r.chosen.product_url %}<a href="{{ r.chosen.product_url }}" target="_blank" rel="noopener">{{ r.chosen.mpn }}</a>
+              {% else %}{{ r.chosen.mpn }}{% endif %}
+            {% endif %}
+          </td>
+          <td>{{ r.chosen.order_part_number(r.packaging) if r.chosen else '' }}</td>
+          <td>{{ r.packaging or '' }}</td>
+          <td class="num">{{ r.purchase_qty if r.purchase_qty is not none else '' }}</td>
+          <td class="num">{% if r.purchase_unit_price %}{{ "%.4f"|format(r.purchase_unit_price) }}{% endif %}</td>
+          <td class="num">{% if r.line_cost %}{{ "%.2f"|format(r.line_cost) }}{% endif %}</td>
+          <td class="num">{% if r.chosen %}{{ "%.0f"|format(r.confidence*100) }}%{% endif %}</td>
+          <td class="flag">{{ r.flag_reason or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p style="margin-top:1.25rem;"><a href="/">← New quote</a></p>
+</div>
+{% endblock %}

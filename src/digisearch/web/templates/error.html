@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error · PartPilot{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:560px; margin:0 auto;">
+  <h1>Something went wrong</h1>
+  <div class="err">{{ message }}</div>
+  <p style="margin-top:1rem;"><a href="/">← Back</a></p>
+</div>
+{% endblock %}

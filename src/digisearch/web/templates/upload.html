@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}New quote · PartPilot{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:560px; margin:0 auto;">
+  <h1>New quote</h1>
+  {% if not can_quote %}
+    <div class="err">Your role ({{ user.role }}) cannot run quotes. Ask an admin for the
+      <em>quoter</em> role.</div>
+  {% else %}
+    <p class="note">Upload a BOM (CSV or Excel). PartPilot resolves each line against
+      Digi-Key{% if stock_available %}, checks miniMRP stock,{% endif %} and produces a priced
+      quote plus distributor cart files.</p>
+    <form method="post" action="/quote" enctype="multipart/form-data" onsubmit="showOverlay()">
+      <label for="file">BOM file</label>
+      <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
+
+      <label for="build_qty">Build quantity (boards)</label>
+      <input id="build_qty" name="build_qty" type="number" min="1" value="{{ default_build_qty }}" required>
+
+      {% if stock_available %}
+      <div class="check">
+        <input id="check_stock" name="check_stock" type="checkbox" value="true" checked>
+        <label for="check_stock" style="margin:0; color:inherit;">Check miniMRP stock first</label>
+      </div>
+      {% endif %}
+
+      <button type="submit">Resolve &amp; quote</button>
+    </form>
+  {% endif %}
+</div>
+
+<div id="overlay">
+  <div class="spin"></div>
+  <div>Resolving against Digi-Key… this can take a minute.</div>
+</div>
+<script>
+  function showOverlay() { document.getElementById('overlay').style.display = 'flex'; }
+</script>
+{% endblock %}

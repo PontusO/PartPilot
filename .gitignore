@@ -7,6 +7,9 @@
 # Local settings override
 config/settings.yaml
 
+# PartPilot web app runtime data (user DB, uploaded BOMs, generated quote files)
+data/
+
 # Generated BOM reports and distributor cart CSVs
 *-resolved.xlsx
 *-cart.csv
