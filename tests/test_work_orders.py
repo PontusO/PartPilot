@@ -240,6 +240,50 @@ def test_buy_by_uses_component_lead_time(db):
     assert any(ln["part_no"] == "COMP-A" and ln["lead_time"] == 10 for ln in bb["lines"])
 
 
+def test_spillage_margin_inflates_requirements(db):
+    a, _, _, top = _setup(db)  # TOP-1 → COMP-A 6/build, COMP-B 5/build
+    with db.connect() as conn:  # set a 10% global spillage
+        conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('production.spillage_percent', '10')")
+        conn.commit()
+
+    wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 10}))
+    req = {ln["part_no"]: ln["qty_required"] for ln in wo["lines"]}
+    assert req["COMP-A"] == 66 and req["COMP-B"] == 55   # 60/50 + 10%
+    assert wo["spillage_percent"] == 10.0
+
+    wo2 = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 1}))
+    req2 = {ln["part_no"]: ln["qty_required"] for ln in wo2["lines"]}
+    assert req2["COMP-A"] == 7 and req2["COMP-B"] == 6   # 6.6→7, 5.5→6 rounded up to whole parts
+
+
+def test_min_margin_qty_floors_the_spillage(db):
+    a, _, _, top = _setup(db)  # TOP-1 → COMP-A 6/build, COMP-B 5/build
+    with db.connect() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('production.spillage_percent', '3')")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('production.min_margin_qty', '15')")
+        conn.commit()
+
+    # small batch: 3% (1.8/1.5) is below the 15 minimum → +15 floor wins
+    wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 10}))
+    req = {ln["part_no"]: ln["qty_required"] for ln in wo["lines"]}
+    assert req["COMP-A"] == 75 and req["COMP-B"] == 65   # 60+15, 50+15
+    assert wo["spillage_percent"] == 3.0 and wo["min_margin_qty"] == 15.0
+
+    # large batch: the 3% exceeds the minimum → percentage wins
+    wo2 = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 1000}))
+    req2 = {ln["part_no"]: ln["qty_required"] for ln in wo2["lines"]}
+    assert req2["COMP-A"] == 6180 and req2["COMP-B"] == 5150   # 6000+180, 5000+150
+
+
+def test_no_spillage_leaves_requirements_unchanged(db):
+    _, _, _, top = _setup(db)  # no app_settings table → spillage 0
+    wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 10}))
+    req = {ln["part_no"]: ln["qty_required"] for ln in wo["lines"]}
+    assert req["COMP-A"] == 60 and req["COMP-B"] == 50 and (wo["spillage_percent"] or 0) == 0
+
+
 def test_only_assemblies_with_bom_are_buildable(db):
     _setup(db)
     catrepo.create_part(db, part={"part_no": "LONE"},

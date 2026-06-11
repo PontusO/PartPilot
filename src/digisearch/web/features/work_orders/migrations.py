@@ -62,4 +62,21 @@ MIGRATIONS = [
         ALTER TABLE work_orders ADD COLUMN purchase_by TEXT;
         """,
     ),
+    Migration(
+        version=4,
+        name="work order spillage margin",
+        sql="""
+        -- The production spillage/scrap % in effect when the WO was created, snapshotted here so
+        -- changing the global setting doesn't retroactively alter existing batches.
+        ALTER TABLE work_orders ADD COLUMN spillage_percent REAL;
+        """,
+    ),
+    Migration(
+        version=5,
+        name="work order minimum margin",
+        sql="""
+        -- Minimum spillage margin (whole parts) per component, snapshotted alongside spillage_percent.
+        ALTER TABLE work_orders ADD COLUMN min_margin_qty REAL;
+        """,
+    ),
 ]

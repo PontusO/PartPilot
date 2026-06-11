@@ -48,6 +48,19 @@ def test_order_ref_auto_numbered_when_blank(db):
     assert repo.get_order(db, oid2)["order_ref"] == "SO-CUSTOM"      # explicit ref preserved
 
 
+def test_next_order_ref_and_rederive(db):
+    cust, _ = _seed(db)
+    assert repo.next_order_ref(db) == "CO-00001"                     # prediction for the form
+    oid = repo.create_order(db, {"customer_id": cust})
+    assert repo.next_order_ref(db) == f"CO-{oid + 1:05d}"
+
+    # two stale forms both submitting the same predicted CO-ref bind to their real ids (no collision)
+    a = repo.create_order(db, {"customer_id": cust, "order_ref": "CO-00001"})
+    b = repo.create_order(db, {"customer_id": cust, "order_ref": "CO-00001"})
+    assert repo.get_order(db, a)["order_ref"] == f"CO-{a:05d}"
+    assert repo.get_order(db, b)["order_ref"] == f"CO-{b:05d}" and a != b
+
+
 def test_default_status_is_draft(db):
     cust, _ = _seed(db)
     oid = repo.create_order(db, {"customer_id": cust})  # no status given

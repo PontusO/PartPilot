@@ -32,6 +32,9 @@ TOOLS = [
                     "from the miniMRP database."},
     {"label": "Company details", "url": "/setup/company", "icon": "🏢",
      "description": "Your company name and address used on purchase-order PDFs and ISO records."},
+    {"label": "Production settings", "url": "/setup/production", "icon": "🏭",
+     "description": "Production parameters such as the spillage/scrap margin added to each "
+                    "work-order batch's component requirements."},
 ]
 
 
@@ -72,6 +75,28 @@ async def save_company(request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "company.html",
         {"company": repo.get_company(request.app.state.database), "saved": True},
+    )
+
+
+@router.get("/production", response_class=HTMLResponse)
+def production_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return request.app.state.templates.TemplateResponse(
+        request, "production.html",
+        {"production": repo.get_production(request.app.state.database), "saved": False},
+    )
+
+
+@router.post("/production", response_class=HTMLResponse)
+async def save_production(request: Request):
+    require_role(request, SETUP_ROLES)
+    form = await request.form()
+    repo.save_production(request.app.state.database,
+                         {"spillage_percent": form.get("spillage_percent"),
+                          "min_margin_qty": form.get("min_margin_qty")})
+    return request.app.state.templates.TemplateResponse(
+        request, "production.html",
+        {"production": repo.get_production(request.app.state.database), "saved": True},
     )
 
 

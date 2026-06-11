@@ -87,7 +87,8 @@
   {% endif %}
 
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Component requirements
-    <span class="note" style="font-weight:400;">(BOM exploded to base parts)</span></h2>
+    <span class="note" style="font-weight:400;">(BOM exploded to base parts{% if w.spillage_percent or w.min_margin_qty %},
+      incl. spillage margin{% if w.spillage_percent %} {{ "%g"|format(w.spillage_percent) }}%{% endif %}{% if w.min_margin_qty %} min {{ "%g"|format(w.min_margin_qty) }}/part{% endif %}{% endif %})</span></h2>
   <div style="overflow-x:auto;">
     <table>
       <thead>

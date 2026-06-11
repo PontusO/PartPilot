@@ -41,3 +41,15 @@ def save_company(db: Database, data: dict) -> None:
                 (f"company.{f}", (data.get(f) or "").strip() or None),
             )
         conn.commit()
+
+
+# ---- production settings ----
+
+def get_production(db: Database) -> dict:
+    return {"spillage_percent": get_setting(db, "production.spillage_percent") or "",
+            "min_margin_qty": get_setting(db, "production.min_margin_qty") or ""}
+
+
+def save_production(db: Database, data: dict) -> None:
+    set_setting(db, "production.spillage_percent", (data.get("spillage_percent") or "").strip() or None)
+    set_setting(db, "production.min_margin_qty", (data.get("min_margin_qty") or "").strip() or None)

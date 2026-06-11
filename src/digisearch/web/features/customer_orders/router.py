@@ -82,7 +82,8 @@ def new_order_form(request: Request):
     require_role(request, CUSTOMER_ORDER_WRITE_ROLES)
     return _render_form(request, action="/customer-orders/new", heading="New customer order",
                         submit_label="Create order", back_url="/customer-orders",
-                        values={"status": "draft", "order_date": date.today().isoformat()})
+                        values={"status": "draft", "order_date": date.today().isoformat(),
+                                "order_ref": repo.next_order_ref(request.app.state.database)})
 
 
 @router.post("/new", response_class=HTMLResponse)

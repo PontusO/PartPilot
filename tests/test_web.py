@@ -309,6 +309,36 @@ def test_po_documents_archived_on_placement(app):
     assert r.status_code == 200 and r.content[:5] == b"%PDF-"  # serves the stored copy
 
 
+def test_production_spillage_setting_inflates_work_order(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.setup import repo as setuprepo
+    from digisearch.web.features.work_orders import repo as worepo
+
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")                       # purchasing — not admin
+    assert client.get("/setup/production", follow_redirects=False).status_code == 403
+
+    _login(client, "boss", "pw")
+    assert "Saved" in client.post("/setup/production",
+                                  data={"spillage_percent": "5", "min_margin_qty": "15"}).text
+    prod = setuprepo.get_production(db)
+    assert prod["spillage_percent"] == "5" and prod["min_margin_qty"] == "15"
+
+    comp = catrepo.create_part(db, part={"part_no": "SP-1"},
+                               supplier_lines=[{"supplier_name": "X", "unit_price": 1,
+                                                "reel_qty": 1, "is_default": True}])
+    asm = asmrepo.create_assembly(db, {"part_no": "SPA-1"})
+    asmrepo.add_bom_line(db, asm, comp, 1, None)
+    # build 100 (base 100): 5% = 5, but the 15 minimum wins → 115
+    wo = worepo.get_work_order(db, worepo.create_work_order(db, {"assembly_id": asm, "qty": 100}))
+    assert wo["spillage_percent"] == 5.0 and wo["min_margin_qty"] == 15.0
+    assert wo["lines"][0]["qty_required"] == 115
+
+
 def test_company_details_settings(app):
     from digisearch.web.features.setup import repo as setuprepo
 
@@ -614,6 +644,7 @@ def test_new_order_form_calendar_and_dates(app):
     assert 'id="order-cal"' in page and "FullCalendar.Calendar" in page and "/planning/events" in page
     assert client.get("/static/fullcalendar/index.global.min.js").status_code == 200
     assert date.today().isoformat() in page          # order date pre-filled with today
+    assert "CO-00001" in page                        # our order ref pre-filled (predicted)
     assert "dateClick" in page and "required_date" in page  # clicking a day fills Required date
 
 

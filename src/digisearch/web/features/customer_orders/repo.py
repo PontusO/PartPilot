@@ -7,6 +7,8 @@ order-level discount, delivery charge and tax rate on top.
 
 from __future__ import annotations
 
+import re
+
 from ...core import ref_no
 from ...core.db import Database
 
@@ -155,11 +157,19 @@ def create_order(db: Database, data: dict) -> int:
             f"INSERT INTO customer_orders ({cols}) VALUES ({placeholders})",
             tuple(data.get(f) for f in _ORDER_FIELDS),
         ).lastrowid
-        if not data.get("order_ref"):           # auto-number CO-NNNNN when no ref entered
+        ref = (data.get("order_ref") or "").strip()
+        if not ref or re.fullmatch(r"CO-\d+", ref):   # blank or an auto-style ref → bind to the real id
             conn.execute("UPDATE customer_orders SET order_ref = ? WHERE id = ?",
                          (ref_no("CO", order_id), order_id))
         conn.commit()
     return order_id
+
+
+def next_order_ref(db: Database) -> str:
+    """The CO number a new order would get — to pre-fill the form (re-derived to the real id on save)."""
+    with db.connect() as conn:
+        nxt = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM customer_orders").fetchone()[0]
+    return ref_no("CO", nxt)
 
 
 def update_order(db: Database, order_id: int, data: dict) -> None:

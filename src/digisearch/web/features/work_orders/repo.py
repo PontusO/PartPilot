@@ -7,11 +7,30 @@ assembly to stock when it's completed.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 from ...core import add_workdays, iso, parse_date, ref_no, sub_workdays, workdays_between
 from ...core.db import Database
 from ..catalog import stock
+
+
+def _spillage_settings(conn) -> tuple[float, float]:
+    """(spillage_percent, min_margin_qty) from Setup → Production settings; (0, 0) if unset/absent."""
+    try:
+        rows = dict(conn.execute(
+            "SELECT key, value FROM app_settings WHERE key IN "
+            "('production.spillage_percent', 'production.min_margin_qty')").fetchall())
+    except Exception:  # app_settings table not present (e.g. isolated tests)
+        return 0.0, 0.0
+
+    def _f(v):
+        try:
+            return float(v) if v not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    return _f(rows.get("production.spillage_percent")), _f(rows.get("production.min_margin_qty"))
 
 STATUSES = ("allocated", "issued", "finished", "cancelled")
 
@@ -140,22 +159,29 @@ def create_work_order(db: Database, data: dict) -> int:
             raise ValueError("Choose an assembly to build.")
         qty = data.get("qty") or 1
         planned_start, due_date, duration_days = _resolve_schedule(conn, data["assembly_id"], data)
+        spillage, min_margin = _spillage_settings(conn)
         wo_id = conn.execute(
             """INSERT INTO work_orders (wo_no, assembly_id, qty, status, customer_order_line_id,
-               location_id, build_date, notes, planned_start, due_date, duration_days)
-               VALUES (?, ?, ?, 'allocated', ?, ?, ?, ?, ?, ?, ?)""",
+               location_id, build_date, notes, planned_start, due_date, duration_days,
+               spillage_percent, min_margin_qty)
+               VALUES (?, ?, ?, 'allocated', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (data.get("wo_no"), data["assembly_id"], qty, data.get("customer_order_line_id"),
              data.get("location_id"), data.get("build_date"), data.get("notes"),
-             planned_start, due_date, duration_days),
+             planned_start, due_date, duration_days, spillage, min_margin),
         ).lastrowid
         if not data.get("wo_no"):
             conn.execute("UPDATE work_orders SET wo_no = ? WHERE id = ?", (ref_no("WO", wo_id), wo_id))
         exploded = explode_to_components(conn, data["assembly_id"], qty)
         for i, (pid, need) in enumerate(sorted(exploded.items()), start=1):
+            # per-component margin = max(percentage of need, minimum qty); round up to whole parts
+            if spillage or min_margin:
+                required = math.ceil(round(need + max(need * spillage / 100.0, min_margin), 6))
+            else:
+                required = need
             conn.execute(
                 "INSERT INTO work_order_lines (work_order_id, part_id, qty_required, line_no) "
                 "VALUES (?, ?, ?, ?)",
-                (wo_id, pid, need, i),
+                (wo_id, pid, required, i),
             )
         pb = _critical_buy_by(conn, wo_id, parse_date(planned_start))   # now that lines exist
         if pb:
