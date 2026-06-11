@@ -25,6 +25,7 @@ rules:
   - device: "KMR2"
     query: "KMR2 tactile switch SMD"
 
-  # Generic 2.54 mm pin headers (EAGLE MAxx-y devices)
-  - device: "^MA\\d"
-    query: "pin header 2.54mm"
+  # Generic 2.54 mm pin headers (EAGLE MAxx-y devices) are intentionally NOT mapped:
+  # without a pin count there's no way to pick the right header, so these fall through
+  # to the "manual" status (needs a human) rather than getting a generic, likely-wrong
+  # suggestion. To resolve a specific header, add an `mpn:` rule for its exact device.

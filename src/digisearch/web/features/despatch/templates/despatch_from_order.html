@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Despatch {{ order.order_ref or 'order #' ~ order.id }} · PartPilot{% endblock %}
+{% set shippable = lines | selectattr('outstanding', 'greaterthan', 0) | list %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/customer-orders/{{ order.id }}">← {{ order.order_ref or 'Order #' ~ order.id }}</a></p>
+  <h1>Despatch {{ order.order_ref or 'order #' ~ order.id }}</h1>
+  <p class="note">{{ order.customer_name or 'No customer' }} — enter the quantity to ship for each line.
+    Shipping issues stock out and consumes any reserved allocation.</p>
+
+  {% if not shippable %}
+  <div class="note" style="margin-top:1rem;">Nothing left to ship — every line is fully despatched.</div>
+  {% else %}
+  <form method="post" action="/despatch/from-order/{{ order.id }}"
+        onsubmit="return confirm('Ship the entered quantities? This issues stock out.');">
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th></th><th>Product</th><th class="num">Ordered</th><th class="num">Shipped</th>
+              <th class="num">Outstanding</th><th class="num">Reserved</th><th class="num">In stock</th>
+              <th class="num">Ship now</th></tr>
+        </thead>
+        <tbody>
+          {% for ln in lines %}
+          <tr>
+            <td class="num">{% if ln.outstanding > 0 %}<input type="checkbox" name="ship" value="{{ ln.line_id }}" checked>{% endif %}</td>
+            <td>{% if ln.part_id %}<a href="/{{ 'catalog' }}/{{ ln.part_id }}">{{ ln.part_no }}</a>{% if ln.value %} <span class="flag">{{ ln.value }}</span>{% endif %}{% else %}<span class="note">(no part)</span>{% endif %}</td>
+            <td class="num">{{ "%g"|format(ln.ordered_qty) }}</td>
+            <td class="num">{{ "%g"|format(ln.shipped_qty) }}</td>
+            <td class="num">{{ "%g"|format(ln.outstanding) }}</td>
+            <td class="num">{% if ln.allocated %}{{ "%g"|format(ln.allocated) }}{% endif %}</td>
+            <td class="num">{{ "%g"|format(ln.total_qty or 0) }}</td>
+            <td class="num">
+              {% if ln.outstanding > 0 %}
+              <input name="qty_{{ ln.line_id }}" type="number" step="any" min="0" value="{{ '%g'|format(ln.suggested_qty) }}"
+                     style="width:90px; text-align:right; padding:.3rem .4rem; background:#0d1219;
+                            color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit;">
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">Despatch</button>
+      <button type="button" onclick="window.location.href='/customer-orders/{{ order.id }}'">Cancel</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

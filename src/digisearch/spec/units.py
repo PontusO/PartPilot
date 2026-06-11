@@ -73,6 +73,24 @@ def parse_frequency(text: str) -> float | None:
     return _parse_si(text, "Hz")
 
 
+_FREQ_IN_TEXT = re.compile(r"(\d+(?:\.\d+)?)\s*([kKMG]?)Hz", re.IGNORECASE)
+
+
+def extract_frequency(text: str) -> float | None:
+    """Find the first frequency inside free text (e.g. a crystal description).
+
+    ``'12MHz Crystal 12pF SMD3225'`` -> 12e6; ``'CRYSTAL 32.7680KHZ 9PF'`` -> 32768.0.
+    Only kHz/MHz/GHz prefixes (crystals are never sub-kHz), so the case of the prefix is
+    normalized to avoid confusing ``M`` (mega) with ``m`` (milli).
+    """
+    m = _FREQ_IN_TEXT.search(text or "")
+    if not m:
+        return None
+    num, prefix = m.groups()
+    mult = {"K": 1e3, "M": 1e6, "G": 1e9}.get(prefix.upper(), 1.0)
+    return float(num) * mult
+
+
 # --- Display formatting ---
 
 def _eng(value: float, prefixes: list[tuple[float, str]], unit: str) -> str:

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Import BOM · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/assemblies/{{ a.id }}">← {{ a.part_no }}</a></p>
+  <h1>Import BOM into {{ a.part_no }}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <p class="note">Upload a CSV BOM. Each line is resolved against stock and Digi-Key/Mouser
+    (the same engine the purchasing tool uses). You'll then review the result and choose which
+    new parts to add to inventory before the assembly's BOM is built.</p>
+  <form method="post" action="/assemblies/{{ a.id }}/import" enctype="multipart/form-data"
+        onsubmit="showOverlay()">
+    <label for="file">BOM file (.csv / Excel)</label>
+    <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
+    <button type="submit">Resolve</button>
+  </form>
+</div>
+
+<div id="overlay">
+  <div class="spin"></div>
+  <div>Resolving against Digi-Key/Mouser… this can take a minute.</div>
+</div>
+<script>function showOverlay(){ document.getElementById('overlay').style.display = 'flex'; }</script>
+{% endblock %}

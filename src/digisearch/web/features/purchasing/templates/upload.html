@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}New quote · PartPilot{% endblock %}
+{% block title %}New purchasing run · PartPilot{% endblock %}
 {% block content %}
 <div class="panel" style="max-width:560px; margin:0 auto;">
-  <h1>New quote</h1>
-  {% if not can_quote %}
-    <div class="err">Your role ({{ user.role }}) cannot run quotes. Ask an admin for the
-      <em>quoter</em> role.</div>
+  <h1>Purchasing</h1>
+  {% if not can_purchase %}
+    <div class="err">Your role ({{ current_user.role }}) cannot run purchasing. Ask an admin for the
+      <em>purchasing</em> role.</div>
   {% else %}
     <p class="note">Upload a BOM (CSV or Excel). PartPilot resolves each line against
-      Digi-Key{% if stock_available %}, checks miniMRP stock,{% endif %} and produces a priced
-      quote plus distributor cart files.</p>
-    <form method="post" action="/quote" enctype="multipart/form-data" onsubmit="showOverlay()">
+      Digi-Key{% if stock_available %}, checks miniMRP stock,{% endif %} and produces a purchasing
+      breakdown plus ready-to-upload distributor cart files.</p>
+    <form method="post" action="/purchasing/run" enctype="multipart/form-data" onsubmit="showOverlay()">
       <label for="file">BOM file</label>
       <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
 
@@ -24,7 +24,7 @@
       </div>
       {% endif %}
 
-      <button type="submit">Resolve &amp; quote</button>
+      <button type="submit">Resolve &amp; build carts</button>
     </form>
   {% endif %}
 </div>

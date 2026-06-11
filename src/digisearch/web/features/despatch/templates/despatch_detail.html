@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ d.despatch_no or 'Despatch #' ~ d.id }} · PartPilot{% endblock %}
+{% set badge = {'open':'stock','invoiced':'ok'} %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/despatch">← Despatch</a>{% if d.order_id %} · <a href="/customer-orders/{{ d.order_id }}">{{ d.order_ref or 'order' }}</a>{% endif %}</p>
+  <h1>{{ d.despatch_no or 'Despatch #' ~ d.id }}
+    <span class="badge {{ badge.get(d.status, 'muted') }}">{{ d.status }}</span></h1>
+  <p class="note">{{ d.customer_name or 'No customer' }}
+    {% if d.despatch_date %} — shipped {{ d.despatch_date }}{% endif %}
+    {% if d.invoice_no %} · invoice {{ d.invoice_no }}{% if d.invoice_date %} ({{ d.invoice_date }}){% endif %}{% endif %}</p>
+
+  <div class="cards">
+    <div class="card"><b>{{ d.lines|length }}</b><small>lines</small></div>
+    <div class="card"><b>{{ "%.2f"|format(d.total) }}</b><small>despatched value</small></div>
+  </div>
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Despatched lines</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Product</th><th>Value</th><th class="num">Qty</th><th class="num">Unit price</th>
+                 <th class="num">Line total</th></tr></thead>
+      <tbody>
+        {% for ln in d.lines %}
+        <tr>
+          <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}—{% endif %}</td>
+          <td>{{ ln.value or '' }}</td>
+          <td class="num">{{ "%g"|format(ln.qty) }}</td>
+          <td class="num">{% if ln.unit_price is not none %}{{ "%.4f"|format(ln.unit_price) }}{% endif %}</td>
+          <td class="num">{{ "%.2f"|format(ln.line_total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can_invoice and d.status == 'open' %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Invoice</h2>
+  <form method="post" action="/despatch/{{ d.id }}/invoice"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end;
+               background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
+    <div><label for="invoice_no">Invoice no.</label>
+      <input id="invoice_no" name="invoice_no" type="text"
+             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+    <div><label for="invoice_date">Invoice date</label>
+      <input id="invoice_date" name="invoice_date" type="date"
+             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+    <button type="submit">Mark invoiced</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

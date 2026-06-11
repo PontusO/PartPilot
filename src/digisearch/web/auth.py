@@ -14,12 +14,12 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-# Roles the app understands. Only ``admin``/``quoter`` are used by the first slice;
-# the warehouse/shipping/purchasing roles are placeholders for the screens to come.
-ROLES = ("admin", "quoter", "warehouse", "shipping", "purchasing")
+# Roles the app understands. ``admin``/``purchasing`` use the purchasing tool today;
+# warehouse/shipping are placeholders for the screens to come.
+ROLES = ("admin", "purchasing", "warehouse", "shipping")
 
-# Which roles may run a quote (the only gated action in this slice).
-QUOTE_ROLES = frozenset({"admin", "quoter"})
+# Which roles may run the purchasing tool.
+PURCHASE_ROLES = frozenset({"admin", "purchasing"})
 
 _PBKDF2_ROUNDS = 200_000
 
@@ -57,7 +57,7 @@ class UserStore:
                     username      TEXT NOT NULL UNIQUE,
                     salt          TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
-                    role          TEXT NOT NULL DEFAULT 'quoter',
+                    role          TEXT NOT NULL DEFAULT 'purchasing',
                     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
                 )
                 """
@@ -67,7 +67,7 @@ class UserStore:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
-    def create_user(self, username: str, password: str, role: str = "quoter") -> User:
+    def create_user(self, username: str, password: str, role: str = "purchasing") -> User:
         if role not in ROLES:
             raise ValueError(f"unknown role {role!r}; expected one of {ROLES}")
         salt = secrets.token_bytes(16)

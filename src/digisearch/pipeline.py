@@ -11,7 +11,7 @@ from .models import BomLine, Candidate, CompType, LineKind, PartSpec, ResolvedLi
 from .match.score import rank
 from .minimrp.reader import StockIndex, StockItem
 from .purchasing import decide_packaging
-from .spec.classify import classify
+from .spec.classify import classify, looks_like_mpn
 from .spec.lookup import LookupRule, match_lookup, render
 from .spec.parse_spec import build_query, build_spec, mpn_query, relaxed_mpn_queries
 
@@ -67,10 +67,52 @@ def plan_line(line: BomLine, settings: Settings, lookup: list[LookupRule] | None
     return LinePlan(kind, None, None, None)  # DNP / NON_ORDERABLE
 
 
-def _match_stock(plan: LinePlan, line: BomLine, stock: StockIndex) -> StockItem | None:
-    if plan.spec is not None and plan.spec.comp_type in _PASSIVE:
-        return stock.match_param(plan.spec.comp_type, plan.spec.value_si, plan.spec.package_imperial)
-    return stock.match_mpn(plan.target_mpn, line.value, line.device)
+def _needs_manual(plan: LinePlan, line: BomLine) -> bool:
+    """A line the BOM under-specifies so badly the tool can't pick a part (needs a human).
+
+    Examples: a passive/crystal with no parseable value (C38, L1), or a line whose only
+    identifier is a generic EAGLE device name equal to its package (SV1 = MA13-2 / MA13-2).
+    """
+    if not plan.query:
+        return True
+    if plan.kind in (LineKind.GENERIC_PASSIVE, LineKind.CRYSTAL):
+        return plan.spec is None or plan.spec.value_si is None
+    if plan.kind == LineKind.MPN and not (line.value or "").strip():
+        dev = (line.device or "").strip().lower()
+        pkg = (line.package or "").strip().lower()
+        return (not dev) or dev == pkg or not looks_like_mpn(line.device)
+    return False
+
+
+def _match_stock(plan: LinePlan, line: BomLine, stock: StockIndex) -> tuple[StockItem | None, str]:
+    """Find a stock item for this line; also report *how* it matched.
+
+    Returns (item, how) where how is "param" (passive value+package), "crystal"
+    (frequency), "exact" (MPN), "stem" (fuller MPN), or "none".
+    """
+    spec = plan.spec
+    if spec is not None and spec.comp_type in _PASSIVE:
+        return stock.match_param(spec.comp_type, spec.value_si, spec.package_imperial), "param"
+    if spec is not None and spec.comp_type == CompType.CRYSTAL and spec.value_si is not None:
+        crystal = stock.match_crystal(spec.value_si, spec.package_code)
+        if crystal is not None:
+            return crystal, "crystal"
+    hit = stock.match_mpn(plan.target_mpn, line.value, line.device)
+    if hit is not None:
+        return hit, "exact"
+    # Fall back to a fuller stocked MPN (e.g. BOM "MBR120" -> stock "MBR120LSF").
+    hit = stock.match_mpn_prefix(plan.target_mpn, line.value, line.device)
+    return (hit, "stem") if hit is not None else (None, "none")
+
+
+def _weak_stock_note(how: str, plan: LinePlan, line: BomLine, match: StockItem) -> str:
+    """A 'verify' note for stock matches looser than exact (stem MPN / generic crystal)."""
+    if how == "stem":
+        return f"MPN stem '{plan.target_mpn or line.value}' → {match.label}; verify"
+    if how == "crystal":
+        freq = plan.spec.value_display if plan.spec else None
+        return f"crystal matched by {freq or 'frequency'} → {match.label}; verify"
+    return ""  # "exact"/"param" matches are trusted — no extra note
 
 
 def _search_supplier(
@@ -111,16 +153,18 @@ def resolve_line(
         return ResolvedLine(line=line, kind=plan.kind, status=_NO_SEARCH[plan.kind])
 
     result = ResolvedLine(line=line, kind=plan.kind, spec=plan.spec, query=plan.query)
-    if not plan.query:
-        result.status = Status.NOT_FOUND
-        result.flag_reason = "no searchable value"
+    if _needs_manual(plan, line):
+        result.status = Status.MANUAL
+        result.flag_reason = "no value / part number to resolve from — needs manual selection"
         return result
 
     # miniMRP stock pre-check: skip Digi-Key entirely when fully covered by stock.
     required = line.qty * build_qty
+    stock_note = ""  # extra "verify" note for weak (stem MPN / generic crystal) stock matches
     if stock is not None:
-        match = _match_stock(plan, line, stock)
+        match, how = _match_stock(plan, line, stock)
         if match is not None:
+            stock_note = _weak_stock_note(how, plan, line, match)
             result.stock_on_hand = match.on_hand
             result.stock_free = match.free
             result.stock_match = match.label
@@ -128,6 +172,8 @@ def resolve_line(
             if result.need_to_buy == 0:
                 result.status = Status.IN_STOCK
                 note = f"in stock: {match.label} ({int(match.free)} free ≥ {required} needed)"
+                if stock_note:
+                    note += f" [{stock_note}]"
                 if plan.spec and plan.spec.value_warning:
                     note += f"; {plan.spec.value_warning}"
                 result.flag_reason = note
@@ -138,15 +184,20 @@ def resolve_line(
 
     value_warning = plan.spec.value_warning if plan.spec else None
 
-    # Digi-Key is the preferred supplier; Mouser is consulted only when DK is weak,
-    # and must strictly out-score DK to win (ties go to Digi-Key).
+    # Digi-Key is the preferred supplier; consult Mouser when DK is weak — a low-confidence
+    # match, no match, OR a best match that is out of stock. Mouser wins if it out-scores DK,
+    # or if it is actually in stock when DK's pick is not (ties otherwise go to Digi-Key).
     ranked, relaxed, dk_err = _search_supplier(client, plan, settings, build_qty)
     mo_err = None
-    dk_weak = (not ranked) or ranked[0][0] < settings.confidence_threshold
+    dk_out_of_stock = bool(ranked) and ranked[0][1].quantity_available <= 0
+    dk_weak = (not ranked) or ranked[0][0] < settings.confidence_threshold or dk_out_of_stock
     if mouser is not None and dk_weak:
         mo_ranked, mo_relaxed, mo_err = _search_supplier(mouser, plan, settings, build_qty)
-        if mo_ranked and (not ranked or mo_ranked[0][0] > ranked[0][0]):
-            ranked, relaxed = mo_ranked, mo_relaxed
+        if mo_ranked:
+            mo_in_stock = mo_ranked[0][1].quantity_available > 0
+            if (not ranked or mo_ranked[0][0] > ranked[0][0]
+                    or (dk_out_of_stock and mo_in_stock)):
+                ranked, relaxed = mo_ranked, mo_relaxed
 
     if not ranked:
         if dk_err and (mouser is None or mo_err):
@@ -190,9 +241,10 @@ def resolve_line(
         if result.status == Status.RESOLVED:
             result.status = Status.REVIEW
     if result.stock_match and result.need_to_buy and result.need_to_buy > 0:
-        reasons.append(
-            f"partial stock: {int(result.stock_free)} free, buy {result.need_to_buy}"
-        )
+        msg = f"partial stock: {int(result.stock_free)} free, buy {result.need_to_buy}"
+        if stock_note:
+            msg += f" ({stock_note})"
+        reasons.append(msg)
 
     decision = decide_packaging(result.chosen, result.order_qty(required), reel_threshold)
     result.packaging = decision.packaging

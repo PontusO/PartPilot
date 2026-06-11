@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Purchase Orders · PartPilot{% endblock %}
+{% set badge = {'draft':'muted','ordered':'stock','received':'ok','cancelled':'bad'} %}
+{% block content %}
+<div class="panel">
+  <h1>Purchase Orders</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.total }}</b><small>purchase orders</small></div>
+    <div class="card"><b>{{ summary.draft }}</b><small>draft</small></div>
+    <div class="card"><b>{{ summary.ordered }}</b><small>on order</small></div>
+    <div class="card"><b>{{ "%.0f"|format(summary.on_order_value) }}</b><small>on-order value</small></div>
+    {% if can_edit %}
+    <a href="/purchase-orders/new" style="margin-left:auto; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New PO</a>
+    {% endif %}
+  </div>
+
+  {% if can_edit and shortages %}
+  <div style="margin-top:1rem; background:rgba(220,90,90,.12); border:1px solid var(--bad);
+       border-radius:9px; padding:.7rem .95rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <span>⚠ <b>{{ shortages }}</b> component(s) are short for your allocated work orders.</span>
+    <a href="/purchase-orders/suggestions" style="background:var(--accent); color:#fff;
+       font-weight:600; text-decoration:none; border-radius:7px; padding:.4rem 1rem;">Review &amp; raise POs</a>
+  </div>
+  {% endif %}
+
+  <form method="get" action="/purchase-orders"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin:1rem 0;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="PO number, supplier…">
+    </div>
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+    {% if q or status %}<a href="/purchase-orders" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>PO</th><th>Supplier</th><th>Status</th><th>Ordered</th><th>Required</th>
+            <th class="num">Lines</th><th class="num">Total</th></tr>
+      </thead>
+      <tbody>
+        {% for p in pos %}
+        <tr>
+          <td><a href="/purchase-orders/{{ p.id }}">{{ p.po_no or '#' ~ p.id }}</a></td>
+          <td>{{ p.supplier_name or '—' }}</td>
+          <td><span class="badge {{ badge.get(p.status, 'muted') }}">{{ p.status }}</span></td>
+          <td>{{ p.order_date or '' }}</td>
+          <td>{{ p.required_date or '' }}</td>
+          <td class="num">{{ p.line_count }}</td>
+          <td class="num">{{ "%.2f"|format(p.total) }}{% if p.currency %} {{ p.currency }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not pos %}<tr><td colspan="7" class="note">No purchase orders{% if q or status %} match{% endif %} yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

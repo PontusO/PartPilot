@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Suggested purchase orders · PartPilot{% endblock %}
+{% set orderable = groups | selectattr('supplier_id') | list %}
+{% block content %}
+<style>
+  tr.suprow td { background:#0f151d; border-top:1px solid var(--line); }
+  tr.suprow .supname { font-weight:600; }
+  td.indent { padding-left:1.8rem; }
+</style>
+<div class="panel">
+  <p class="note"><a href="/purchase-orders">← Purchase Orders</a></p>
+  <h1>Suggested purchase orders</h1>
+  <p class="note">Components short for your <b>allocated</b> work orders, after free stock and goods
+    already on order, grouped by supplier. Untick a whole supplier with the box on its header row, or
+    individual lines. One draft PO is created per supplier.</p>
+
+  {% if not orderable %}
+  <div class="note" style="margin-top:1rem;">Nothing to order — every allocated work order is covered
+    by stock or existing purchase orders, or the short parts have no supplier. 🎉</div>
+  {% endif %}
+
+  <form method="post" action="/purchase-orders/suggestions">
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th style="width:1%;"></th><th>Component</th><th>Supplier P/N</th>
+              <th class="num">Required</th><th class="num">Free</th><th class="num">On order</th>
+              <th class="num">Short</th><th class="num">Order qty</th><th class="num">Unit price</th></tr>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+          <tr class="suprow">
+            <td class="num">
+              {% if g.supplier_id %}<input type="checkbox" class="suptoggle" data-sup="{{ g.supplier_id }}"
+                     checked onclick="toggleSupplier(this)" title="Select all lines for this supplier">{% endif %}
+            </td>
+            <td colspan="8">
+              {% if g.supplier_name %}<span class="supname">{{ g.supplier_name }}</span>
+                <span class="note">— {{ g.lines|length }} line(s)</span>
+              {% else %}<span class="badge bad">No supplier</span>
+                <span class="note">— add a supplier on these parts to order them</span>{% endif %}
+            </td>
+          </tr>
+          {% for s in g.lines %}
+          <tr>
+            <td class="num">{% if s.supplier_id %}<input type="checkbox" name="buy" value="{{ s.part_id }}"
+                   class="linecb" data-sup="{{ s.supplier_id }}" checked
+                   onchange="syncSupplier('{{ s.supplier_id }}')">{% endif %}</td>
+            <td class="indent"><a href="/catalog/{{ s.part_id }}">{{ s.part_no }}</a>
+              {% if s.value %}<span class="flag">{{ s.value }}</span>{% endif %}</td>
+            <td>{{ s.supplier_pno or '' }}</td>
+            <td class="num">{{ "%g"|format(s.required) }}</td>
+            <td class="num">{{ "%g"|format(s.free) }}</td>
+            <td class="num">{% if s.on_order %}{{ "%g"|format(s.on_order) }}{% endif %}</td>
+            <td class="num"><span class="badge bad">{{ "%g"|format(s.short) }}</span></td>
+            <td class="num">
+              {% if s.supplier_id %}
+              <input name="qty_{{ s.part_id }}" type="number" step="any" min="0" value="{{ '%g'|format(s.suggested_qty) }}"
+                     style="width:90px; text-align:right; padding:.3rem .4rem; background:#0d1219;
+                            color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit;">
+              {% endif %}
+            </td>
+            <td class="num">{% if s.unit_price is not none %}{{ "%.4f"|format(s.unit_price) }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      {% if orderable %}<button type="submit">Create draft purchase orders</button>{% endif %}
+      <button type="button" onclick="window.location.href='/purchase-orders'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  function toggleSupplier(cb) {
+    document.querySelectorAll('.linecb[data-sup="' + cb.dataset.sup + '"]')
+            .forEach(c => c.checked = cb.checked);
+  }
+  function syncSupplier(sup) {
+    const lines = [...document.querySelectorAll('.linecb[data-sup="' + sup + '"]')];
+    const head = document.querySelector('.suptoggle[data-sup="' + sup + '"]');
+    if (!head) return;
+    const on = lines.filter(c => c.checked).length;
+    head.checked = on === lines.length;
+    head.indeterminate = on > 0 && on < lines.length;
+  }
+</script>
+{% endblock %}

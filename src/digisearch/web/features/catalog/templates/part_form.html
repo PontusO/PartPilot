@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  select, textarea { width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px; font:inherit; }
+  .req::after { content:" *"; color:var(--bad); }
+  h2 { font-size:1.05rem; margin:1.6rem 0 .2rem; }
+  #suprows input, #suprows select { margin:0; }
+  #suprows td { padding:.3rem .35rem; }
+  #suprows td.sup { min-width:210px; }
+  #suprows td.def { text-align:center; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="{{ back_url }}">← Back</a></p>
+  <h1>{{ heading }}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ action }}">
+    <h2>Part</h2>
+    <div class="formgrid">
+      <div>
+        <label for="part_no" class="req">Part number</label>
+        <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
+               placeholder="manufacturer part number / internal P/N" required autofocus>
+      </div>
+      <div>
+        <label for="category">Category</label>
+        <input id="category" name="category" type="text" list="dl-categories"
+               value="{{ values.get('category','') or '' }}" placeholder="e.g. RESISTOR (type to add new)">
+      </div>
+      <div>
+        <label for="value">Value / spec</label>
+        <input id="value" name="value" type="text" value="{{ values.get('value','') or '' }}"
+               placeholder="e.g. 0u1/16V/10%/0402">
+      </div>
+      <div>
+        <label for="rev">Revision</label>
+        <input id="rev" name="rev" type="text" value="{{ values.get('rev','') or '' }}">
+      </div>
+      <div>
+        <label for="mfr_name">Manufacturer</label>
+        <input id="mfr_name" name="mfr_name" type="text" value="{{ values.get('mfr_name','') or '' }}">
+      </div>
+      <div>
+        <label for="mfr_pno">Manufacturer P/N</label>
+        <input id="mfr_pno" name="mfr_pno" type="text" value="{{ values.get('mfr_pno','') or '' }}">
+      </div>
+      <div>
+        <label for="min_qty">Reorder point (min qty)</label>
+        <input id="min_qty" name="min_qty" type="number" step="any" min="0"
+               value="{{ values.get('min_qty') if values.get('min_qty') is not none else '' }}">
+      </div>
+      <div class="full">
+        <label for="description">Description</label>
+        <input id="description" name="description" type="text"
+               value="{{ values.get('description','') or '' }}">
+      </div>
+      <div class="full">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
+      </div>
+    </div>
+
+    <h2>{{ stock_heading }}</h2>
+    <div class="formgrid">
+      <div>
+        <label for="stock_qty">On-hand quantity</label>
+        <input id="stock_qty" name="stock_qty" type="number" step="any" min="0"
+               value="{{ stock.get('qty') if stock.get('qty') is not none else '0' }}">
+      </div>
+      <div>
+        <label for="location_id">Location</label>
+        <select id="location_id" name="location_id">
+          {% for l in locations %}
+            <option value="{{ l.id }}" {{ 'selected' if stock.get('location_id') == l.id else '' }}>{{ l.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="bin">Bin</label>
+        <input id="bin" name="bin" type="text" value="{{ stock.get('bin','') or '' }}" placeholder="e.g. KH1">
+      </div>
+    </div>
+
+    <h2>Suppliers</h2>
+    <p class="note">Pick an existing supplier or type a new name to create it. Unit price is
+      per piece; reel/UOM qty is the packaged quantity.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Supplier</th><th>Supplier P/N</th><th>Unit price</th><th>Reel/UOM qty</th>
+              <th>MOQ</th><th>Lead (days)</th><th>Default</th><th></th></tr>
+        </thead>
+        <tbody id="suprows">
+          {% for s in supplier_rows %}
+          <tr>
+            <td class="sup">
+              <input type="hidden" name="row_key" value="r{{ loop.index0 }}">
+              <select name="supplier_id" onchange="toggleNew(this)">
+                <option value="">— select supplier —</option>
+                {% for sup in suppliers %}
+                  <option value="{{ sup.id }}" {{ 'selected' if s.get('supplier_id') == sup.id else '' }}>{{ sup.name }}</option>
+                {% endfor %}
+                <option value="__new__" {{ 'selected' if (not s.get('supplier_id') and s.get('supplier_name')) else '' }}>+ New supplier…</option>
+              </select>
+              <input name="new_supplier_name" type="text" class="newsup" placeholder="new supplier name"
+                     value="{{ s.get('supplier_name','') if (not s.get('supplier_id') and s.get('supplier_name')) else '' }}"
+                     style="margin-top:.3rem; {{ '' if (not s.get('supplier_id') and s.get('supplier_name')) else 'display:none;' }}">
+            </td>
+            <td><input name="supplier_pno" type="text" value="{{ s.get('supplier_pno','') or '' }}"></td>
+            <td><input name="unit_price" type="number" step="any" min="0"
+                       value="{{ s.get('unit_price') if s.get('unit_price') is not none else '' }}"></td>
+            <td><input name="reel_qty" type="number" step="any" min="1" placeholder="1"
+                       value="{{ s.get('reel_qty') if s.get('reel_qty') is not none else '' }}"></td>
+            <td><input name="moq" type="number" step="any" min="0"
+                       value="{{ s.get('moq') if s.get('moq') is not none else '' }}"></td>
+            <td><input name="lead_time" type="number" min="0"
+                       value="{{ s.get('lead_time') if s.get('lead_time') is not none else '' }}"></td>
+            <td class="def"><input name="default_key" type="radio" value="r{{ loop.index0 }}"
+                                   {{ 'checked' if s.get('is_default') else '' }}></td>
+            <td><button type="button" class="danger" onclick="delRow(this)">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="ghost" style="margin-top:.6rem" onclick="addRow()">+ Add supplier</button>
+
+    <div style="margin-top:1.4rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">{{ submit_label }}</button>
+      <button type="button" onclick="window.location.href='{{ back_url }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<datalist id="dl-categories">
+  {% for c in categories %}<option value="{{ c.category }}">{% endfor %}</datalist>
+
+<script>
+  let rowSeq = {{ supplier_rows|length }};
+  function toggleNew(sel) {
+    const inp = sel.parentElement.querySelector('.newsup');
+    if (sel.value === '__new__') { inp.style.display = 'block'; inp.focus(); }
+    else { inp.style.display = 'none'; inp.value = ''; }
+  }
+  function addRow() {
+    const tb = document.getElementById('suprows');
+    const row = tb.querySelector('tr').cloneNode(true);
+    const key = 'r' + rowSeq; rowSeq++;
+    row.querySelectorAll('input').forEach(i => {
+      if (i.name === 'row_key') i.value = key;
+      else if (i.type === 'radio') { i.value = key; i.checked = false; }
+      else i.value = '';
+    });
+    const sel = row.querySelector('select[name=supplier_id]');
+    if (sel) sel.value = '';
+    const ns = row.querySelector('.newsup');
+    if (ns) { ns.style.display = 'none'; ns.value = ''; }
+    tb.appendChild(row);
+  }
+  function delRow(btn) {
+    const tb = document.getElementById('suprows');
+    if (tb.querySelectorAll('tr').length > 1) btn.closest('tr').remove();
+  }
+</script>
+{% endblock %}

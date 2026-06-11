@@ -50,7 +50,7 @@ def serve(
     port: int = typer.Option(8000, help="Port to listen on."),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
 ):
-    """Run the PartPilot web app (upload a BOM, quote it in the browser)."""
+    """Run the PartPilot web app (upload a BOM, resolve it for purchasing in the browser)."""
     import uvicorn
 
     console.print(
@@ -58,6 +58,46 @@ def serve(
         f"{'(LAN-accessible)' if host == '0.0.0.0' else '(local only — use --host 0.0.0.0 for LAN)'}"
     )
     uvicorn.run("digisearch.web.app:create_app", host=host, port=port, factory=True, reload=reload)
+
+
+@app.command(name="import-catalog")
+def import_catalog(
+    minimrp: Optional[Path] = typer.Option(
+        None, "--from", help="miniMRP database (Data/mrp5data). Defaults to settings minimrp_path."
+    ),
+):
+    """Import the miniMRP catalog (parts, suppliers, stock) into PartPilot's database."""
+    settings = Settings.load(None)
+    src = minimrp or (Path(settings.minimrp_path) if settings.minimrp_path else None)
+    if not src or not Path(src).exists():
+        console.print(
+            "[red]Error:[/] miniMRP database not found. Pass --from or set minimrp_path in settings."
+        )
+        raise typer.Exit(1)
+
+    from .web.app import FEATURES
+    from .web.core import FeatureRegistry
+    from .web.core.db import Database
+    from .web.core.paths import db_path
+    from .web.features.assemblies.importer import import_boms
+    from .web.features.catalog.importer import import_from_minimrp
+    from .web.features.contacts.importer import import_contacts
+
+    db = Database(db_path())
+    registry = FeatureRegistry()
+    registry.register(*FEATURES)
+    db.apply_migrations(registry)
+
+    console.print(f"Importing catalog from [bold]{src}[/] → {db_path()}")
+    stats = import_from_minimrp(db, src)
+    stats.update(import_boms(db, src))  # assembly BOM structure (tblusedin)
+    stats.update(import_contacts(db, src))  # suppliers/customers/misc address books
+    table = Table(title="Imported")
+    table.add_column("Table")
+    table.add_column("Rows", justify="right")
+    for key, value in stats.items():
+        table.add_row(key, str(value))
+    console.print(table)
 
 
 @app.command()

@@ -76,3 +76,24 @@ def test_digikey_kept_on_tie():
     mo = FakeSearcher(default=[part_to_candidate(make_mouser_part(mpn="APS6404L-3"))])
     res = resolve_line(_mpn_line(), dk, S, mouser=mo)
     assert res.chosen.supplier == "Digi-Key"
+
+
+def test_mouser_used_when_digikey_out_of_stock():
+    # Strong Digi-Key MPN match but zero stock; Mouser has the same part in stock -> use Mouser.
+    dk = FakeSearcher(default=[product_to_candidate(make_product(mpn="TCR3UM18A", qty=0))])
+    mo = FakeSearcher(default=[part_to_candidate(
+        make_mouser_part(mpn="TCR3UM18A", availability="5000 In Stock"))])
+    res = resolve_line(_mpn_line("TCR3UM18A"), dk, S, mouser=mo)
+    assert res.chosen.supplier == "Mouser"
+    assert res.chosen.quantity_available == 5000
+    assert mo.calls  # Mouser was consulted despite a confident DK match
+
+
+def test_digikey_out_of_stock_kept_when_mouser_also_out():
+    # If neither has stock, Digi-Key (preferred) is kept and flagged out of stock.
+    dk = FakeSearcher(default=[product_to_candidate(make_product(mpn="TCR3UM18A", qty=0))])
+    mo = FakeSearcher(default=[part_to_candidate(
+        make_mouser_part(mpn="TCR3UM18A", availability="Quote"))])  # 0 in stock
+    res = resolve_line(_mpn_line("TCR3UM18A"), dk, S, mouser=mo)
+    assert res.chosen.supplier == "Digi-Key"
+    assert "out of stock" in (res.flag_reason or "").lower()

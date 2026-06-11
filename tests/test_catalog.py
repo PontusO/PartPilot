@@ -1,0 +1,223 @@
+import pytest
+
+from digisearch.web.core import FeatureRegistry
+from digisearch.web.core.db import Database
+from digisearch.web.features.catalog import feature as catalog_feature
+from digisearch.web.features.catalog import importer, repo, stock
+
+
+@pytest.fixture
+def db(tmp_path):
+    database = Database(tmp_path / "c.db")
+    reg = FeatureRegistry()
+    reg.register(catalog_feature)
+    database.apply_migrations(reg)
+    return database
+
+
+SUPPLIERS = [{"AddID": "2", "CoName": "Digikey", "ShortNm": "DK", "URL": "", "defCurrency": "SEK"}]
+PARTS = [
+    {"ItemID": "1", "MasterPNo": "GRM155R61A106ME11D", "ItemName": "10uF/10V/20%/0402",
+     "ItemDescription": "", "Category": "capacitor", "Type": "PART", "MfrName": "", "MfrPNo": "",
+     "Rev": "", "xCost": "0.10580", "MinQty": "5000", "TotalQty": "9500", "TotalAllocQty": "0",
+     "TotalOnOrderQty": "0"},
+    {"ItemID": "329", "MasterPNo": "98-00195-1", "ItemName": "Widget assembly",
+     "ItemDescription": "", "Category": "PRODUCT", "Type": "ASSY", "xCost": "", "MinQty": "0",
+     "TotalQty": "5", "TotalAllocQty": "1", "TotalOnOrderQty": "0"},
+]
+ITEM_SUPPLIERS = [
+    {"AutoID": "10", "Supplier_ItemID": "1", "SupplierID": "2",
+     "SupplierPNo": "490-GRM155R61A106ME11DTR-ND", "PriceEach": "1058", "QtyPerUOM": "10000",
+     "MinOrQty": "1", "LeadTime": "3", "DefaultSupplier": "1"},
+]
+ITEM_LOCATIONS = [
+    {"AutoID": "100", "LocStockID": "1", "LocLocationID": "1", "LocBIN": "KH1",
+     "LocOnHandQty": "9500", "LocAllocQty": "0", "LocOnOrderQty": "0"},
+]
+
+
+def _import(db):
+    return importer.import_tables(
+        db, suppliers=SUPPLIERS, parts=PARTS,
+        item_suppliers=ITEM_SUPPLIERS, item_locations=ITEM_LOCATIONS,
+    )
+
+
+def test_import_counts(db):
+    stats = _import(db)
+    assert stats == {"suppliers": 1, "parts": 2, "locations": 1,
+                     "part_suppliers": 1, "part_stock": 1}
+
+
+def test_import_is_idempotent(db):
+    _import(db)
+    _import(db)  # re-run upserts, must not duplicate
+    _, total = repo.list_parts(db)
+    assert total == 1  # the ASSY (98-00195-1) is excluded from the Parts list
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM part_suppliers").fetchone()[0] == 1
+
+
+def test_list_search_and_filter(db):
+    _import(db)
+    _, total = repo.list_parts(db)
+    assert total == 1  # components only; the ASSY is excluded
+
+    hits, n = repo.list_parts(db, search="GRM155")
+    assert n == 1 and hits[0]["part_no"] == "GRM155R61A106ME11D"
+
+    caps, n = repo.list_parts(db, category="CAPACITOR")  # category upper-cased on import
+    assert n == 1 and caps[0]["category"] == "CAPACITOR"
+
+    # Per-piece price = PriceEach / QtyPerUOM = 1058 / 10000.
+    assert caps[0]["supplier"] == "Digikey"
+    assert abs(caps[0]["unit_price"] - 0.1058) < 1e-9
+    assert caps[0]["below_min"] is False  # 9500 free >= 5000 min
+
+
+def test_get_part_detail(db):
+    _import(db)
+    hits, _ = repo.list_parts(db, search="GRM155")
+    part = repo.get_part(db, hits[0]["id"])
+    assert part["mfr_pno"] in (None, "")
+    assert part["free"] == 9500
+    assert len(part["suppliers"]) == 1
+    s = part["suppliers"][0]
+    assert s["is_default"] == 1 and abs(s["unit_price"] - 0.1058) < 1e-9
+    assert len(part["stock"]) == 1 and part["stock"][0]["bin"] == "KH1"
+
+
+def test_summary(db):
+    _import(db)
+    s = repo.summary(db)
+    assert s == {"parts": 1, "categories": 1, "below_min": 0}  # ASSY/PRODUCT excluded
+
+
+def test_get_missing_part(db):
+    _import(db)
+    assert repo.get_part(db, 9999) is None
+
+
+def test_parts_for_supplier(db):
+    _import(db)  # GRM155... is supplied by "Digikey"
+    parts = repo.parts_for_supplier(db, "digikey")  # case-insensitive
+    assert any(p["part_no"] == "GRM155R61A106ME11D" for p in parts)
+    assert parts[0]["unit_price"] is not None        # enriched with unit price
+    assert repo.parts_for_supplier(db, "NoSuchSupplier") == []
+    assert repo.parts_for_supplier(db, "") == []
+
+
+def test_supplier_distributor_links(db):
+    pid = repo.create_part(db, part={"part_no": "X"}, supplier_lines=[
+        {"supplier_name": "Digi-Key", "supplier_pno": "490-ABC-ND", "unit_price": 0.1,
+         "reel_qty": 1, "is_default": True},
+        {"supplier_name": "Mouser Electronics", "supplier_pno": "81-XYZ", "unit_price": 0.2,
+         "reel_qty": 1, "is_default": False},
+        {"supplier_name": "Local Shop", "supplier_pno": "LS-1", "unit_price": 0.3,
+         "reel_qty": 1, "is_default": False},
+    ])
+    sup = {s["supplier_name"]: s for s in repo.get_part(db, pid)["suppliers"]}
+    # "Digi-Key" (hyphen) normalizes to match, and the part number is in the search URL
+    assert "digikey.com" in sup["Digi-Key"]["part_url"] and "490-ABC-ND" in sup["Digi-Key"]["part_url"]
+    assert "mouser.com" in sup["Mouser Electronics"]["part_url"]
+    assert sup["Local Shop"]["part_url"] is None   # unknown distributor -> no link
+
+
+def test_create_part_with_suppliers_and_stock(db):
+    pid = repo.create_part(
+        db,
+        part={"part_no": "NEWPART1", "value": "10k/1%/0402", "category": "RESISTOR", "min_qty": 100},
+        supplier_lines=[
+            {"supplier_name": "Digikey", "supplier_pno": "DK-1", "unit_price": 0.1,
+             "reel_qty": 5000, "is_default": True},
+            {"supplier_name": "BrandNewSup", "supplier_pno": "BN-1", "unit_price": 0.08,
+             "reel_qty": 1, "is_default": False},
+        ],
+        opening={"qty": 2500, "location_id": None, "bin": "A1"},
+    )
+    part = repo.get_part(db, pid)
+    assert part["part_no"] == "NEWPART1" and part["kind"] == "PART"
+    assert part["total_qty"] == 2500
+    assert part["unit_cost"] == 0.1  # taken from the default supplier's unit price
+
+    assert len(part["suppliers"]) == 2
+    dk = next(s for s in part["suppliers"] if s["supplier_name"] == "Digikey")
+    assert dk["price_per_uom"] == 500.0          # unit_price (0.1) * reel_qty (5000)
+    assert abs(dk["unit_price"] - 0.1) < 1e-9     # computed back per piece
+    assert dk["is_default"] == 1
+
+    # a brand-new supplier was created on the fly
+    assert any(s["name"] == "BrandNewSup" for s in repo.suppliers(db))
+    # opening stock landed in a bin
+    assert len(part["stock"]) == 1 and part["stock"][0]["bin"] == "A1"
+    assert part["stock"][0]["on_hand"] == 2500
+
+
+def test_update_part_changes_fields_suppliers_and_stock(db):
+    pid = repo.create_part(
+        db, part={"part_no": "EDIT1", "category": "RESISTOR", "min_qty": 10},
+        supplier_lines=[{"supplier_name": "Digikey", "unit_price": 0.1, "reel_qty": 5000,
+                         "is_default": True}],
+        opening={"qty": 1000, "bin": "A1"},
+    )
+    repo.update_part(
+        db, pid,
+        part={"part_no": "EDIT1-REV", "category": "CAPACITOR", "value": "1u0", "min_qty": 50,
+              "notes": "changed"},
+        supplier_lines=[
+            {"supplier_name": "Mouser Electronics", "supplier_pno": "MO-9", "unit_price": 0.2,
+             "reel_qty": 4000, "is_default": True},
+            {"supplier_name": "Farnell", "unit_price": 0.25, "reel_qty": 1, "is_default": False},
+        ],
+        stock={"qty": 750, "bin": "B2", "location_id": None},
+    )
+    p = repo.get_part(db, pid)
+    assert p["part_no"] == "EDIT1-REV" and p["category"] == "CAPACITOR" and p["value"] == "1u0"
+    assert p["min_qty"] == 50 and p["notes"] == "changed"
+    assert p["total_qty"] == 750
+    names = {s["supplier_name"] for s in p["suppliers"]}
+    assert names == {"Mouser Electronics", "Farnell"}  # old Digikey line replaced
+    mo = next(s for s in p["suppliers"] if s["supplier_name"] == "Mouser Electronics")
+    assert mo["is_default"] == 1 and mo["price_per_uom"] == 800.0  # 0.2 * 4000
+    assert p["unit_cost"] == 0.2  # from the new default supplier
+    assert p["stock"][0]["bin"] == "B2" and p["stock"][0]["on_hand"] == 750
+
+
+def test_stock_movements_receive_issue_adjust(db):
+    pid = repo.create_part(
+        db, part={"part_no": "MOVE1"},
+        supplier_lines=[{"supplier_name": "X", "unit_price": 1.0, "reel_qty": 1, "is_default": True}],
+        opening={"qty": 100, "bin": "A1"})
+    assert repo.get_part(db, pid)["total_qty"] == 100
+
+    stock.adjust_stock(db, pid, delta=50, mtype=stock.RECEIVE, reference="PO-1", user="u")
+    assert repo.get_part(db, pid)["total_qty"] == 150
+    stock.adjust_stock(db, pid, delta=-30, mtype=stock.ISSUE, reference="WO-1", user="u")
+    assert repo.get_part(db, pid)["total_qty"] == 120
+
+    mv = stock.movements_for_part(db, pid)          # newest first, with running balance
+    assert [m["mtype"] for m in mv][:2] == ["ISSUE", "RECEIVE"]
+    assert mv[0]["qty_delta"] == -30 and mv[0]["qty_after"] == 120
+    assert mv[1]["qty_delta"] == 50 and mv[1]["qty_after"] == 150
+
+
+def test_post_movement_creates_stock_row_when_none(db):
+    pid = repo.create_part(
+        db, part={"part_no": "NOSTOCK"},
+        supplier_lines=[{"supplier_name": "X", "unit_price": 1.0, "reel_qty": 1, "is_default": True}])
+    assert repo.get_part(db, pid)["total_qty"] == 0 and repo.get_part(db, pid)["stock"] == []
+    stock.adjust_stock(db, pid, delta=10, mtype=stock.RECEIVE)
+    p = repo.get_part(db, pid)
+    assert p["total_qty"] == 10 and len(p["stock"]) == 1
+
+
+def test_create_part_reuses_existing_supplier_by_name(db):
+    _import(db)  # has "Digikey"
+    before = len(repo.suppliers(db))
+    pid = repo.create_part(
+        db, part={"part_no": "REUSE1"},
+        supplier_lines=[{"supplier_name": "digikey", "unit_price": 1.0, "reel_qty": 1,
+                         "is_default": True}],
+    )
+    assert len(repo.suppliers(db)) == before  # matched case-insensitively, no duplicate
+    assert repo.get_part(db, pid)["suppliers"][0]["supplier_name"] == "Digikey"

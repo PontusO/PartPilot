@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Parts · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Parts</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.parts }}</b><small>parts</small></div>
+    <div class="card"><b>{{ summary.categories }}</b><small>categories</small></div>
+    <div class="card"><b>{{ summary.below_min }}</b><small>below min</small></div>
+    {% if can_add %}
+    <a href="/catalog/new" style="margin-left:auto; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+       text-decoration:none; border-radius:9px; padding:0 1.3rem;">+ Add component</a>
+    {% endif %}
+  </div>
+
+  <form method="get" action="/catalog"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="part no, value, MPN, description…">
+    </div>
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for c in categories %}
+          <option value="{{ c.category }}" {{ 'selected' if c.category == category }}>{{ c.category }} ({{ c.n }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+    {% if q or category %}<a href="/catalog" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <p class="note">{{ total }} part(s){% if q or category %} matching{% endif %}.</p>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Part No</th><th>Value</th><th>Category</th><th>Kind</th>
+          <th class="num">Free</th><th class="num">On hand</th><th class="num">Min</th>
+          <th>Supplier</th><th>Supplier P/N</th><th class="num">Unit (SEK)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in parts %}
+        <tr>
+          <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a></td>
+          <td>{{ p.value or '' }}</td>
+          <td>{{ p.category or '' }}</td>
+          <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>
+          <td class="num">{% if p.below_min %}<span class="badge bad">{{ "%.0f"|format(p.free) }}</span>{% else %}{{ "%.0f"|format(p.free) }}{% endif %}</td>
+          <td class="num">{{ "%.0f"|format(p.total_qty) }}</td>
+          <td class="num">{{ "%.0f"|format(p.min_qty) }}</td>
+          <td>{{ p.supplier or '' }}</td>
+          <td>{{ p.supplier_pno or '' }}</td>
+          <td class="num">{% if p.unit_price is not none %}{{ "%.4f"|format(p.unit_price) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not parts %}<tr><td colspan="10" class="note">No parts match.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if has_prev or has_next %}
+  <div style="margin-top:1rem; display:flex; gap:1rem; align-items:center;">
+    {% if has_prev %}<a href="?q={{ q }}&category={{ category }}&page={{ page - 1 }}">← Prev</a>{% endif %}
+    <span class="note">Page {{ page }}</span>
+    {% if has_next %}<a href="?q={{ q }}&category={{ category }}&page={{ page + 1 }}">Next →</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

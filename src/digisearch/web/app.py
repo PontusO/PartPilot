@@ -1,47 +1,62 @@
-"""FastAPI application for the DigiSearch web front-end.
+"""PartPilot application factory: the core platform that hosts feature modules.
 
-First slice: log in, upload a BOM, run the quoting pipeline, see the resolved table,
-and download the Excel report + distributor cart CSVs. Auth is session-based and the
-quote action is gated by role. The heavy, network-bound resolve runs in a threadpool
-so it never blocks the event loop.
+The core owns auth/login, navigation, the SQLite database + migrations and the shared
+template environment. Features (purchasing today; catalog/inventory next) are registered
+here and contribute their own routes, nav entries and migrations without the core
+knowing their internals.
 """
 
 from __future__ import annotations
 
 import os
 import secrets
-import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from ..config import PROJECT_ROOT, Settings
-from ..models import Status
-from .auth import QUOTE_ROLES, User, UserStore
-from .service import run_quote
+from .auth import UserStore
+from .core import FeatureRegistry
+from .core.db import Database
+from .core.deps import Forbidden, LoginRequired, current_user
+from .core.paths import data_dir as default_data_dir, db_path as default_db_path
+from .features.assemblies import feature as assemblies_feature
+from .features.catalog import feature as catalog_feature
+from .features.contacts import feature as contacts_feature
+from .features.customer_orders import feature as customer_orders_feature
+from .features.despatch import feature as despatch_feature
+from .features.goods_receipts import feature as goods_receipts_feature
+from .features.placeholders import make_placeholder
+from .features.planning import feature as planning_feature
+from .features.purchase_orders import feature as purchase_orders_feature
+from .features.purchasing import feature as purchasing_feature
+from .features.setup import feature as setup_feature
+from .features.work_orders import feature as work_orders_feature
 
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
-_ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".xls"}
+_CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
 
-# Status -> CSS badge class, for colouring the results table.
-STATUS_CLASS = {
-    Status.RESOLVED: "ok",
-    Status.IN_STOCK: "stock",
-    Status.REVIEW: "warn",
-    Status.NOT_FOUND: "bad",
-    Status.ERROR: "bad",
-    Status.DNP: "muted",
-    Status.NON_ORDERABLE: "muted",
-}
-
-
-def _default_data_dir() -> Path:
-    env = os.getenv("PARTPILOT_DATA_DIR")
-    return Path(env) if env else PROJECT_ROOT / "data"
+# The features this deployment ships, in nav order. Explicit and greppable on purpose —
+# adding functionality is appending a feature here, not editing the core. Categories not yet
+# built are placeholders (greyed "soon" nav entries) so the app structure is visible up front.
+FEATURES = [
+    catalog_feature,                                                         # Parts (order 10)
+    assemblies_feature,                                                      # order 20
+    purchasing_feature,                                                      # order 50
+    contacts_feature,                                                        # order 60
+    # Registered after contacts so its FK to contacts(id) resolves; nav order 30 keeps its slot.
+    customer_orders_feature,                                                 # order 30
+    # Registered after customer_orders so its FK to customer_order_lines resolves; nav order 40.
+    work_orders_feature,                                                     # order 40
+    planning_feature,                                                        # order 42 (after Work Orders)
+    despatch_feature,                                                        # order 52 (after Purchasing; needs CO FKs)
+    purchase_orders_feature,                                                 # order 45
+    goods_receipts_feature,                                                   # order 46 (views PO-owned GRN tables)
+    make_placeholder("reports", "Reports", "📊", 70),
+    setup_feature,                                                          # Setup & Tools (order 80)
+]
 
 
 def create_app(
@@ -50,13 +65,24 @@ def create_app(
     data_dir: str | Path | None = None,
     secret_key: str | None = None,
 ) -> FastAPI:
-    data_dir = Path(data_dir) if data_dir else _default_data_dir()
-    db_path = Path(db_path) if db_path else Path(os.getenv("PARTPILOT_DB", data_dir / "partpilot.db"))
-    jobs_dir = data_dir / "jobs"
+    resolved_data_dir = Path(data_dir) if data_dir else default_data_dir()
+    if db_path:
+        resolved_db = Path(db_path)
+    elif data_dir:
+        resolved_db = resolved_data_dir / "partpilot.db"
+    else:
+        resolved_db = default_db_path()
+    jobs_dir = resolved_data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
 
-    store = UserStore(db_path)
+    store = UserStore(resolved_db)
     _seed_admin(store)
+
+    registry = FeatureRegistry()
+    registry.register(*FEATURES)
+
+    database = Database(resolved_db)
+    database.apply_migrations(registry)
 
     secret_key = secret_key or os.getenv("PARTPILOT_SECRET_KEY")
     if not secret_key:
@@ -66,18 +92,39 @@ def create_app(
             "sessions reset on restart. Set PARTPILOT_SECRET_KEY for persistent logins."
         )
 
+    def inject(request: Request) -> dict:
+        user = current_user(request)
+        return {"current_user": user, "nav": registry.nav_for(user.role if user else None)}
+
+    templates = Jinja2Templates(
+        directory=[str(_CORE_TEMPLATES), *[str(d) for d in registry.template_dirs()]],
+        context_processors=[inject],
+    )
+
     app = FastAPI(title="PartPilot")
     app.add_middleware(SessionMiddleware, secret_key=secret_key, same_site="lax")
     app.state.store = store
+    app.state.registry = registry
+    app.state.database = database
+    app.state.templates = templates
     app.state.jobs_dir = jobs_dir
 
-    templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+    # Static assets (vendored FullCalendar for the planning board). The app's only static mount.
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
-    def current_user(request: Request) -> User | None:
-        uid = request.session.get("user_id")
-        return store.get(uid) if uid else None
+    # ----- platform-wide auth handling -----
 
-    # ----- auth -----
+    @app.exception_handler(LoginRequired)
+    async def _login_required(request: Request, exc: LoginRequired):
+        return RedirectResponse("/login", status_code=303)
+
+    @app.exception_handler(Forbidden)
+    async def _forbidden(request: Request, exc: Forbidden):
+        return templates.TemplateResponse(
+            request, "error.html", {"message": exc.message}, status_code=403
+        )
+
+    # ----- core routes: login + landing -----
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request):
@@ -90,10 +137,8 @@ def create_app(
         user = store.verify(username, password)
         if user is None:
             return templates.TemplateResponse(
-                request,
-                "login.html",
-                {"error": "Invalid username or password."},
-                status_code=401,
+                request, "login.html",
+                {"error": "Invalid username or password."}, status_code=401,
             )
         request.session["user_id"] = user.id
         return RedirectResponse("/", status_code=303)
@@ -103,97 +148,17 @@ def create_app(
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
 
-    # ----- quoting -----
-
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
-        user = current_user(request)
-        if user is None:
-            return RedirectResponse("/login", status_code=303)
-        settings = Settings.load(None)
-        return templates.TemplateResponse(
-            request,
-            "upload.html",
-            {
-                "user": user,
-                "can_quote": user.role in QUOTE_ROLES,
-                "default_build_qty": settings.build_qty,
-                "default_currency": settings.currency or "",
-                "stock_available": bool(settings.minimrp_path),
-            },
-        )
-
-    @app.post("/quote", response_class=HTMLResponse)
-    async def quote(
-        request: Request,
-        file: UploadFile = File(...),
-        build_qty: int = Form(...),
-        check_stock: bool = Form(False),
-    ):
-        user = current_user(request)
-        if user is None:
-            return RedirectResponse("/login", status_code=303)
-        if user.role not in QUOTE_ROLES:
-            return templates.TemplateResponse(
-                request,
-                "error.html",
-                {"user": user, "message": "Your role is not permitted to run quotes."},
-                status_code=403,
-            )
-
-        suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in _ALLOWED_SUFFIXES:
-            return templates.TemplateResponse(
-                request,
-                "error.html",
-                {"user": user,
-                 "message": f"Unsupported file type '{suffix}'. Upload a CSV or Excel BOM."},
-                status_code=400,
-            )
-
-        job_id = uuid.uuid4().hex
-        job_dir = jobs_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        bom_path = job_dir / (Path(file.filename).name)
-        bom_path.write_bytes(await file.read())
-
-        try:
-            result = await run_in_threadpool(
-                run_quote, bom_path, job_dir,
-                build_qty=build_qty, check_stock=check_stock,
-            )
-        except Exception as exc:  # surface engine/credential errors to the user
-            return templates.TemplateResponse(
-                request,
-                "error.html",
-                {"user": user, "message": f"Quote failed: {exc}"},
-                status_code=500,
-            )
-
-        downloads = [("Report (Excel)", result.report_path.name)]
-        downloads += [(f"{label} cart", path.name) for label, path in result.cart_paths.items()]
-
-        return templates.TemplateResponse(
-            request,
-            "result.html",
-            {
-                "user": user,
-                "job_id": job_id,
-                "result": result,
-                "downloads": downloads,
-                "status_class": STATUS_CLASS,
-                "source_name": Path(file.filename).name,
-            },
-        )
-
-    @app.get("/download/{job_id}/{name}")
-    def download(request: Request, job_id: str, name: str):
+    def home(request: Request):
         if current_user(request) is None:
             return RedirectResponse("/login", status_code=303)
-        target = (jobs_dir / job_id / name).resolve()
-        if not target.is_relative_to(jobs_dir.resolve()) or not target.is_file():
-            return HTMLResponse("Not found", status_code=404)
-        return FileResponse(target, filename=name)
+        return templates.TemplateResponse(request, "home.html", {})
+
+    # ----- feature routes -----
+
+    for feature in registry.features:
+        if feature.router is not None:
+            app.include_router(feature.router)
 
     return app
 

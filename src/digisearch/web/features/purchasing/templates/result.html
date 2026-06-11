@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Quote · PartPilot{% endblock %}
+{% block title %}Purchasing · PartPilot{% endblock %}
 {% block content %}
 <div class="panel">
-  <h1>Quote — {{ source_name }}</h1>
+  <h1>Purchasing — {{ source_name }}</h1>
   <p class="note">
     {{ result.build_qty }} board(s){% if result.stock_checked %}, miniMRP stock checked{% endif %}{% if result.mouser_enabled %}, Mouser fallback enabled{% endif %}.
   </p>
@@ -18,7 +18,7 @@
 
   <div class="downloads">
     {% for label, name in downloads %}
-      <a href="/download/{{ job_id }}/{{ name }}">⬇ {{ label }}</a>
+      <a href="/purchasing/download/{{ job_id }}/{{ name }}">⬇ {{ label }}</a>
     {% endfor %}
   </div>
 
@@ -58,6 +58,6 @@
     </table>
   </div>
 
-  <p style="margin-top:1.25rem;"><a href="/">← New quote</a></p>
+  <p style="margin-top:1.25rem;"><a href="/purchasing">← New run</a></p>
 </div>
 {% endblock %}

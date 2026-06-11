@@ -51,6 +51,20 @@ def test_resolve_mpn_exact_match_is_confident():
     assert res.confidence > 0.9
 
 
+def test_valueless_lines_need_manual():
+    client = FakeSearcher(default=[product_to_candidate(make_product())])
+    # an inductor with no value -> nothing to parametric-match on
+    l1 = resolve_line(BomLine(refdes=["L1"], qty=1, value="",
+                              device="L_CHIP-0805(2012-METRIC)", package="INDC2009X120",
+                              description="Inductor Fixed - Generic"), client, S)
+    assert l1.status == Status.MANUAL
+    # SV1: empty value, device == package (a generic EAGLE part name, not a real MPN)
+    sv1 = resolve_line(BomLine(refdes=["SV1"], qty=1, value="",
+                               device="MA13-2", package="MA13-2", description="PIN HEADER"), client, S)
+    assert sv1.status == Status.MANUAL
+    assert client.calls == []  # neither one was searched on Digi-Key
+
+
 def test_resolve_not_found_and_dnp():
     client = FakeSearcher(default=[])
     nf = resolve_line(BomLine(refdes=["U1"], qty=1, value="NOSUCHPART123"), client, S)

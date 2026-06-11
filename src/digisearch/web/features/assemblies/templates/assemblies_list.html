@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Assemblies · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Assemblies</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.assemblies }}</b><small>assemblies</small></div>
+    <div class="card"><b>{{ summary.lines }}</b><small>BOM lines</small></div>
+    <div class="card"><b>{{ summary.empty }}</b><small>without a BOM</small></div>
+    {% if can_edit %}
+    <a href="/assemblies/new" style="margin-left:auto; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Assy</a>
+    {% endif %}
+  </div>
+
+  <form method="get" action="/assemblies"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="part no, value, description…">
+    </div>
+    <button type="submit">Filter</button>
+    {% if q %}<a href="/assemblies" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Part No</th><th>Value / name</th><th>Rev</th>
+            <th class="num">BOM lines</th><th class="num">Used in</th><th class="num">On hand</th></tr>
+      </thead>
+      <tbody>
+        {% for a in assemblies %}
+        <tr>
+          <td><a href="/assemblies/{{ a.id }}">{{ a.part_no }}</a></td>
+          <td>{{ a.value or '' }}</td>
+          <td>{{ a.rev or '' }}</td>
+          <td class="num">{% if a.line_count %}{{ a.line_count }}{% else %}<span class="flag">0</span>{% endif %}</td>
+          <td class="num">{{ a.used_in or '' }}</td>
+          <td class="num">{{ "%.0f"|format(a.total_qty) }}</td>
+        </tr>
+        {% endfor %}
+        {% if not assemblies %}<tr><td colspan="6" class="note">No assemblies.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

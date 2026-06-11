@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}{{ a.part_no }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .modal { position:fixed; inset:0; background:rgba(8,12,18,.7); display:none;
+           align-items:flex-start; justify-content:center; z-index:60; padding:2.5rem 1rem; }
+  .modal-card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+                width:880px; max-width:100%; max-height:88vh; display:flex; flex-direction:column;
+                padding:1rem 1.1rem; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.6rem; }
+  .modal-head b { font-size:1.05rem; }
+  .part-list { overflow-y:auto; border:1px solid var(--line); border-radius:8px; margin-top:.7rem; }
+  .part-row { display:flex; flex-direction:column; align-items:flex-start; gap:.1rem; width:100%;
+              text-align:left; background:transparent; border:0; border-bottom:1px solid var(--line);
+              color:var(--fg); padding:.5rem .8rem; cursor:pointer; margin:0; border-radius:0; font:inherit; }
+  .part-row:last-child { border-bottom:0; }
+  .part-row:hover { background:var(--accent); color:#fff; }
+  .part-row .pn-line { display:flex; justify-content:space-between; align-items:baseline;
+                       gap:1rem; width:100%; }
+  .part-row .pn { font-weight:600; }
+  .part-row .stk { color:var(--muted); font-size:.8rem; white-space:nowrap; }
+  .part-row .pv { color:var(--muted); font-size:.85rem; line-height:1.35; }
+  .part-row:hover .stk, .part-row:hover .pv { color:#e6eefb; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/assemblies">← Assemblies</a></p>
+  <h1>{{ a.part_no }} <span class="badge stock">ASSY</span>
+    {% if a.rev %}<span class="flag" style="font-size:.9rem;">rev {{ a.rev }}</span>{% endif %}</h1>
+  <p class="note">{{ a.value or '' }}{% if a.description %} — {{ a.description }}{% endif %}</p>
+
+  <div class="cards">
+    <div class="card"><b>{{ a.lines|length }}</b><small>BOM lines</small></div>
+    <div class="card"><b>{{ a.used_in|length }}</b><small>used in</small></div>
+    <div class="card"><b>{{ "%.0f"|format(a.total_qty) }}</b><small>on hand</small></div>
+    <div class="card"><b>{{ "%.2f"|format(a.total_cost) }}</b><small>total cost (SEK)</small></div>
+    {% if can_edit %}
+    <a href="/assemblies/{{ a.id }}/edit" style="margin:0 0 0 auto; display:flex;
+       align-items:center; justify-content:center; background:var(--accent); color:#fff;
+       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none;
+       white-space:nowrap;">Edit</a>
+    <a href="/assemblies/{{ a.id }}/import" style="margin:0; display:flex;
+       align-items:center; justify-content:center; background:var(--accent); color:#fff;
+       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none;
+       white-space:nowrap;">Import BOM (.csv)</a>
+    <button type="button" onclick="openAdd()" style="margin:0; display:flex;
+       align-items:center; justify-content:center; background:var(--accent); color:#fff;
+       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; cursor:pointer;
+       white-space:nowrap;">Add Component to Assy</button>
+    {% endif %}
+  </div>
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Bill of materials</h2>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th class="num">#</th><th class="num">Qty</th><th>Component</th><th>Value</th>
+            <th>Category</th><th class="num">Unit (SEK)</th><th class="num">Line (SEK)</th>
+            <th>Reference designators</th>{% if can_edit %}<th></th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for ln in a.lines %}
+        <tr>
+          <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
+          <td class="num">{{ "%g"|format(ln.qty_per) }}</td>
+          <td>
+            {% if ln.child_kind == 'ASSY' %}
+              <a href="/assemblies/{{ ln.child_id }}">{{ ln.child_part_no }}</a>
+              <span class="badge stock">ASSY</span>
+            {% else %}
+              <a href="/catalog/{{ ln.child_id }}">{{ ln.child_part_no }}</a>
+            {% endif %}
+          </td>
+          <td>{{ ln.child_value or '' }}</td>
+          <td>{{ ln.child_category or '' }}</td>
+          <td class="num">{% if ln.unit_cost is not none %}{{ "%.4f"|format(ln.unit_cost) }}{% endif %}</td>
+          <td class="num">{% if ln.line_cost is not none %}{{ "%.2f"|format(ln.line_cost) }}{% endif %}</td>
+          <td class="flag">{{ ln.refdes or '' }}</td>
+          {% if can_edit %}
+          <td class="num">
+            <form method="post" action="/assemblies/{{ a.id }}/lines/{{ ln.id }}/delete"
+                  style="margin:0" onsubmit="return confirm('Remove this line?');">
+              <button type="submit" class="danger" title="Remove line">Remove</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+        {% if not a.lines %}<tr><td colspan="{{ 9 if can_edit else 8 }}" class="note">This assembly has no BOM lines yet.</td></tr>{% endif %}
+      </tbody>
+      {% if a.lines %}
+      <tfoot>
+        <tr>
+          <td colspan="6" class="num" style="font-weight:600;">Total</td>
+          <td class="num" style="font-weight:600;">{{ "%.2f"|format(a.total_cost) }}</td>
+          <td colspan="{{ 2 if can_edit else 1 }}"></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+
+  {% if a.used_in %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Used in</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Assembly</th><th>Value / name</th><th class="num">Qty per</th></tr></thead>
+      <tbody>
+        {% for u in a.used_in %}
+        <tr>
+          <td><a href="/assemblies/{{ u.id }}">{{ u.part_no }}</a></td>
+          <td>{{ u.value or '' }}</td>
+          <td class="num">{{ "%g"|format(u.qty_per) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+<div id="addModal" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b>Add component to {{ a.part_no }}</b>
+      <button type="button" class="quiet" onclick="closeAdd()">✕</button>
+    </div>
+    <form method="post" action="/assemblies/{{ a.id }}/lines/add"
+          onkeydown="if(event.key==='Enter' && event.target.tagName==='INPUT') event.preventDefault();">
+      <div style="display:flex; gap:.6rem; align-items:flex-end;">
+        <div style="width:90px;">
+          <label for="qty_per">Qty</label>
+          <input id="qty_per" name="qty_per" type="number" step="any" min="1" value="1">
+        </div>
+        <div style="flex:1;">
+          <label for="refdes">Reference designators</label>
+          <input id="refdes" name="refdes" type="text" placeholder="C1, C2…">
+        </div>
+      </div>
+      <label for="partsearch">Find a part, then click it to add</label>
+      <input id="partsearch" type="text" autocomplete="off" placeholder="Filter by part no or value…"
+             oninput="filterParts()">
+      <div class="part-list" style="min-height:44vh; max-height:64vh;">
+        {% for p in parts %}
+        <button type="submit" name="child_id" value="{{ p.id }}" class="part-row"
+                data-s="{{ (p.part_no ~ ' ' ~ (p.value or '') ~ ' ' ~ p.kind) | lower }}">
+          <span class="pn-line">
+            <span class="pn">{{ p.part_no }}{% if p.kind == 'ASSY' %} <span class="badge stock">ASSY</span>{% endif %}</span>
+            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock</span>
+          </span>
+          {% if p.value %}<span class="pv">{{ p.value }}</span>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+  function openAdd() {
+    document.getElementById('addModal').style.display = 'flex';
+    const s = document.getElementById('partsearch'); s.value = ''; filterParts(); s.focus();
+  }
+  function closeAdd() { document.getElementById('addModal').style.display = 'none'; }
+  function filterParts() {
+    const q = document.getElementById('partsearch').value.toLowerCase();
+    document.querySelectorAll('#addModal .part-row').forEach(b => {
+      b.style.display = b.dataset.s.includes(q) ? '' : 'none';
+    });
+  }
+  // Close on backdrop click or Escape.
+  document.getElementById('addModal').addEventListener('click', e => {
+    if (e.target.id === 'addModal') closeAdd();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAdd(); });
+</script>
+{% endif %}
+{% endblock %}

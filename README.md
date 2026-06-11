@@ -19,8 +19,8 @@ uv run digisearch resolve slice-vb.csv --build-qty 100 -o slice-vb-resolved.xlsx
 
 ## Web app (PartPilot)
 
-DigiSearch also ships a small **web front-end** so colleagues can run quotes from a browser
-instead of the CLI — the first step toward an in-house tool the whole company uses.
+DigiSearch also ships a small **web front-end** so colleagues can run the **purchasing** flow
+from a browser instead of the CLI — the first step toward an in-house tool the whole company uses.
 
 ```bash
 uv run digisearch serve                 # local only: http://127.0.0.1:8000
@@ -30,14 +30,109 @@ uv run digisearch serve --host 0.0.0.0  # allow other machines on the LAN to con
 It's an *internal* app: one machine on your network runs a single process, everyone points a
 browser at it. On first run it prints an initial **admin** username/password (override with
 `PARTPILOT_ADMIN_USER` / `PARTPILOT_ADMIN_PASSWORD`). Log in, upload a BOM, pick a build
-quantity, and you get the resolved quote table plus downloadable Excel report and distributor
-cart CSVs — the same engine as the CLI.
+quantity, and you get the resolved purchasing table plus downloadable Excel report and
+distributor cart CSVs — the same engine as the CLI.
 
-Access is **role-based**: only the `admin`/`quoter` roles can run quotes (warehouse/shipping/
-purchasing roles are reserved for screens still to come). Users, uploaded BOMs and generated
+Access is **role-based**: only the `admin`/`purchasing` roles can run purchasing (warehouse/
+shipping roles are reserved for screens still to come). Users, uploaded BOMs and generated
 files live under `data/` (git-ignored); back up `data/partpilot.db`. Set
 `PARTPILOT_SECRET_KEY` to keep logins valid across restarts. For production, run it behind a
 `systemd` unit on one LAN machine.
+
+> This is a **purchasing** aid — it resolves a BOM to orderable parts, checks stock and builds
+> distributor carts. (A dedicated customer-quotation tool may reuse parts of this later, but
+> that's a separate tool.)
+
+### Architecture: feature modules
+
+PartPilot is a **modular monolith**. A small **core** (`src/digisearch/web/core/`) owns the
+cross-cutting concerns — auth/login, navigation, the SQLite database + a migration runner, and
+the shared template environment. Functionality is added as bounded **feature modules** under
+`src/digisearch/web/features/<name>/`, each declaring what it contributes via a `Feature`
+descriptor (`feature.py`):
+
+```python
+feature = Feature(
+    name="catalog",
+    router=router,                                  # its FastAPI routes
+    nav=NavItem("Parts", "/catalog", roles=frozenset({"admin", "purchasing"})),
+    migrations=[Migration(1, "create parts", "CREATE TABLE parts (...);")],
+    template_dir=Path(__file__).parent / "templates",
+)
+```
+
+The core includes the router, runs the migrations on startup, and shows the nav entry only to
+the roles allowed — the feature never edits the core. To add functionality you create a feature
+package and append it to `FEATURES` in `web/app.py`; nothing else changes. Purchasing
+(`features/purchasing/`) is the reference example. (This is internal extensibility — there is no
+third-party plugin API.)
+
+### Parts catalog
+
+The **catalog** feature (`features/catalog/`) is the first feature to *own* data: a normalized
+`parts` / `suppliers` / `part_suppliers` / `stock_locations` / `part_stock` schema in PartPilot's
+SQLite, seeded from miniMRP. Import (or re-sync) it with:
+
+```bash
+uv run digisearch import-catalog            # uses settings 'minimrp_path'
+uv run digisearch import-catalog --from /path/to/miniMRP/Data/mrp5data
+```
+
+The import upserts on a stored `minimrp_id`, so it's safe to re-run while miniMRP stays the
+system of record (dual-run); it imports parts, suppliers, stock, the assembly BOM structure
+**and the contacts address book** (suppliers/customers/misc). The same import is also available in the web GUI under **Setup & Tools → Import from
+miniMRP** (admin only), where you can **browse/upload any `mrp5data` file** or leave it empty to
+use the configured default path. The **Parts** screen then offers a searchable, category-filterable list with stock,
+default supplier and per-piece price, and a per-part detail view (all supplier offers + stock by
+bin). It shows **components only** (assemblies live under their own tab). The **+ Add component**
+button (admin/purchasing roles) opens a form to create a new part with all its fields, multiple
+supplier lines (pick an existing supplier from the dropdown or add a new one inline; unit price +
+reel qty), and opening stock. Each part's detail page has an **Edit** button that reuses the same
+form to maintain every field, its supplier lines and its stock. Dedicated stock movements
+(receive/issue/adjust) come next.
+
+> Note on pricing: miniMRP's `PriceEach` is the price per `QtyPerUOM` (per reel), so the
+> per-piece price shown is `PriceEach / QtyPerUOM` (verified against miniMRP's own `xCost`).
+
+### Assemblies
+
+The **assemblies** feature (`features/assemblies/`) models the multi-level BOM tree. Assemblies
+are parts with `kind = ASSY`; their structure lives in a `bom_lines` table (parent → child, both
+referencing `parts`, so subassemblies and where-used come for free). It's seeded from miniMRP's
+`tblusedin` by the same `import-catalog` command. The **Assemblies** tab lists every assembly with
+its BOM-line and used-in counts; each assembly's page shows its bill of materials (qty · component
+· reference designators), with subassembly children as links you drill into, plus a **Used in**
+list of the assemblies that consume it. The BOM is **editable** (admin/purchasing): the **Add
+Component to Assy** button opens a dialog where you filter the full part list and click a part to
+add it (with qty + reference designators), and each line has a ✕ to remove it — granular edits
+that preserve the imported lines' `minimrp_id`. **New Assy** creates an assembly from scratch.
+
+The **Import BOM (.csv)** button resolves an uploaded BOM with the **same engine as the
+purchasing tool** (shared `resolve_bom_file()`, so resolution improvements flow to both), then
+shows a **review screen**: lines already in inventory are linked automatically; lines resolved on
+Digi-Key/Mouser are offered as **new parts** to create (tick to accept, with a link to the
+distributor page — opens in a new tab — to verify), and unresolved lines can be created bare from
+their CSV text. Lines the BOM under-specifies so badly the tool can't pick a part (no value/MPN —
+valueless passives like `C38`/`L1`, or generic headers like `SV1`) are tagged **manual**: they
+need a human and can't be auto-imported. Applying creates the accepted parts (with a supplier line
+from the resolved candidate) and adds a BOM line per row. *Building* an assembly (consuming stock,
+via Work Orders) comes next.
+
+### Contacts
+
+The **contacts** feature (`features/contacts/`) is a unified address book of business contacts —
+**suppliers, customers and other** companies — in one `contacts` table with a `kind`
+discriminator (miniMRP keeps these in three separate tables, `tblsup/cus/misaddresses`, which we
+fold into one). It holds company name, short name, contact person, email/phone/fax, address,
+postcode, website, currency, discount and notes. The **Contacts** tab lists them with a kind
+filter + search, and **New Contact** / **Edit** forms (admin/purchasing) let you add and maintain
+them — the foundation for Customer Orders (customers) and Work Orders / purchasing (suppliers).
+It's seeded from miniMRP by the same `import-catalog` command. (The catalog's lean `suppliers`
+table — used for per-part supplier links — stays separate for now; the two will be unified when
+purchase orders are built.)
+
+> The same **manual** status applies in the purchasing tool — under-specified lines are flagged
+> rather than resolved to a wrong part.
 
 ## Checking what's already in stock (miniMRP)
 

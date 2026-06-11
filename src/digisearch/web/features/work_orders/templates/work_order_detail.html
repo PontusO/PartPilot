@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ w.wo_no or 'WO #' ~ w.id }} · PartPilot{% endblock %}
+{% set badge = {'allocated':'stock','issued':'muted','finished':'ok','cancelled':'bad'} %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/work-orders">← Work Orders</a></p>
+  <h1>{{ w.wo_no or 'WO #' ~ w.id }}
+    <span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span></h1>
+  <p class="note">Build <b>{{ "%g"|format(w.qty) }}</b> ×
+    <a href="/assemblies/{{ w.assembly_id }}">{{ w.assembly_part_no }}</a>
+    {% if w.assembly_value %} — {{ w.assembly_value }}{% endif %}</p>
+
+  <div class="cards">
+    <div class="card"><b>{{ "%g"|format(w.qty) }}</b><small>to build</small></div>
+    <div class="card"><b>{{ w.lines|length }}</b><small>components</small></div>
+    <div class="card"><b>{{ w.short_count }}</b><small>short</small></div>
+    <div class="card"><b>{{ w.build_date or '—' }}</b><small>build date</small></div>
+  </div>
+
+  {% if error %}<div class="err" style="margin-top:1rem;">{{ error }}</div>{% endif %}
+
+  {% if can_edit and w.status in ('allocated', 'issued') %}
+  <div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem;">
+    {% if w.status == 'allocated' %}
+      {% if w.short_count %}<span class="badge bad" style="align-self:center;">⚠ {{ w.short_count }} component(s) short — issuing will drive stock negative</span>{% endif %}
+      <form method="post" action="/work-orders/{{ w.id }}/issue" style="margin:0"
+            onsubmit="return confirm('Issue components out of stock? This reduces inventory.');">
+        <button type="submit">Issue components (→ WIP)</button></form>
+      <form method="post" action="/work-orders/{{ w.id }}/flush" style="margin:0"
+            onsubmit="return confirm('Build straight through: issue components AND complete to stock?');">
+        <button type="submit">Flush (issue + finish)</button></form>
+      <form method="post" action="/work-orders/{{ w.id }}/cancel" style="margin:0"
+            onsubmit="return confirm('Cancel this work order?');">
+        <button type="submit">Cancel</button></form>
+    {% elif w.status == 'issued' %}
+      <form method="post" action="/work-orders/{{ w.id }}/finish" style="margin:0"
+            onsubmit="return confirm('Complete the build and add finished assemblies to stock?');">
+        <button type="submit">Finish (→ stock)</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if w.notes %}<p class="note" style="margin-top:.8rem;">{{ w.notes }}</p>{% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Schedule</h2>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.4rem 1.4rem;">
+    {% if w.customer_required_date %}
+    <div><small class="note">Customer requested</small><br>{{ w.customer_required_date }}
+      {% if w.customer_order_id %}<a href="/customer-orders/{{ w.customer_order_id }}" class="note">{{ w.customer_order_ref }}</a>{% endif %}</div>
+    {% endif %}
+    <div><small class="note">Planned start</small><br>{{ w.planned_start or '—' }}</div>
+    <div><small class="note">Planned finish</small><br>{{ w.due_date or '—' }}</div>
+    <div><small class="note">Build days (working)</small><br>{{ w.duration_days if w.duration_days is not none else '—' }}</div>
+  </div>
+  {% if w.customer_required_date and w.due_date and w.due_date > w.customer_required_date %}
+  <p class="note" style="color:var(--warn); margin-top:.5rem;">⚠ Planned finish ({{ w.due_date }}) is later than
+    the customer requested ({{ w.customer_required_date }}). The customer's request is retained; the planned
+    dates are what we work from.</p>
+  {% endif %}
+
+  {% if buy_by %}
+  <div style="margin-top:1rem; padding:.7rem .95rem; border-radius:9px; flex-wrap:wrap;
+       display:flex; gap:1rem; align-items:center;
+       background:rgba({{ '220,90,90,.12' if buy_by.late else '90,140,220,.10' }});
+       border:1px solid var({{ '--bad' if buy_by.late else '--line' }});">
+    <span>{% if buy_by.late %}⚠ {% endif %}Order materials by <b>{{ buy_by.critical }}</b>
+      {%- if buy_by.late %} — <b>overdue</b>{% endif %} to start the build on {{ buy_by.planned_start }}.</span>
+    <a href="/purchase-orders/suggestions" style="background:var(--accent); color:#fff; font-weight:600;
+       text-decoration:none; border-radius:7px; padding:.4rem 1rem;">Review &amp; raise POs</a>
+  </div>
+  {% endif %}
+
+  {% if can_edit and w.status in ('allocated', 'issued') %}
+  <form method="post" action="/work-orders/{{ w.id }}/reschedule"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-top:1rem;
+               background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
+    <div><label for="due_date">Planned finish</label>
+      <input id="due_date" name="due_date" type="date" value="{{ w.due_date or '' }}"
+             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+    <div style="width:110px;"><label for="duration_days">Build days</label>
+      <input id="duration_days" name="duration_days" type="number" min="0" step="1"
+             value="{{ w.duration_days if w.duration_days is not none else '' }}"
+             style="width:110px; padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+    <button type="submit">Reschedule</button>
+    <span class="note">Start and the purchasing deadline are calculated back from the planned finish. The
+      customer's requested date is unaffected.</span>
+  </form>
+  {% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Component requirements
+    <span class="note" style="font-weight:400;">(BOM exploded to base parts)</span></h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th class="num">#</th><th>Component</th><th>Value</th><th class="num">Required</th>
+            <th class="num">Issued</th><th class="num">Available</th><th class="num">Short</th></tr>
+      </thead>
+      <tbody>
+        {% for ln in w.lines %}
+        <tr>
+          <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
+          <td><a href="/{{ 'assemblies' if ln.kind == 'ASSY' else 'catalog' }}/{{ ln.part_id }}">{{ ln.part_no }}</a>
+            {% if ln.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}</td>
+          <td>{{ ln.value or '' }}</td>
+          <td class="num">{{ "%g"|format(ln.qty_required) }}</td>
+          <td class="num">{{ "%g"|format(ln.qty_issued) }}</td>
+          <td class="num">{{ "%g"|format(ln.available) }}</td>
+          <td class="num">{% if ln.short > 0 %}<span class="badge bad">{{ "%g"|format(ln.short) }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not w.lines %}<tr><td colspan="7" class="note">This assembly has no BOM — nothing to issue.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -13,10 +13,9 @@ from .units import (
     format_frequency,
     format_inductance,
     format_resistance,
-    parse_capacitance,
     parse_frequency,
-    parse_inductance,
     parse_resistance,
+    parse_rkm_value,
 )
 
 # Known imperial chip sizes and the metric codes that map to them.
@@ -76,7 +75,8 @@ def build_spec(line: BomLine, settings: Settings, kind: LineKind) -> PartSpec:
         spec.tolerance = settings.default_resistor_tolerance
         spec.assumed.append("tolerance")
     elif ctype == CompType.CAPACITOR:
-        farads = parse_capacitance(value)
+        # parse_rkm_value handles both standard (0.1uF, 15pF) and RKM (0u1, 1p5) notation.
+        farads = parse_rkm_value(value, CompType.CAPACITOR)
         if farads is not None:
             spec.value_si = farads
             spec.value_display = format_capacitance(farads)
@@ -91,7 +91,7 @@ def build_spec(line: BomLine, settings: Settings, kind: LineKind) -> PartSpec:
         spec.voltage = settings.default_capacitor_voltage
         spec.assumed.extend(["dielectric", "voltage"])
     elif ctype == CompType.INDUCTOR:
-        henries = parse_inductance(value)
+        henries = parse_rkm_value(value, CompType.INDUCTOR)
         if henries is not None:
             spec.value_si = henries
             spec.value_display = format_inductance(henries)
@@ -105,6 +105,7 @@ def build_spec(line: BomLine, settings: Settings, kind: LineKind) -> PartSpec:
         spec.package_imperial = None
         code = extract_dimension_code(line)
         if code:
+            spec.package_code = code
             spec.package_note = format_dimension_code(code)
 
     if spec.value_display is None:

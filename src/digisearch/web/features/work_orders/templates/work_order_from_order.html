@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Build for {{ order.order_ref or 'order #' ~ order.id }} · PartPilot{% endblock %}
+{% set buildable = proposals | selectattr('category', 'equalto', 'build') | list %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/customer-orders/{{ order.id }}">← {{ order.order_ref or 'Order #' ~ order.id }}</a></p>
+  <h1>Build to fulfil {{ order.order_ref or 'order #' ~ order.id }}</h1>
+  <p class="note">{{ order.customer_name or 'No customer' }} — stock checked against each ordered line.</p>
+
+  {% if not buildable %}
+  <div class="note" style="margin-top:1rem;">Nothing to build — every assembly line is already covered
+    by stock or existing work orders. (Short components are purchased, not built.)</div>
+  {% endif %}
+
+  <form method="post" action="/work-orders/from-order/{{ order.id }}">
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>{% if buildable %}<th></th>{% endif %}<th>Product</th><th class="num">Ordered</th>
+              <th class="num">Free stock</th><th class="num">On WO</th><th class="num">Shortfall</th>
+              <th class="num">Build qty</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for p in proposals %}
+          <tr>
+            {% if buildable %}
+            <td class="num">{% if p.category == 'build' %}<input type="checkbox" name="build" value="{{ p.line_id }}" checked>{% endif %}</td>
+            {% endif %}
+            <td><a href="/{{ 'assemblies' if p.kind == 'ASSY' else 'catalog' }}/{{ p.part_id }}">{{ p.part_no }}</a>
+              {% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+              {% if p.value %}<span class="flag">{{ p.value }}</span>{% endif %}
+              {% for w in existing.get(p.line_id, []) %}<a href="/work-orders/{{ w.id }}" class="badge muted" style="text-decoration:none;">{{ w.wo_no or 'WO#' ~ w.id }} · {{ w.status }}</a>{% endfor %}
+            </td>
+            <td class="num">{{ "%g"|format(p.ordered_qty) }}</td>
+            <td class="num">{{ "%g"|format(p.free) }}</td>
+            <td class="num">{% if p.on_wo %}{{ "%g"|format(p.on_wo) }}{% endif %}</td>
+            <td class="num">{% if p.shortfall > 0 %}<span class="badge bad">{{ "%g"|format(p.shortfall) }}</span>{% endif %}</td>
+            <td class="num">
+              {% if p.category == 'build' %}
+              <input name="qty_{{ p.line_id }}" type="number" step="any" min="0" value="{{ '%g'|format(p.shortfall) }}"
+                     style="width:90px; text-align:right; padding:.3rem .4rem; background:#0d1219;
+                            color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit;">
+              {% endif %}
+            </td>
+            <td class="note">
+              {% if p.category == 'covered' %}covered
+              {% elif p.category == 'component' %}component → purchase{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      {% if buildable %}<button type="submit">Create {{ buildable|length }} work order(s)</button>{% endif %}
+      <button type="button" onclick="window.location.href='/customer-orders/{{ order.id }}'">Back to order</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

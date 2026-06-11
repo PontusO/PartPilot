@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Parts from {{ supplier }} · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/contacts">← Contacts</a></p>
+  <h1>Parts from {{ supplier }}</h1>
+  <p class="note">{{ parts|length }} part(s) sourced from this supplier.</p>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Part No</th><th>Value</th><th>Category</th><th>Supplier P/N</th>
+            <th class="num">Unit (SEK)</th></tr>
+      </thead>
+      <tbody>
+        {% for p in parts %}
+        <tr>
+          <td><a href="/{{ 'assemblies' if p.kind == 'ASSY' else 'catalog' }}/{{ p.id }}">{{ p.part_no }}</a>
+            {% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}</td>
+          <td>{{ p.value or '' }}</td>
+          <td>{{ p.category or '' }}</td>
+          <td>{% if p.part_url %}<a href="{{ p.part_url }}" target="_blank" rel="noopener">{{ p.supplier_pno or 'view' }}</a>{% else %}{{ p.supplier_pno or '' }}{% endif %}</td>
+          <td class="num">{% if p.unit_price is not none %}{{ "%.4f"|format(p.unit_price) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not parts %}<tr><td colspan="5" class="note">No parts are linked to this supplier.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

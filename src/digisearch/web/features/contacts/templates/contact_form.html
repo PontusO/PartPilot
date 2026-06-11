@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+  select, textarea { width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px; font:inherit; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="{{ back_url }}">← Contacts</a></p>
+  <h1>{{ heading }}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ action }}">
+    <div class="formgrid">
+      <div>
+        <label for="kind">Kind</label>
+        <select id="kind" name="kind">
+          {% for k in kinds %}<option value="{{ k }}" {{ 'selected' if values.get('kind') == k else '' }}>{{ k }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="name" class="req">Company name</label>
+        <input id="name" name="name" type="text" value="{{ values.get('name','') or '' }}" required autofocus>
+      </div>
+      <div>
+        <label for="short_name">Short name</label>
+        <input id="short_name" name="short_name" type="text" value="{{ values.get('short_name','') or '' }}">
+      </div>
+      <div>
+        <label for="contact">Contact person</label>
+        <input id="contact" name="contact" type="text" value="{{ values.get('contact','') or '' }}">
+      </div>
+      <div>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="text" value="{{ values.get('email','') or '' }}">
+      </div>
+      <div>
+        <label for="website">Website</label>
+        <input id="website" name="website" type="text" value="{{ values.get('website','') or '' }}">
+      </div>
+      <div>
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="text" value="{{ values.get('phone','') or '' }}">
+      </div>
+      <div>
+        <label for="phone2">Phone 2</label>
+        <input id="phone2" name="phone2" type="text" value="{{ values.get('phone2','') or '' }}">
+      </div>
+      <div>
+        <label for="fax">Fax</label>
+        <input id="fax" name="fax" type="text" value="{{ values.get('fax','') or '' }}">
+      </div>
+      <div>
+        <label for="postcode">Postcode</label>
+        <input id="postcode" name="postcode" type="text" value="{{ values.get('postcode','') or '' }}">
+      </div>
+      <div>
+        <label for="currency">Currency</label>
+        <input id="currency" name="currency" type="text" value="{{ values.get('currency','') or '' }}" placeholder="e.g. SEK">
+      </div>
+      <div>
+        <label for="discount">Discount %</label>
+        <input id="discount" name="discount" type="number" step="any"
+               value="{{ values.get('discount') if values.get('discount') is not none else '' }}">
+      </div>
+      <div class="full">
+        <label for="address">Address</label>
+        <textarea id="address" name="address" rows="3">{{ values.get('address','') or '' }}</textarea>
+      </div>
+      <div class="full">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
+      </div>
+    </div>
+    <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">{{ submit_label }}</button>
+      <button type="button" onclick="window.location.href='{{ back_url }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Company details · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  textarea { width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+             border:1px solid var(--line); border-radius:7px; font:inherit; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Company details</h1>
+  <p class="note">Used as the issuer header on purchase-order PDFs and your ISO records.</p>
+  {% if saved %}<div class="ok-banner" style="background:rgba(70,180,120,.15); border:1px solid var(--ok,#4caf6e);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">Saved.</div>{% endif %}
+
+  <form method="post" action="/setup/company">
+    <div class="formgrid">
+      <div class="full">
+        <label for="name">Company name</label>
+        <input id="name" name="name" type="text" value="{{ company.name }}" autofocus>
+      </div>
+      <div class="full">
+        <label for="address">Address</label>
+        <textarea id="address" name="address" rows="2">{{ company.address }}</textarea>
+      </div>
+      <div><label for="postcode">Postcode</label>
+        <input id="postcode" name="postcode" type="text" value="{{ company.postcode }}"></div>
+      <div><label for="city">City</label>
+        <input id="city" name="city" type="text" value="{{ company.city }}"></div>
+      <div><label for="country">Country</label>
+        <input id="country" name="country" type="text" value="{{ company.country }}"></div>
+      <div><label for="vat_no">VAT number</label>
+        <input id="vat_no" name="vat_no" type="text" value="{{ company.vat_no }}"></div>
+      <div><label for="org_no">Org / company number</label>
+        <input id="org_no" name="org_no" type="text" value="{{ company.org_no }}"></div>
+      <div><label for="email">Email</label>
+        <input id="email" name="email" type="text" value="{{ company.email }}"></div>
+      <div><label for="phone">Phone</label>
+        <input id="phone" name="phone" type="text" value="{{ company.phone }}"></div>
+      <div><label for="website">Website</label>
+        <input id="website" name="website" type="text" value="{{ company.website }}"></div>
+    </div>
+    <div style="margin-top:1.2rem;"><button type="submit">Save company details</button></div>
+  </form>
+</div>
+{% endblock %}

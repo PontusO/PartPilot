@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ g.grn_no or 'GRN #' ~ g.id }} · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/goods-receipts">← Goods Receipts</a>{% if g.po_id %} · <a href="/purchase-orders/{{ g.po_id }}">{{ g.po_no or 'PO' }}</a>{% endif %}</p>
+  <h1>{{ g.grn_no or 'GRN #' ~ g.id }}</h1>
+  <p class="note">{{ g.supplier_name or 'No supplier' }}
+    {% if g.grn_date %} — received {{ g.grn_date }}{% endif %}
+    {% if g.advice_no %} · advice {{ g.advice_no }}{% endif %}
+    {% if g.received_by %} · by {{ g.received_by }}{% endif %}</p>
+
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Received lines</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Part</th><th>Value</th><th class="num">Qty received</th></tr></thead>
+      <tbody>
+        {% for ln in g.lines %}
+        <tr>
+          <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}—{% endif %}</td>
+          <td>{{ ln.value or '' }}</td>
+          <td class="num">{{ "%g"|format(ln.qty) }}</td>
+        </tr>
+        {% endfor %}
+        {% if not g.lines %}<tr><td colspan="3" class="note">No lines.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

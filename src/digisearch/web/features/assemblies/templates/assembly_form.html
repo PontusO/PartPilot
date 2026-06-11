@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="{{ back_url }}">← Back</a></p>
+  <h1>{{ heading }}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ action }}">
+    <div class="formgrid">
+      <div>
+        <label for="part_no" class="req">Part number</label>
+        <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
+               placeholder="e.g. 98-00400-1" required autofocus>
+      </div>
+      <div>
+        <label for="rev">Revision</label>
+        <input id="rev" name="rev" type="text" value="{{ values.get('rev','') or '' }}">
+      </div>
+      <div>
+        <label for="value">Name / value</label>
+        <input id="value" name="value" type="text" value="{{ values.get('value','') or '' }}"
+               placeholder="descriptive name">
+      </div>
+      <div>
+        <label for="category">Category</label>
+        <input id="category" name="category" type="text" value="{{ values.get('category','') or '' }}"
+               placeholder="e.g. PRODUCT">
+      </div>
+      <div>
+        <label for="default_build_days">Default build days</label>
+        <input id="default_build_days" name="default_build_days" type="number" min="0" step="1"
+               value="{{ values.get('default_build_days') if values.get('default_build_days') is not none else '' }}"
+               placeholder="working days">
+      </div>
+      <div class="full">
+        <label for="description">Description</label>
+        <input id="description" name="description" type="text"
+               value="{{ values.get('description','') or '' }}">
+      </div>
+    </div>
+    {% if hint %}<p class="note" style="margin-top:.8rem;">{{ hint }}</p>{% endif %}
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">{{ submit_label }}</button>
+      <button type="button" onclick="window.location.href='{{ back_url }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

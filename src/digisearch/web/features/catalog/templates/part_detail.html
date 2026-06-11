@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ part.part_no }} · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/catalog">← Parts</a></p>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+    <h1 style="margin:0;">{{ part.part_no }}
+      {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}</h1>
+    {% if can_edit %}
+    <a href="/catalog/{{ part.id }}/edit" style="background:var(--accent); color:#fff;
+       font-weight:600; text-decoration:none; border-radius:7px; padding:.55rem 1.1rem;
+       white-space:nowrap;">Edit</a>
+    {% endif %}
+  </div>
+  <p class="note">{{ part.value or '' }}{% if part.description %} — {{ part.description }}{% endif %}</p>
+
+  <div class="cards">
+    <div class="card"><b>{{ "%.0f"|format(part.free) }}</b><small>free</small></div>
+    <div class="card"><b>{{ "%.0f"|format(part.total_qty) }}</b><small>on hand</small></div>
+    <div class="card"><b>{{ "%.0f"|format(part.total_alloc) }}</b><small>allocated</small></div>
+    <div class="card"><b>{{ "%.0f"|format(part.min_qty) }}</b><small>min</small></div>
+    {% if part.unit_cost is not none %}
+      <div class="card"><b>{{ "%.4f"|format(part.unit_cost) }}</b><small>unit cost SEK</small></div>
+    {% endif %}
+  </div>
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Details</h2>
+  <table>
+    <tbody>
+      <tr><th>Category</th><td>{{ part.category or '' }}</td><th>Manufacturer</th><td>{{ part.mfr_name or '' }}</td></tr>
+      <tr><th>MPN</th><td>{{ part.mfr_pno or '' }}</td><th>Revision</th><td>{{ part.rev or '' }}</td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Suppliers</h2>
+  <table>
+    <thead>
+      <tr><th>Supplier</th><th>Supplier P/N</th><th class="num">Price/UOM</th><th class="num">UOM</th>
+          <th class="num">Unit (SEK)</th><th class="num">MOQ</th><th class="num">Lead</th><th>Default</th></tr>
+    </thead>
+    <tbody>
+      {% for s in part.suppliers %}
+      <tr>
+        <td>{{ s.supplier_name or '' }}</td>
+        <td>{% if s.part_url %}<a href="{{ s.part_url }}" target="_blank" rel="noopener">{{ s.supplier_pno or 'view' }}</a>{% else %}{{ s.supplier_pno or '' }}{% endif %}</td>
+        <td class="num">{% if s.price_per_uom is not none %}{{ "%.2f"|format(s.price_per_uom) }}{% endif %}</td>
+        <td class="num">{{ "%.0f"|format(s.qty_per_uom) }}</td>
+        <td class="num">{% if s.unit_price is not none %}{{ "%.4f"|format(s.unit_price) }}{% endif %}</td>
+        <td class="num">{% if s.moq is not none %}{{ "%.0f"|format(s.moq) }}{% endif %}</td>
+        <td class="num">{{ s.lead_time if s.lead_time is not none else '' }}</td>
+        <td>{% if s.is_default %}<span class="badge ok">default</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% if not part.suppliers %}<tr><td colspan="8" class="note">No supplier links.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock by location</h2>
+  <table>
+    <thead>
+      <tr><th>Location</th><th>Bin</th><th class="num">On hand</th><th class="num">Allocated</th><th class="num">On order</th></tr>
+    </thead>
+    <tbody>
+      {% for st in part.stock %}
+      <tr>
+        <td>{{ st.location_name or '' }}</td><td>{{ st.bin or '' }}</td>
+        <td class="num">{{ "%.0f"|format(st.on_hand) }}</td>
+        <td class="num">{{ "%.0f"|format(st.allocated) }}</td>
+        <td class="num">{{ "%.0f"|format(st.on_order) }}</td>
+      </tr>
+      {% endfor %}
+      {% if not part.stock %}<tr><td colspan="5" class="note">No stock records.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  {% if can_move %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Adjust stock</h2>
+  <form method="post" action="/catalog/{{ part.id }}/stock/move"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end;
+               background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
+    <div>
+      <label for="action">Action</label>
+      <select id="action" name="action"
+              style="padding:.5rem .6rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="receive">Receive (+)</option>
+        <option value="issue">Issue (−)</option>
+        <option value="adjust">Set on-hand to…</option>
+      </select>
+    </div>
+    <div style="width:110px;"><label for="qty">Quantity</label>
+      <input id="qty" name="qty" type="number" step="any" min="0" required></div>
+    {% if locations %}
+    <div><label for="location_id">Location</label>
+      <select id="location_id" name="location_id"
+              style="padding:.5rem .6rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        {% for l in locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div style="flex:1; min-width:160px;"><label for="note">Note</label>
+      <input id="note" name="note" type="text" placeholder="reason / reference…"></div>
+    <button type="submit">Apply</button>
+  </form>
+  {% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock movements</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>When</th><th>Type</th><th class="num">Change</th><th class="num">Balance</th>
+            <th>Location</th><th>Reference</th><th>Note</th><th>By</th></tr>
+      </thead>
+      <tbody>
+        {% for m in movements %}
+        <tr>
+          <td class="flag">{{ m.moved_at }}</td>
+          <td><span class="badge {{ 'ok' if m.qty_delta >= 0 else 'bad' }}">{{ m.mtype }}</span></td>
+          <td class="num">{{ "%+g"|format(m.qty_delta) }}</td>
+          <td class="num">{{ "%g"|format(m.qty_after) }}</td>
+          <td>{{ m.location_name or '' }}</td>
+          <td>{{ m.reference or '' }}</td>
+          <td>{{ m.note or '' }}</td>
+          <td>{{ m.user or '' }}</td>
+        </tr>
+        {% endfor %}
+        {% if not movements %}<tr><td colspan="8" class="note">No stock movements recorded yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

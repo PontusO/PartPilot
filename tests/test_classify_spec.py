@@ -64,6 +64,16 @@ def test_build_spec_small_cap_is_c0g():
     assert spec.dielectric == "C0G"
 
 
+def test_build_spec_parses_rkm_cap_and_inductor_notation():
+    # House style writes 0.1uF as "0u1"; the BOM side must understand it like stock does.
+    for value in ("0u1", "0u1F"):
+        spec = build_spec(line(value=value, device="C_CHIP-0402(1005-METRIC)"), S, LineKind.GENERIC_PASSIVE)
+        assert spec.value_si == 1e-7, value
+        assert spec.value_display == "100nF"
+    ind = build_spec(line(value="3n3", device="L_CHIP-0402(1005-METRIC)"), S, LineKind.GENERIC_PASSIVE)
+    assert ind.comp_type == CompType.INDUCTOR and abs(ind.value_si - 3.3e-9) < 1e-15
+
+
 def test_resistor_query_is_ascii_no_ohm_symbol():
     from digisearch.spec.parse_spec import resistance_query_token
 

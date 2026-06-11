@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PartPilot{% endblock %}</title>
+  <style>
+    :root {
+      --bg:#0f1419; --panel:#1a2330; --line:#2a3646; --fg:#e6edf3; --muted:#8b98a8;
+      --accent:#3b82f6; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --stock:#0891b2;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+           background:var(--bg); color:var(--fg); }
+    a { color:var(--accent); }
+
+    /* ---- app shell (signed in): sidebar + main ---- */
+    body.authed { display:flex; min-height:100vh; }
+    .sidebar { width:220px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--line);
+               display:flex; flex-direction:column; padding:.9rem .7rem; position:sticky; top:0;
+               height:100vh; }
+    .sidebar .brand { display:block; text-decoration:none; color:var(--fg); font-weight:700;
+                      font-size:1.1rem; letter-spacing:.2px; padding:.3rem .6rem 1rem; }
+    .sidebar .brand span { color:var(--accent); }
+    .sidebar nav { display:flex; flex-direction:column; gap:.1rem; flex:1; overflow-y:auto; }
+    .sidebar nav a { display:flex; align-items:center; gap:.55rem; padding:.5rem .6rem;
+                     border-radius:8px; color:var(--muted); text-decoration:none; font-size:.92rem; }
+    .sidebar nav a:hover { background:var(--line); color:var(--fg); }
+    .sidebar nav a.active { background:var(--accent); color:#fff; }
+    .sidebar nav a .ic { width:1.25rem; text-align:center; }
+    .sidebar nav a .soon { margin-left:auto; font-size:.6rem; text-transform:uppercase;
+                           letter-spacing:.4px; background:var(--line); color:var(--muted);
+                           padding:.05rem .4rem; border-radius:999px; }
+    .sidebar nav a.active .soon { background:rgba(255,255,255,.22); color:#fff; }
+    .sidebar .who { border-top:1px solid var(--line); margin-top:.5rem; padding-top:.7rem;
+                    font-size:.8rem; color:var(--muted); display:flex; flex-direction:column; gap:.5rem; }
+    .sidebar .who .role { display:inline-block; background:var(--line); color:var(--fg);
+                          border-radius:999px; padding:.05rem .5rem; font-size:.7rem;
+                          text-transform:uppercase; letter-spacing:.4px; }
+    main { flex:1; min-width:0; padding:1.5rem 1.75rem; }
+    body.anon main { padding:1.5rem; }
+
+    /* ---- welcome hero ---- */
+    .hero { display:flex; flex-direction:column; align-items:center; justify-content:center;
+            min-height:calc(100vh - 3rem); text-align:center; }
+    .hero h1 { font-size:2.6rem; font-weight:700; margin:0; letter-spacing:.5px; }
+    .hero h1 span { color:var(--accent); }
+    .hero p { color:var(--muted); margin-top:.6rem; }
+
+    /* ---- shared components ---- */
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+             padding:1.25rem 1.4rem; }
+    h1 { font-size:1.4rem; margin:.2rem 0 1rem; }
+    label { display:block; font-size:.85rem; color:var(--muted); margin:.9rem 0 .3rem; }
+    input[type=text], input[type=password], input[type=number], input[type=file] {
+      width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+      border:1px solid var(--line); border-radius:7px; }
+    .check { display:flex; align-items:center; gap:.5rem; margin-top:1rem; color:var(--fg); }
+    .check input { width:auto; }
+    button { margin-top:1.2rem; padding:.6rem 1.2rem; background:var(--accent); color:#fff;
+             border:0; border-radius:7px; font-weight:600; cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    /* .ghost = a normal solid (blue) button without the top margin, for in-row / inline use */
+    button.ghost { margin:0; }
+    /* .danger = destructive action (delete/remove): maroon, same size as the blue buttons */
+    button.danger { margin:0; background:#9b2226; }
+    button.danger:hover { background:#b3272c; filter:none; }
+    /* .quiet = small utility button (modal close, log out) */
+    button.quiet { margin:0; padding:.3rem .6rem; background:transparent; border:1px solid var(--line);
+                   color:var(--muted); font-weight:500; }
+    button.quiet:hover { color:var(--fg); filter:none; }
+    .err { background:#3a1418; border:1px solid var(--bad); color:#ffb4b4;
+           padding:.6rem .8rem; border-radius:7px; margin-bottom:1rem; }
+    .note { color:var(--muted); font-size:.9rem; }
+    .cards { display:flex; flex-wrap:wrap; gap:.75rem; margin:.5rem 0 1.25rem; }
+    .card { background:#0d1219; border:1px solid var(--line); border-radius:9px;
+            padding:.6rem 1rem; min-width:120px; }
+    .card b { display:block; font-size:1.5rem; }
+    .card small { color:var(--muted); text-transform:uppercase; letter-spacing:.5px; font-size:.7rem; }
+    table { width:100%; border-collapse:collapse; font-size:.86rem; }
+    th, td { text-align:left; padding:.4rem .55rem; border-bottom:1px solid var(--line);
+             vertical-align:middle; }
+    th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--panel); }
+    tr:hover td { background:#141d29; }
+    .num { text-align:right; font-variant-numeric:tabular-nums; }
+    /* FullCalendar dark theming, reusable wherever an embedded calendar is shown (.fccal) */
+    .fccal { --fc-border-color:var(--line); --fc-page-bg-color:transparent; --fc-neutral-bg-color:#0f151d;
+             --fc-list-event-hover-bg-color:#0f151d; --fc-today-bg-color:rgba(90,140,220,.10); color:var(--fg); }
+    .fccal a { color:inherit; text-decoration:none; }
+    .fccal .fc-col-header-cell-cushion, .fccal .fc-daygrid-day-number, .fccal .fc-list-day-text { color:var(--muted); }
+    .fccal .fc-button { text-transform:none; }
+    .badge { border-radius:999px; padding:.05rem .5rem; font-size:.72rem; font-weight:600;
+             text-transform:uppercase; letter-spacing:.3px; white-space:nowrap; }
+    .badge.ok{background:rgba(22,163,74,.18);color:#5fe39b;}
+    .badge.warn{background:rgba(217,119,6,.18);color:#f3c06b;}
+    .badge.bad{background:rgba(220,38,38,.18);color:#ff9a9a;}
+    .badge.stock{background:rgba(8,145,178,.18);color:#67d8ec;}
+    .badge.muted{background:var(--line);color:var(--muted);}
+    .downloads a { display:inline-block; margin-right:.6rem; margin-top:.4rem; padding:.4rem .8rem;
+                   background:#0d1219; border:1px solid var(--line); border-radius:7px; }
+    .flag { color:var(--muted); font-size:.8rem; }
+    #overlay { position:fixed; inset:0; background:rgba(8,12,18,.82); display:none;
+               align-items:center; justify-content:center; flex-direction:column; gap:1rem; z-index:50; }
+    #overlay .spin { width:42px; height:42px; border:4px solid var(--line);
+                     border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body class="{{ 'authed' if current_user else 'anon' }}">
+  {% if current_user %}
+  <aside class="sidebar">
+    <a class="brand" href="/">iLabs <span>PartPilot</span></a>
+    <nav>
+      {% for item in nav %}
+        {% set active = request.url.path == item.url or request.url.path.startswith(item.url ~ '/') %}
+        <a href="{{ item.url }}" class="{{ 'active' if active else '' }}">
+          <span class="ic">{{ item.icon }}</span><span>{{ item.label }}</span>
+          {% if item.placeholder %}<span class="soon">soon</span>{% endif %}
+        </a>
+      {% endfor %}
+    </nav>
+    <div class="who">
+      <div>{{ current_user.username }} &nbsp;<span class="role">{{ current_user.role }}</span></div>
+      <form method="post" action="/logout" style="margin:0">
+        <button class="quiet" type="submit">Log out</button>
+      </form>
+    </div>
+  </aside>
+  {% endif %}
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

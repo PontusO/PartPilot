@@ -53,6 +53,7 @@ class PartSpec(BaseModel):
     value_display: str | None = None
     package_imperial: str | None = None  # EIA chip size, e.g. "0402" (parametric-matched)
     package_note: str | None = None  # free-form package hint for the query, e.g. crystal "3.2 x 2.5 mm"
+    package_code: str | None = None  # 4-digit outline code for crystals, e.g. "3225"
     tolerance: str | None = None
     voltage: str | None = None
     dielectric: str | None = None
@@ -108,7 +109,8 @@ class Status(str, Enum):
     RESOLVED = "resolved"  # confident automatic pick
     REVIEW = "review"  # picked but low confidence -> flag
     IN_STOCK = "in_stock"  # already covered by miniMRP stock; no purchase needed
-    NOT_FOUND = "not_found"  # nothing matched
+    NOT_FOUND = "not_found"  # searched but nothing matched
+    MANUAL = "manual"  # under-specified (no value/MPN) -> can't auto-resolve, needs a human
     DNP = "dnp"
     NON_ORDERABLE = "non_orderable"
     ERROR = "error"
@@ -139,7 +141,7 @@ class ResolvedLine(BaseModel):
 
     @property
     def flagged(self) -> bool:
-        return self.status in (Status.REVIEW, Status.NOT_FOUND, Status.ERROR)
+        return self.status in (Status.REVIEW, Status.NOT_FOUND, Status.MANUAL, Status.ERROR)
 
     def order_qty(self, total_required: int) -> int:
         """How many to actually purchase: the shortfall if stock was checked, else all."""

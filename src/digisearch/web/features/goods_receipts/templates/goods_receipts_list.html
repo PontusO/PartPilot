@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Goods Receipts · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Goods Receipts</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.total }}</b><small>received notes</small></div>
+    <div class="card"><b>{{ "%.0f"|format(summary.units) }}</b><small>units received</small></div>
+  </div>
+  <p class="note">Goods Received Notes are raised when you receive a purchase order.</p>
+
+  <form method="get" action="/goods-receipts" style="display:flex; gap:.6rem; margin:1rem 0; max-width:420px;">
+    <input name="q" type="text" value="{{ q }}" placeholder="GRN no, advice no, supplier, PO…" style="flex:1;">
+    <button type="submit">Search</button>
+    {% if q %}<a href="/goods-receipts" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>PO</th><th>Advice no.</th>
+                 <th>Received by</th><th class="num">Lines</th></tr></thead>
+      <tbody>
+        {% for g in receipts %}
+        <tr>
+          <td><a href="/goods-receipts/{{ g.id }}">{{ g.grn_no or '#' ~ g.id }}</a></td>
+          <td>{{ g.grn_date or '' }}</td>
+          <td>{{ g.supplier_name or '—' }}</td>
+          <td>{{ g.po_no or '' }}</td>
+          <td>{{ g.advice_no or '' }}</td>
+          <td>{{ g.received_by or '' }}</td>
+          <td class="num">{{ g.line_count }}</td>
+        </tr>
+        {% endfor %}
+        {% if not receipts %}<tr><td colspan="7" class="note">No goods receipts{% if q %} match{% endif %} yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

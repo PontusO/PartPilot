@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+  select, textarea, input[type=date] { width:100%; padding:.55rem .65rem; background:#0d1219;
+    color:var(--fg); border:1px solid var(--line); border-radius:7px; font:inherit; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="{{ back_url }}">← Back</a></p>
+  <h1>{{ heading }}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if not customers %}
+  <div class="note" style="margin-bottom:1rem;">No customers yet —
+    <a href="/contacts/new?kind=customer">add a customer in Contacts</a> first.</div>
+  {% endif %}
+
+  <form method="post" action="{{ action }}">
+    <div class="formgrid">
+      <div>
+        <label for="customer_id" class="req">Customer</label>
+        <select id="customer_id" name="customer_id" required autofocus>
+          <option value="">— choose —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}" {{ 'selected' if values.get('customer_id')|string == c.id|string else '' }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if values.get('status') == s else '' }}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="order_ref">Our order ref</label>
+        <input id="order_ref" name="order_ref" type="text" value="{{ values.get('order_ref','') or '' }}" placeholder="e.g. SO-1042">
+      </div>
+      <div>
+        <label for="customer_po">Customer PO no.</label>
+        <input id="customer_po" name="customer_po" type="text" value="{{ values.get('customer_po','') or '' }}">
+      </div>
+      <div>
+        <label for="order_date">Order date</label>
+        <input id="order_date" name="order_date" type="date" value="{{ values.get('order_date','') or '' }}">
+      </div>
+      <div>
+        <label for="required_date">Required date</label>
+        <input id="required_date" name="required_date" type="date" value="{{ values.get('required_date','') or '' }}">
+      </div>
+      <div>
+        <label for="currency">Currency</label>
+        <input id="currency" name="currency" type="text" value="{{ values.get('currency','') or '' }}" placeholder="e.g. SEK">
+      </div>
+      <div>
+        <label for="discount_rate">Order discount %</label>
+        <input id="discount_rate" name="discount_rate" type="number" step="any"
+               value="{{ values.get('discount_rate') if values.get('discount_rate') is not none else '' }}">
+      </div>
+      <div>
+        <label for="delivery_charge">Delivery charge</label>
+        <input id="delivery_charge" name="delivery_charge" type="number" step="any"
+               value="{{ values.get('delivery_charge') if values.get('delivery_charge') is not none else '' }}">
+      </div>
+      <div>
+        <label for="tax_rate">Tax rate %</label>
+        <input id="tax_rate" name="tax_rate" type="number" step="any"
+               value="{{ values.get('tax_rate') if values.get('tax_rate') is not none else '' }}">
+      </div>
+      <div class="full">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
+      </div>
+    </div>
+    <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">{{ submit_label }}</button>
+      <button type="button" onclick="window.location.href='{{ back_url }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem;">
+    <h2 style="margin:0; font-size:1.1rem;">Planning calendar</h2>
+    <a href="/planning" style="font-size:.85rem;">open full planner ↗</a>
+  </div>
+  <p class="note">The current committed work. <b>Click a day</b> to set it as the Required date above.</p>
+  <div id="order-cal" class="fccal"></div>
+</div>
+<script src="/static/fullcalendar/index.global.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    new FullCalendar.Calendar(document.getElementById('order-cal'), {
+      initialView: 'plan2',
+      views: { plan2: { type: 'multiMonth', duration: { months: 2 }, multiMonthMaxColumns: 2,
+                        multiMonthMinWidth: 320, buttonText: '2 months' } },
+      headerToolbar: { left: 'prev,next today', center: 'title', right: 'plan2,dayGridMonth' },
+      firstDay: 1, weekends: false, height: 'auto', editable: false,
+      events: '/planning/events',
+      dateClick: function (info) {                 // pick a date → fill Required date
+        const f = document.getElementById('required_date');
+        if (f) { f.value = info.dateStr; f.focus(); }
+      },
+      eventClick: function (info) { info.jsEvent.preventDefault(); },  // don't navigate away from the form
+    }).render();
+  });
+</script>
+{% endblock %}

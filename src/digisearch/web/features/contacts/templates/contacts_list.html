@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Contacts · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Contacts</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.total }}</b><small>contacts</small></div>
+    <div class="card"><b>{{ summary.suppliers }}</b><small>suppliers</small></div>
+    <div class="card"><b>{{ summary.customers }}</b><small>customers</small></div>
+    <div class="card"><b>{{ summary.other }}</b><small>other</small></div>
+    {% if can_edit %}
+    <a href="/contacts/new{% if kind %}?kind={{ kind }}{% endif %}" style="margin-left:auto;
+       display:flex; align-items:center; justify-content:center; background:var(--accent);
+       color:#fff; font-weight:600; text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Contact</a>
+    {% endif %}
+  </div>
+
+  <form method="get" action="/contacts"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="name, contact, email…">
+    </div>
+    <div>
+      <label for="kind">Kind</label>
+      <select id="kind" name="kind"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for k in kinds %}<option value="{{ k }}" {{ 'selected' if k == kind else '' }}>{{ k }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+    {% if q or kind %}<a href="/contacts" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Name</th><th>Kind</th><th>Contact</th><th>Email</th><th>Phone</th><th>Web</th></tr></thead>
+      <tbody>
+        {% for c in contacts %}
+        <tr>
+          <td>{% if can_edit %}<a href="/contacts/{{ c.id }}/edit">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}{% if c.short_name %} <span class="flag">({{ c.short_name }})</span>{% endif %}</td>
+          <td>
+            <span class="badge {{ 'ok' if c.kind == 'supplier' else ('stock' if c.kind == 'customer' else 'muted') }}">{{ c.kind }}</span>
+            {% if c.kind == 'supplier' %}
+            <a href="/catalog/supplier?name={{ c.name | urlencode }}" target="_blank" rel="noopener"
+               style="margin-left:.4rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.3px;
+                      background:var(--accent); color:#fff; padding:.08rem .5rem; border-radius:999px;
+                      text-decoration:none; white-space:nowrap;">Parts ↗</a>
+            {% endif %}
+          </td>
+          <td>{{ c.contact or '' }}</td>
+          <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}</td>
+          <td>{{ c.phone or '' }}</td>
+          <td>{% if c.website %}<a href="{{ c.website }}" target="_blank" rel="noopener">link</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not contacts %}<tr><td colspan="6" class="note">No contacts{% if q or kind %} match{% endif %}.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

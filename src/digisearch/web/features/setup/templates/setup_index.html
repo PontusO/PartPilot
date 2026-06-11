@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Setup & Tools · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Setup &amp; Tools</h1>
+  <p class="note">Administrative tools. More will appear here over time.</p>
+  <div style="display:flex; flex-direction:column; gap:.6rem; margin-top:1rem;">
+    {% for t in tools %}
+    <a href="{{ t.url }}" style="display:flex; gap:.9rem; align-items:center; text-decoration:none;
+       color:var(--fg); background:#0d1219; border:1px solid var(--line); border-radius:9px;
+       padding:.9rem 1.1rem;">
+      <span style="font-size:1.7rem; line-height:1;">{{ t.icon }}</span>
+      <span><b>{{ t.label }}</b><br><span class="note">{{ t.description }}</span></span>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

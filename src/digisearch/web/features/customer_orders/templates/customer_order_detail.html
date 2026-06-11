@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}{{ o.order_ref or 'Order #' ~ o.id }} · PartPilot{% endblock %}
+{% set badge = {'draft':'muted','confirmed':'stock','shipped':'ok','complete':'ok','cancelled':'bad'} %}
+{% block content %}
+<style>
+  .modal { position:fixed; inset:0; background:rgba(8,12,18,.7); display:none;
+           align-items:flex-start; justify-content:center; z-index:60; padding:2.5rem 1rem; }
+  .modal-card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+                width:880px; max-width:100%; max-height:88vh; display:flex; flex-direction:column;
+                padding:1rem 1.1rem; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.6rem; }
+  .part-list { overflow-y:auto; border:1px solid var(--line); border-radius:8px; margin-top:.7rem; }
+  .part-row { display:flex; flex-direction:column; align-items:flex-start; gap:.1rem; width:100%;
+              text-align:left; background:transparent; border:0; border-bottom:1px solid var(--line);
+              color:var(--fg); padding:.5rem .8rem; cursor:pointer; margin:0; border-radius:0; font:inherit; }
+  .part-row:last-child { border-bottom:0; }
+  .part-row:hover, .part-row.sel { background:var(--accent); color:#fff; }
+  .part-row .pn-line { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; width:100%; }
+  .part-row .pn { font-weight:600; }
+  .part-row .stk { color:var(--muted); font-size:.8rem; white-space:nowrap; }
+  .part-row:hover .stk, .part-row:hover .pv, .part-row.sel .stk, .part-row.sel .pv { color:#e6eefb; }
+  .part-row .pv { color:var(--muted); font-size:.85rem; }
+  .lineinput { width:90px; padding:.3rem .4rem; background:#0d1219; color:var(--fg);
+               border:1px solid var(--line); border-radius:6px; font:inherit; text-align:right; }
+  .meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:.5rem 1.4rem;
+          margin:.4rem 0 0; }
+  .meta div small { color:var(--muted); display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.4px; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/customer-orders">← Customer Orders</a></p>
+  <h1>{{ o.order_ref or 'Order #' ~ o.id }}
+    <span class="badge {{ badge.get(o.status, 'muted') }}">{{ o.status }}</span></h1>
+  <p class="note">{{ o.customer_name or 'No customer' }}{% if o.customer_po %} — their PO {{ o.customer_po }}{% endif %}</p>
+
+  {% if o.status == 'cancelled' and (downstream.work_orders or downstream.purchase_orders) %}
+  <div style="margin:.5rem 0 1rem; background:rgba(217,119,6,.12); border:1px solid var(--warn);
+       border-radius:9px; padding:.7rem .95rem;">
+    <p style="margin:0 0 .4rem;">⚠ This order is cancelled, but the following were raised for it and were
+      <b>not</b> cancelled automatically — review whether they're still needed:</p>
+    {% if downstream.work_orders %}
+    <div style="margin-top:.3rem;"><b>Work orders:</b>
+      {% for w in downstream.work_orders %}<a href="/work-orders/{{ w.id }}" class="badge muted" style="text-decoration:none;">{{ w.wo_no or 'WO#' ~ w.id }} · {{ w.status }}</a> {% endfor %}</div>
+    {% endif %}
+    {% if downstream.purchase_orders %}
+    <div style="margin-top:.3rem;"><b>Purchase orders</b> <span class="note">(include parts for those builds)</span>:
+      {% for p in downstream.purchase_orders %}<a href="/purchase-orders/{{ p.id }}" class="badge muted" style="text-decoration:none;">{{ p.po_no or 'PO#' ~ p.id }} · {{ p.status }}{% if p.supplier_name %} · {{ p.supplier_name }}{% endif %}</a> {% endfor %}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="cards">
+    <div class="card"><b>{{ o.lines|length }}</b><small>lines</small></div>
+    <div class="card"><b>{{ "%.2f"|format(o.subtotal) }}</b><small>goods subtotal</small></div>
+    <div class="card"><b>{{ "%.2f"|format(o.grand_total) }}</b><small>order total{% if o.currency %} ({{ o.currency }}){% endif %}</small></div>
+    {% if can_build %}
+    <a href="/work-orders/from-order/{{ o.id }}" style="margin:0 0 0 auto; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600; border:0;
+       border-radius:9px; padding:0 1.2rem; text-decoration:none; white-space:nowrap;">Check stock &amp; build</a>
+    {% endif %}
+    {% if can_ship %}
+    <a href="/despatch/from-order/{{ o.id }}" style="margin:{{ '0' if can_build else '0 0 0 auto' }}; display:flex;
+       align-items:center; justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+       border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none; white-space:nowrap;">Despatch / ship</a>
+    {% endif %}
+    {% if can_edit %}
+    <a href="/customer-orders/{{ o.id }}/edit" style="margin:0; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600; border:0;
+       border-radius:9px; padding:0 1.2rem; text-decoration:none; white-space:nowrap;">Edit</a>
+    <button type="button" onclick="openAdd()" style="margin:0; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600; border:0;
+       border-radius:9px; padding:0 1.2rem; cursor:pointer; white-space:nowrap;">Add Product</button>
+    {% endif %}
+  </div>
+
+  {% if can_build and build_short_count %}
+  <div style="margin-top:1rem; background:rgba(220,90,90,.12); border:1px solid var(--bad);
+       border-radius:9px; padding:.7rem .95rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <span>⚠ <b>{{ build_short_count }}</b> line(s) can't be filled from stock.</span>
+    <a href="/work-orders/from-order/{{ o.id }}" style="background:var(--accent); color:#fff;
+       font-weight:600; text-decoration:none; border-radius:7px; padding:.4rem 1rem;">Create work orders</a>
+  </div>
+  {% endif %}
+
+  {% set allocated_total = o.lines | sum(attribute='allocated') %}
+  {% if can_allocate %}
+  <div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem; align-items:center;">
+    <form method="post" action="/customer-orders/{{ o.id }}/allocate" style="margin:0"
+          onsubmit="return confirm('Reserve available stock to this order?');">
+      <button type="submit" class="ghost">Allocate stock</button></form>
+    {% if allocated_total %}
+    <form method="post" action="/customer-orders/{{ o.id }}/release" style="margin:0"
+          onsubmit="return confirm('Release all stock reserved to this order?');">
+      <button type="submit" class="ghost">Release allocation</button></form>
+    <span class="note">{{ "%g"|format(allocated_total) }} unit(s) reserved to this order.</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if can_edit and o.status in ('draft', 'confirmed') %}
+  <div style="margin-top:1rem;">
+    <form method="post" action="/customer-orders/{{ o.id }}/cancel" style="margin:0; display:inline"
+          onsubmit="return confirm('Cancel this customer order? Reserved stock will be released.{% if downstream.work_orders %} Note: {{ downstream.work_orders|length }} linked work order(s) will NOT be cancelled — review them afterwards.{% endif %}');">
+      <button type="submit" class="ghost">Cancel order</button></form>
+  </div>
+  {% endif %}
+
+  <div class="meta">
+    <div><small>Order date</small>{{ o.order_date or '—' }}</div>
+    <div><small>Required</small>{{ o.required_date or '—' }}</div>
+    <div><small>Discount</small>{% if o.discount_rate %}{{ "%g"|format(o.discount_rate) }}%{% else %}—{% endif %}</div>
+    <div><small>Delivery</small>{{ "%.2f"|format(o.delivery) }}</div>
+    <div><small>Tax</small>{% if o.tax_rate %}{{ "%g"|format(o.tax_rate) }}%{% else %}—{% endif %}</div>
+  </div>
+  {% if o.notes %}<p class="note" style="margin-top:.6rem;">{{ o.notes }}</p>{% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Order lines</h2>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th class="num">#</th><th>Product</th><th>Value</th><th class="num">Qty</th>
+            <th class="num">Unit price</th><th class="num">Disc %</th><th class="num">Net</th>
+            <th class="num">Line total</th>{% if can_edit %}<th></th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for ln in o.lines %}
+        <tr>
+          <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
+          <td>
+            {% if ln.part_id %}
+              <a href="/{{ 'assemblies' if ln.kind == 'ASSY' else 'catalog' }}/{{ ln.part_id }}">{{ ln.part_no }}</a>
+              {% if ln.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+              {% for w in wos_by_line.get(ln.id, []) %}<a href="/work-orders/{{ w.id }}" class="badge muted" style="text-decoration:none;" title="work order">{{ w.wo_no or 'WO#' ~ w.id }} · {{ w.status }}</a>{% endfor %}
+              {% if ln.allocated %}<span class="badge ok" title="reserved stock">{{ "%g"|format(ln.allocated) }} alloc</span>{% endif %}
+            {% else %}<span class="note">(deleted part)</span>{% endif %}
+          </td>
+          <td>{{ ln.value or '' }}</td>
+          {% if can_edit %}
+          <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="qty" type="number" step="any" min="0" value="{{ '%g'|format(ln.ordered_qty) }}"></td>
+          <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="unit_price" type="number" step="any" value="{{ ('%g'|format(ln.unit_price)) if ln.unit_price is not none else '' }}"></td>
+          <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="discount" type="number" step="any" style="width:64px" value="{{ ('%g'|format(ln.discount_percent)) if ln.discount_percent is not none else '' }}"></td>
+          {% else %}
+          <td class="num">{{ "%g"|format(ln.ordered_qty) }}</td>
+          <td class="num">{% if ln.unit_price is not none %}{{ "%.4f"|format(ln.unit_price) }}{% endif %}</td>
+          <td class="num">{% if ln.discount_percent %}{{ "%g"|format(ln.discount_percent) }}{% endif %}</td>
+          {% endif %}
+          <td class="num">{{ "%.4f"|format(ln.net_price) }}</td>
+          <td class="num">{{ "%.2f"|format(ln.line_total) }}</td>
+          {% if can_edit %}
+          <td class="num" style="white-space:nowrap;">
+            <button form="lf{{ ln.id }}" type="submit" class="ghost" style="margin:0" title="Save line">Save</button>
+            <button form="ld{{ ln.id }}" type="submit" class="danger" title="Remove line">Remove</button>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+        {% if not o.lines %}<tr><td colspan="{{ 9 if can_edit else 8 }}" class="note">No lines yet — add a product.</td></tr>{% endif %}
+      </tbody>
+      {% if o.lines %}
+      <tfoot>
+        <tr><td colspan="{{ 7 if can_edit else 6 }}" class="num">Goods subtotal</td>
+            <td class="num">{{ "%.2f"|format(o.subtotal) }}</td>{% if can_edit %}<td></td>{% endif %}</tr>
+        {% if o.discount_amount %}
+        <tr><td colspan="{{ 7 if can_edit else 6 }}" class="num">Order discount</td>
+            <td class="num">−{{ "%.2f"|format(o.discount_amount) }}</td>{% if can_edit %}<td></td>{% endif %}</tr>
+        {% endif %}
+        {% if o.delivery %}
+        <tr><td colspan="{{ 7 if can_edit else 6 }}" class="num">Delivery</td>
+            <td class="num">{{ "%.2f"|format(o.delivery) }}</td>{% if can_edit %}<td></td>{% endif %}</tr>
+        {% endif %}
+        {% if o.tax %}
+        <tr><td colspan="{{ 7 if can_edit else 6 }}" class="num">Tax</td>
+            <td class="num">{{ "%.2f"|format(o.tax) }}</td>{% if can_edit %}<td></td>{% endif %}</tr>
+        {% endif %}
+        <tr><td colspan="{{ 7 if can_edit else 6 }}" class="num" style="font-weight:600;">Order total</td>
+            <td class="num" style="font-weight:600;">{{ "%.2f"|format(o.grand_total) }}</td>{% if can_edit %}<td></td>{% endif %}</tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+
+  {% if despatches %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Despatches</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Note</th><th>Date</th><th>Status</th><th>Invoice</th></tr></thead>
+      <tbody>
+        {% for d in despatches %}
+        <tr>
+          <td><a href="/despatch/{{ d.id }}">{{ d.despatch_no or 'DN#' ~ d.id }}</a></td>
+          <td>{{ d.despatch_date or '' }}</td>
+          <td><span class="badge {{ 'ok' if d.status == 'invoiced' else 'stock' }}">{{ d.status }}</span></td>
+          <td>{{ d.invoice_no or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+{# Per-line update/delete forms, referenced by the inputs/buttons above via the `form` attribute. #}
+{% for ln in o.lines %}
+<form id="lf{{ ln.id }}" method="post" action="/customer-orders/{{ o.id }}/lines/{{ ln.id }}/update"></form>
+<form id="ld{{ ln.id }}" method="post" action="/customer-orders/{{ o.id }}/lines/{{ ln.id }}/delete"
+      onsubmit="return confirm('Remove this line?');"></form>
+{% endfor %}
+
+<div id="addModal" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b>Add product to {{ o.order_ref or 'order #' ~ o.id }}</b>
+      <button type="button" class="quiet" onclick="closeAdd()">✕</button>
+    </div>
+    <form method="post" action="/customer-orders/{{ o.id }}/lines/add" id="addForm"
+          onkeydown="if(event.key==='Enter' && event.target.tagName==='INPUT') event.preventDefault();">
+      <input type="hidden" name="part_id" id="sel_part_id">
+      <div style="display:flex; gap:.6rem; align-items:flex-end; flex-wrap:wrap;">
+        <div style="flex:1; min-width:170px;">
+          <label for="sel_part_label">Selected product</label>
+          <input id="sel_part_label" type="text" readonly placeholder="click a product below…"
+                 style="width:100%; background:#0d1219; color:var(--fg); border:1px solid var(--line);
+                        border-radius:7px; padding:.55rem .65rem; font:inherit;">
+        </div>
+        <div style="width:78px;">
+          <label for="qty">Qty</label>
+          <input id="qty" name="qty" type="number" step="any" min="1" value="1">
+        </div>
+        <div style="width:120px;">
+          <label for="unit_price">Unit price</label>
+          <input id="unit_price" name="unit_price" type="number" step="any">
+        </div>
+        <div style="width:80px;">
+          <label for="discount">Disc %</label>
+          <input id="discount" name="discount" type="number" step="any">
+        </div>
+        <button type="submit" id="addBtn" disabled>Add to order</button>
+      </div>
+      <label for="partsearch" style="margin-top:.5rem;">Find a product, then click it to select — its price fills in automatically</label>
+      <input id="partsearch" type="text" autocomplete="off" placeholder="Filter by part no or value…"
+             oninput="filterParts()">
+      <div class="part-list" style="min-height:40vh; max-height:60vh;">
+        {% for p in parts %}
+        <button type="button" class="part-row" onclick="selectPart(this)"
+                data-id="{{ p.id }}" data-pn="{{ p.part_no }}" data-assy="{{ '1' if p.kind == 'ASSY' else '' }}"
+                data-price="{{ '%.4f'|format(p.price) if p.price is not none else '' }}"
+                data-s="{{ (p.part_no ~ ' ' ~ (p.value or '') ~ ' ' ~ p.kind) | lower }}">
+          <span class="pn-line">
+            <span class="pn">{{ p.part_no }}{% if p.kind == 'ASSY' %} <span class="badge stock">ASSY</span>{% endif %}</span>
+            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock{% if p.price is not none %} · {{ 'build cost' if p.kind == 'ASSY' else 'price' }} {{ "%.4f"|format(p.price) }}{% endif %}</span>
+          </span>
+          {% if p.value %}<span class="pv">{{ p.value }}</span>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+  function openAdd() {
+    document.getElementById('addModal').style.display = 'flex';
+    document.getElementById('sel_part_id').value = '';
+    document.getElementById('sel_part_label').value = '';
+    document.getElementById('unit_price').value = '';
+    document.getElementById('discount').value = '';
+    document.getElementById('qty').value = '1';
+    document.getElementById('addBtn').disabled = true;
+    document.querySelectorAll('#addModal .part-row').forEach(b => b.classList.remove('sel'));
+    const s = document.getElementById('partsearch'); s.value = ''; filterParts(); s.focus();
+  }
+  function closeAdd() { document.getElementById('addModal').style.display = 'none'; }
+  function selectPart(el) {
+    document.getElementById('sel_part_id').value = el.dataset.id;
+    document.getElementById('sel_part_label').value =
+      el.dataset.pn + (el.dataset.assy ? '  (assembly)' : '');
+    document.getElementById('unit_price').value = el.dataset.price;  // calculated price filled in
+    document.getElementById('addBtn').disabled = false;
+    document.querySelectorAll('#addModal .part-row').forEach(b => b.classList.remove('sel'));
+    el.classList.add('sel');
+    document.getElementById('qty').focus();
+  }
+  function filterParts() {
+    const q = document.getElementById('partsearch').value.toLowerCase();
+    document.querySelectorAll('#addModal .part-row').forEach(b => {
+      b.style.display = b.dataset.s.includes(q) ? '' : 'none';
+    });
+  }
+  document.getElementById('addModal').addEventListener('click', e => {
+    if (e.target.id === 'addModal') closeAdd();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAdd(); });
+</script>
+{% endif %}
+{% endblock %}

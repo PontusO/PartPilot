@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Planning · PartPilot{% endblock %}
+{% block content %}
+<style>
+  /* Theme FullCalendar for the dark app shell. */
+  #calendar { --fc-border-color: var(--line); --fc-page-bg-color: transparent;
+              --fc-neutral-bg-color: #0f151d; --fc-list-event-hover-bg-color: #0f151d;
+              --fc-today-bg-color: rgba(90,140,220,.10); color: var(--fg); }
+  #calendar a { color: inherit; text-decoration: none; }
+  .fc .fc-col-header-cell-cushion, .fc .fc-daygrid-day-number, .fc .fc-list-day-text { color: var(--muted); }
+  .fc .fc-button { text-transform: none; }
+  .legend { display:flex; gap:1.1rem; flex-wrap:wrap; margin:.4rem 0 1rem; color:var(--muted); font-size:.85rem; }
+  .legend span::before { content:"■ "; }
+</style>
+
+<div class="panel">
+  <h1>Planning calendar</h1>
+  <p class="note">Each work order is a <b>purple bar</b> ending on its <b>planned due date</b> — drag the
+    bar to move the whole build, resize it to change the run length. The <b>order-materials-by</b> marker
+    can be dragged on its own (e.g. to start sourcing a hard-to-find part earlier). The customer's
+    requested date is kept on the order, not shown here.</p>
+  <div class="legend">
+    <span style="color:#8b5cf6;">work order (bar ends on the due date)</span>
+    <span style="color:#22c55e;">finished</span>
+    <span style="color:#0ea5e9;">order materials by</span>
+    <span style="color:#ef4444;">⚠ purchasing overdue</span>
+  </div>
+  <div id="calendar"></div>
+</div>
+
+<script src="/static/fullcalendar/index.global.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const editable = {{ 'true' if can_edit else 'false' }};
+    const cal = new FullCalendar.Calendar(document.getElementById('calendar'), {
+      initialView: 'plan2',
+      views: {
+        plan2: { type: 'multiMonth', duration: { months: 2 }, multiMonthMaxColumns: 2,
+                 multiMonthMinWidth: 340, buttonText: '2 months' },
+      },
+      headerToolbar: { left: 'prev,next today', center: 'title',
+                       right: 'plan2,dayGridMonth,timeGridWeek,listMonth' },
+      firstDay: 1, weekNumbers: true, height: 'auto', editable: editable,
+      weekends: false,                        // Mon–Fri shop: don't show/plan Sat & Sun
+      events: '/planning/events',
+      eventDrop: function (info) { save(info, false); },
+      eventResize: function (info) { save(info, true); },
+    });
+    cal.render();
+
+    function save(info, isResize) {
+      const ev = info.event;
+      const t = ev.extendedProps ? ev.extendedProps.type : null;
+      const body = new URLSearchParams();
+      body.set('wo_id', ev.extendedProps.wo_id);
+      if (t === 'wo') {                       // build bar → move the whole build
+        body.set('start', ev.startStr);
+        if (isResize && ev.endStr) body.set('end', ev.endStr);
+      } else if (t === 'buyby') {             // purchasing marker → its date only
+        body.set('purchase', ev.startStr);
+      } else { info.revert(); return; }
+      fetch('/planning/reschedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body,
+      }).then(function (r) { if (!r.ok) info.revert(); else cal.refetchEvents(); })
+        .catch(function () { info.revert(); });
+    }
+  });
+</script>
+{% endblock %}

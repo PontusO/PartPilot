@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Review import · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/assemblies/{{ a.id }}">← {{ a.part_no }}</a></p>
+  <h1>Import BOM into {{ a.part_no }}
+    <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
+  {% for w in warnings %}<div class="err">{{ w }}</div>{% endfor %}
+  <p class="note">Lines <b>already in inventory</b> are linked automatically. Tick the parts you
+    want to <b>create in inventory</b> — ticked lines are added to the assembly's BOM. Unticked
+    new/unresolved lines are left out.</p>
+
+  <form method="post" action="/assemblies/{{ a.id }}/import/apply">
+    <input type="hidden" name="job_id" value="{{ job_id }}">
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Add?</th><th>RefDes</th><th class="num">Qty</th><th>BOM value</th>
+              <th>Resolved part</th><th>Status</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          {% for it in plan %}
+          <tr>
+            <td class="num">
+              {% if it.status == 'in_inventory' %}
+                <span class="badge stock" title="already in inventory — will be linked">✓</span>
+              {% elif it.status in ('new', 'unresolved') %}
+                <input type="checkbox" name="accept" value="{{ loop.index0 }}"
+                       {{ 'checked' if it.status == 'new' else '' }}>
+              {% endif %}
+            </td>
+            <td>{{ it.refdes }}</td>
+            <td class="num">{{ it.qty }}</td>
+            <td>{{ it.orig }}</td>
+            <td>
+              {% if it.product_url %}<a href="{{ it.product_url }}" target="_blank" rel="noopener">{{ it.part_no or 'view' }}</a>
+              {% else %}{{ it.part_no or '' }}{% endif %}
+              {% if it.supplier_label %}<span class="flag">· {{ it.supplier_label }}</span>{% endif %}
+            </td>
+            <td>
+              {% if it.status == 'in_inventory' %}<span class="badge ok">in inventory</span>
+              {% elif it.status == 'new' %}<span class="badge warn">new</span>
+              {% elif it.status == 'unresolved' %}<span class="badge bad">unresolved</span>
+              {% elif it.status == 'manual' %}<span class="badge bad">manual</span>
+              {% else %}<span class="badge muted">skip</span>{% endif %}
+            </td>
+            <td class="flag">{{ it.note }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:1.2rem; display:flex; gap:.8rem;">
+      <button type="submit">Add to assembly</button>
+      <button type="button" onclick="window.location.href='/assemblies/{{ a.id }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

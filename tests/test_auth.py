@@ -5,11 +5,11 @@ from digisearch.web.auth import UserStore
 
 def test_create_and_verify(tmp_path):
     store = UserStore(tmp_path / "u.db")
-    user = store.create_user("alice", "s3cret", role="quoter")
-    assert user.username == "alice" and user.role == "quoter"
+    user = store.create_user("alice", "s3cret", role="purchasing")
+    assert user.username == "alice" and user.role == "purchasing"
 
     ok = store.verify("alice", "s3cret")
-    assert ok is not None and ok.id == user.id and ok.role == "quoter"
+    assert ok is not None and ok.id == user.id and ok.role == "purchasing"
 
 
 def test_wrong_password_and_unknown_user(tmp_path):

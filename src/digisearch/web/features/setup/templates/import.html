@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Import from miniMRP · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Import from miniMRP</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  {% if result %}
+    {% if source %}<p class="note">Imported from <code>{{ source }}</code>.</p>{% endif %}
+    <div class="cards" style="margin-top:.5rem;">
+      {% for k, v in result.items() %}
+        <div class="card"><b>{{ v }}</b><small>{{ k.replace('_',' ') }}</small></div>
+      {% endfor %}
+    </div>
+    <p class="note">Import complete.</p>
+    <form action="/setup/import" method="get" style="margin:0">
+      <button type="submit">Back</button>
+    </form>
+  {% else %}
+    <div style="background:#33260f; border:1px solid var(--warn); color:#f3c06b;
+                padding:.6rem .8rem; border-radius:7px; margin:1rem 0;">
+      This imports / re-syncs <b>parts, suppliers, stock and the assembly BOM</b> from miniMRP.
+      It upserts by miniMRP id, so parts you've <b>edited in PartPilot may be overwritten</b>.
+    </div>
+
+    <form method="post" action="/setup/import" enctype="multipart/form-data" onsubmit="showOverlay()">
+      <label for="dbfile">Choose a miniMRP database file</label>
+      <input id="dbfile" name="dbfile" type="file">
+      <p class="note" style="margin-top:.5rem;">
+        Leave empty to use the configured default:
+        <code>{{ path or '(not configured)' }}</code>
+      </p>
+      <button type="submit">Run import</button>
+    </form>
+  {% endif %}
+</div>
+
+<div id="overlay">
+  <div class="spin"></div>
+  <div>Importing from miniMRP… this can take a moment.</div>
+</div>
+<script>function showOverlay(){ document.getElementById('overlay').style.display = 'flex'; }</script>
+{% endblock %}

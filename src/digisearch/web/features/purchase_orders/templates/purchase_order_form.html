@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}New Purchase Order · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+  select, textarea, input[type=date], input[type=text] { width:100%; padding:.55rem .65rem;
+    background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px; font:inherit; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/purchase-orders">← Purchase Orders</a></p>
+  <h1>New purchase order</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if not suppliers %}
+  <div class="note" style="margin-bottom:1rem;">No suppliers yet — add a supplier on a part, or
+    import from miniMRP.</div>
+  {% endif %}
+
+  <form method="post" action="/purchase-orders/new">
+    <div class="formgrid">
+      <div>
+        <label for="supplier_id" class="req">Supplier</label>
+        <select id="supplier_id" name="supplier_id" required autofocus>
+          <option value="">— choose —</option>
+          {% for s in suppliers %}
+          <option value="{{ s.id }}" {{ 'selected' if values.get('supplier_id')|string == s.id|string else '' }}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="po_no">PO number</label>
+        <input id="po_no" name="po_no" type="text" value="{{ values.get('po_no','') or '' }}" placeholder="auto if blank">
+      </div>
+      <div>
+        <label for="order_date">Order date</label>
+        <input id="order_date" name="order_date" type="date" value="{{ values.get('order_date','') or '' }}">
+      </div>
+      <div>
+        <label for="required_date">Required date</label>
+        <input id="required_date" name="required_date" type="date" value="{{ values.get('required_date','') or '' }}">
+      </div>
+      <div>
+        <label for="currency">Currency</label>
+        <input id="currency" name="currency" type="text" value="{{ values.get('currency','') or '' }}" placeholder="e.g. SEK">
+      </div>
+      <div class="full">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
+      </div>
+    </div>
+    <p class="note" style="margin-top:.8rem;">Add parts to the order on the next page.</p>
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">Create purchase order</button>
+      <button type="button" onclick="window.location.href='/purchase-orders'">Cancel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

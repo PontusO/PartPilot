@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}New Work Order · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+  select, textarea, input[type=date] { width:100%; padding:.55rem .65rem; background:#0d1219;
+    color:var(--fg); border:1px solid var(--line); border-radius:7px; font:inherit; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/work-orders">← Work Orders</a></p>
+  <h1>New work order</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if not assemblies %}
+  <div class="note" style="margin-bottom:1rem;">No buildable assemblies — an assembly needs a BOM.
+    <a href="/assemblies">Add components to an assembly</a> first.</div>
+  {% endif %}
+
+  <form method="post" action="/work-orders/new">
+    <div class="formgrid">
+      <div>
+        <label for="assembly_id" class="req">Assembly to build</label>
+        <select id="assembly_id" name="assembly_id" required autofocus>
+          <option value="">— choose —</option>
+          {% for a in assemblies %}
+          <option value="{{ a.id }}" data-build="{{ a.default_build_days if a.default_build_days is not none else '' }}"
+                  {{ 'selected' if values.get('assembly_id')|string == a.id|string else '' }}>{{ a.part_no }}{% if a.value %} — {{ a.value }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="qty" class="req">Build quantity</label>
+        <input id="qty" name="qty" type="number" step="any" min="1"
+               value="{{ values.get('qty', 1) }}" required
+               style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                      border:1px solid var(--line); border-radius:7px; font:inherit;">
+      </div>
+      <div>
+        <label for="wo_no">Work order no.</label>
+        <input id="wo_no" name="wo_no" type="text" value="{{ values.get('wo_no','') or '' }}"
+               placeholder="e.g. WO-1042"
+               style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                      border:1px solid var(--line); border-radius:7px; font:inherit;">
+      </div>
+      {% if locations %}
+      <div>
+        <label for="location_id">Location</label>
+        <select id="location_id" name="location_id">
+          {% for l in locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div>
+        <label for="due_date">Planned finish (due date)</label>
+        <input id="due_date" name="due_date" type="date" value="{{ values.get('due_date','') or '' }}">
+      </div>
+      <div>
+        <label for="duration_days">Build days (working)</label>
+        <input id="duration_days" name="duration_days" type="number" min="0" step="1"
+               value="{{ values.get('duration_days') if values.get('duration_days') is not none else 5 }}"
+               placeholder="default 5, or the assembly's"
+               style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                      border:1px solid var(--line); border-radius:7px; font:inherit;">
+      </div>
+      <div class="full">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
+      </div>
+    </div>
+    <p class="note" style="margin-top:.8rem;">Set a due date and the build is back-scheduled (working
+      days) onto the planning calendar; build days default from the assembly. The BOM is exploded and
+      snapshotted onto the work order when you create it.</p>
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">Create work order</button>
+      <button type="button" onclick="window.location.href='/work-orders'">Cancel</button>
+    </div>
+  </form>
+</div>
+<script>
+  // When an assembly has its own default build time, use it (else the field keeps the 5-day default).
+  document.getElementById('assembly_id').addEventListener('change', function () {
+    const d = this.options[this.selectedIndex].dataset.build;
+    if (d) document.getElementById('duration_days').value = d;
+  });
+</script>
+{% endblock %}

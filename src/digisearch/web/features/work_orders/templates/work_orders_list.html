@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Work Orders · PartPilot{% endblock %}
+{% set badge = {'allocated':'stock','issued':'muted','finished':'ok','cancelled':'bad'} %}
+{% block content %}
+<div class="panel">
+  <h1>Work Orders</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.total }}</b><small>work orders</small></div>
+    <div class="card"><b>{{ summary.allocated }}</b><small>allocated</small></div>
+    <div class="card"><b>{{ summary.issued }}</b><small>in WIP</small></div>
+    <div class="card"><b>{{ summary.finished }}</b><small>finished</small></div>
+    {% if can_edit %}
+    <a href="/work-orders/new" style="margin-left:auto; display:flex; align-items:center;
+       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Work Order</a>
+    {% endif %}
+  </div>
+
+  <form method="get" action="/work-orders"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="WO number, assembly…">
+    </div>
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit">Filter</button>
+    {% if q or status %}<a href="/work-orders" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>WO</th><th>Assembly</th><th class="num">Qty</th><th>Status</th>
+            <th>Build date</th><th class="num">Components</th></tr>
+      </thead>
+      <tbody>
+        {% for w in work_orders %}
+        <tr>
+          <td><a href="/work-orders/{{ w.id }}">{{ w.wo_no or '#' ~ w.id }}</a></td>
+          <td>{{ w.assembly_part_no }}{% if w.assembly_value %} <span class="flag">{{ w.assembly_value }}</span>{% endif %}</td>
+          <td class="num">{{ "%g"|format(w.qty) }}</td>
+          <td><span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span></td>
+          <td>{{ w.build_date or '' }}</td>
+          <td class="num">{{ w.line_count }}</td>
+        </tr>
+        {% endfor %}
+        {% if not work_orders %}<tr><td colspan="6" class="note">No work orders{% if q or status %} match{% endif %} yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
