@@ -77,4 +77,36 @@ MIGRATIONS = [
         WHERE order_ref IS NULL OR order_ref = '';
         """,
     ),
+    Migration(
+        version=4,
+        name="archived order acknowledgements",
+        sql="""
+        -- The order-acknowledgement PDF sent to the customer is generated and frozen when the order
+        -- is acknowledged, and stored here as an immutable record for ISO retention (it travels
+        -- inside the backed-up DB). Re-acknowledging after an amendment appends a new version; all
+        -- versions are kept. Mirrors purchase_orders' po_documents.
+        CREATE TABLE co_documents (
+            id         INTEGER PRIMARY KEY,
+            order_id   INTEGER NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,
+            kind       TEXT NOT NULL,        -- pdf
+            filename   TEXT NOT NULL,
+            content    BLOB NOT NULL,
+            byte_size  INTEGER,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX ix_codoc_order ON co_documents(order_id);
+        """,
+    ),
+    Migration(
+        version=5,
+        name="order delivery/invoice addresses",
+        sql="""
+        -- Which of the customer's structured addresses this order ships to / invoices to. Default
+        -- from the customer's defaults at create time; overridable per order. Nullable → falls back
+        -- to the customer's base address on documents.
+        ALTER TABLE customer_orders ADD COLUMN delivery_address_id INTEGER REFERENCES contact_addresses(id);
+        ALTER TABLE customer_orders ADD COLUMN invoice_address_id  INTEGER REFERENCES contact_addresses(id);
+        """,
+    ),
 ]

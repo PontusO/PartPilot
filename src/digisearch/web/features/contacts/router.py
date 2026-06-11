@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ...core.deps import require_role, require_user
 from . import repo
@@ -29,9 +29,20 @@ def _parse_contact(form) -> dict:
         "name": (form.get("name") or "").strip(),
         "short_name": s("short_name"), "contact": s("contact"), "email": s("email"),
         "phone": s("phone"), "phone2": s("phone2"), "fax": s("fax"),
-        "address": s("address"), "postcode": s("postcode"), "website": s("website"),
+        "address": s("address"), "postcode": s("postcode"), "country": s("country"),
+        "website": s("website"),
         "currency": s("currency"), "discount": _num(form.get("discount")), "notes": s("notes"),
     }
+
+
+def _parse_address(form) -> dict:
+    def s(name):
+        return (form.get(name) or "").strip() or None
+    data = {f: s(f) for f in ("label", "company", "contact", "line1", "line2", "city",
+                              "region", "postcode", "country", "phone", "email")}
+    for flag in ("is_delivery", "is_invoice", "is_default_delivery", "is_default_invoice"):
+        data[flag] = 1 if form.get(flag) is not None else 0
+    return data
 
 
 def _render_form(request, *, action, heading, submit_label, back_url, values, error=None, status=200):
@@ -81,8 +92,36 @@ async def create(request: Request):
             submit_label="Create contact", back_url="/contacts", values=data,
             error="Company name is required.", status=400,
         )
-    repo.create_contact(request.app.state.database, data)
-    return RedirectResponse("/contacts", status_code=303)
+    new_id = repo.create_contact(request.app.state.database, data)
+    return RedirectResponse(f"/contacts/{new_id}", status_code=303)
+
+
+@router.get("/{contact_id}", response_class=HTMLResponse)
+def contact_detail(request: Request, contact_id: int):
+    user = require_user(request)
+    db = request.app.state.database
+    c = repo.get_contact(db, contact_id)
+    if c is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Contact not found."}, status_code=404)
+    return request.app.state.templates.TemplateResponse(
+        request, "contact_detail.html",
+        {"c": c, "addresses": repo.list_addresses(db, contact_id),
+         "can_edit": user.role in CONTACTS_WRITE_ROLES},
+    )
+
+
+@router.get("/{contact_id}/addresses.json")
+def addresses_json(request: Request, contact_id: int):
+    require_user(request)
+    rows = repo.list_addresses(request.app.state.database, contact_id)
+    return JSONResponse([
+        {"id": r["id"], "label": r["label"], "company": r["company"],
+         "is_delivery": r["is_delivery"], "is_invoice": r["is_invoice"],
+         "is_default_delivery": r["is_default_delivery"],
+         "is_default_invoice": r["is_default_invoice"]}
+        for r in rows
+    ])
 
 
 @router.get("/{contact_id}/edit", response_class=HTMLResponse)
@@ -94,7 +133,7 @@ def edit_form(request: Request, contact_id: int):
             request, "error.html", {"message": "Contact not found."}, status_code=404)
     return _render_form(
         request, action=f"/contacts/{contact_id}/edit", heading=f"Edit — {c['name']}",
-        submit_label="Save changes", back_url="/contacts", values=c,
+        submit_label="Save changes", back_url=f"/contacts/{contact_id}", values=c,
     )
 
 
@@ -110,8 +149,43 @@ async def update(request: Request, contact_id: int):
     if not data["name"]:
         return _render_form(
             request, action=f"/contacts/{contact_id}/edit", heading="Edit contact",
-            submit_label="Save changes", back_url="/contacts", values=data,
+            submit_label="Save changes", back_url=f"/contacts/{contact_id}", values=data,
             error="Company name is required.", status=400,
         )
     repo.update_contact(db, contact_id, data)
-    return RedirectResponse("/contacts", status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
+
+
+# ---- structured addresses (delivery / invoice) ----
+
+@router.post("/{contact_id}/addresses/add")
+async def add_address(request: Request, contact_id: int):
+    require_role(request, CONTACTS_WRITE_ROLES)
+    form = await request.form()
+    repo.create_address(request.app.state.database, contact_id, _parse_address(form))
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
+
+
+@router.post("/{contact_id}/addresses/{address_id}/edit")
+async def edit_address(request: Request, contact_id: int, address_id: int):
+    require_role(request, CONTACTS_WRITE_ROLES)
+    form = await request.form()
+    repo.update_address(request.app.state.database, address_id, _parse_address(form))
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
+
+
+@router.post("/{contact_id}/addresses/{address_id}/delete")
+def delete_address(request: Request, contact_id: int, address_id: int):
+    require_role(request, CONTACTS_WRITE_ROLES)
+    repo.delete_address(request.app.state.database, address_id)
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
+
+
+@router.post("/{contact_id}/addresses/{address_id}/default")
+async def default_address(request: Request, contact_id: int, address_id: int):
+    require_role(request, CONTACTS_WRITE_ROLES)
+    form = await request.form()
+    which = (form.get("which") or "").strip()
+    if which in ("delivery", "invoice"):
+        repo.set_default_address(request.app.state.database, address_id, which)
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)

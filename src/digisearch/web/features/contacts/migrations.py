@@ -41,4 +41,39 @@ MIGRATIONS = [
         CREATE INDEX ix_contacts_name ON contacts(name);
         """,
     ),
+    Migration(
+        version=2,
+        name="structured delivery/invoice addresses",
+        sql="""
+        -- A contact's registered/general address stays on contacts (freeform address + postcode,
+        -- now plus a country). Customers that ship/invoice to distinct places (often under different
+        -- trading names, sometimes several sites) get structured rows here, each tagged for delivery
+        -- and/or invoice use with one default of each. Added in PartPilot and never touched by a
+        -- miniMRP re-import (which only upserts the base contact).
+        ALTER TABLE contacts ADD COLUMN country TEXT;
+
+        CREATE TABLE contact_addresses (
+            id                  INTEGER PRIMARY KEY,
+            contact_id          INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            label               TEXT,        -- "Head office", "Malmo plant"
+            company             TEXT,        -- trading name for this address (may differ from contact.name)
+            contact             TEXT,        -- person at this site
+            line1               TEXT,
+            line2               TEXT,
+            city                TEXT,
+            region              TEXT,        -- state / province / county
+            postcode            TEXT,
+            country             TEXT,
+            phone               TEXT,
+            email               TEXT,
+            is_delivery         INTEGER NOT NULL DEFAULT 0,
+            is_invoice          INTEGER NOT NULL DEFAULT 0,
+            is_default_delivery INTEGER NOT NULL DEFAULT 0,
+            is_default_invoice  INTEGER NOT NULL DEFAULT 0,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX ix_ctaddr_contact ON contact_addresses(contact_id);
+        """,
+    ),
 ]

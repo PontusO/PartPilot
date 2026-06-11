@@ -103,7 +103,16 @@ def order_header(db: Database, order_id: int) -> dict | None:
             "FROM customer_orders o LEFT JOIN contacts c ON c.id = o.customer_id WHERE o.id = ?",
             (order_id,),
         ).fetchone()
-    return dict(row) if row else None
+        if row is None:
+            return None
+        header = dict(row)
+        da = conn.execute(
+            """SELECT a.* FROM contact_addresses a
+               JOIN customer_orders o ON o.delivery_address_id = a.id WHERE o.id = ?""",
+            (order_id,),
+        ).fetchone()
+    header["delivery_address"] = dict(da) if da else None
+    return header
 
 
 def shippable_lines(db: Database, order_id: int) -> list[dict]:

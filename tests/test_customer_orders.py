@@ -194,3 +194,82 @@ def test_customers_picker_lists_only_customers(db):
     conrepo.create_contact(db, {"kind": "supplier", "name": "Digikey"})
     names = [c["name"] for c in repo.customers(db)]
     assert names == ["Acme AB"]
+
+
+def test_acknowledge_stores_pdf_and_confirms(db):
+    cust, part = _seed(db)
+    oid = repo.create_order(db, {"customer_id": cust})        # draft
+    repo.add_line(db, oid, part, qty=3, unit_price=10.0, discount=None)
+
+    doc_id = repo.acknowledge_order(db, oid, user="anna")
+    assert isinstance(doc_id, int)
+    assert repo.get_order(db, oid)["status"] == "confirmed"   # draft advanced
+
+    doc = repo.get_document(db, oid, "pdf")
+    assert doc["content"][:5] == b"%PDF-" and doc["filename"] == f"OA-CO-{oid:05d}.pdf"
+    docs = repo.documents_for_order(db, oid)
+    assert len(docs) == 1 and docs[0]["created_by"] == "anna" and docs[0]["byte_size"] > 0
+
+    # re-issuing after an amendment appends a new immutable version; both are kept
+    repo.update_line(db, oid, repo.get_order(db, oid)["lines"][0]["id"], qty=5,
+                     unit_price=10.0, discount=None)
+    repo.acknowledge_order(db, oid, user="anna")
+    after = repo.documents_for_order(db, oid)
+    assert len(after) == 2 and after[0]["id"] > after[1]["id"]   # newest first
+    assert repo.get_order(db, oid)["status"] == "confirmed"      # already confirmed, unchanged
+
+
+def test_order_defaults_and_resolves_addresses(db):
+    from digisearch.web.features.contacts import repo as conrepo
+
+    cust, _ = _seed(db)
+    inv = conrepo.create_address(db, cust, {"company": "Acme Billing AB", "line1": "1 Rd",
+                                            "is_invoice": 1, "is_default_invoice": 1})
+    dlv = conrepo.create_address(db, cust, {"line1": "2 St", "city": "Malmo",
+                                            "is_delivery": 1, "is_default_delivery": 1})
+
+    o = repo.get_order(db, repo.create_order(db, {"customer_id": cust}))
+    assert o["invoice_address_id"] == inv and o["delivery_address_id"] == dlv  # defaulted from customer
+    assert o["invoice_address"]["company"] == "Acme Billing AB"
+    assert o["delivery_address"]["city"] == "Malmo"
+
+    # explicit override at create time
+    o2 = repo.get_order(db, repo.create_order(db, {"customer_id": cust, "invoice_address_id": dlv}))
+    assert o2["invoice_address_id"] == dlv
+
+    # update can change/clear the chosen addresses
+    repo.update_order(db, o["id"], {"customer_id": cust, "status": "draft",
+                                    "invoice_address_id": inv, "delivery_address_id": None})
+    o3 = repo.get_order(db, o["id"])
+    assert o3["invoice_address_id"] == inv and o3["delivery_address"] is None
+
+
+def test_acknowledgement_pdf_uses_invoice_and_delivery(db):
+    from digisearch.web.features.contacts import repo as conrepo
+    from digisearch.web.features.customer_orders import export
+
+    cust, part = _seed(db)
+    conrepo.create_address(db, cust, {"company": "Acme Billing AB", "line1": "1 Rd",
+                                      "country": "Sweden", "is_invoice": 1, "is_default_invoice": 1})
+    conrepo.create_address(db, cust, {"company": "Acme Plant AB", "line1": "2 St",
+                                      "country": "Norway", "is_delivery": 1, "is_default_delivery": 1})
+    oid = repo.create_order(db, {"customer_id": cust})
+    repo.add_line(db, oid, part, 3, 10.0, None)
+    o = repo.get_order(db, oid)
+
+    # each block draws on its own structured address (different company names + countries)
+    assert o["invoice_address"]["company"] == "Acme Billing AB"
+    assert o["delivery_address"]["company"] == "Acme Plant AB"
+    assert export.ack_pdf(o, {"name": "Us AB"})[:5] == b"%PDF-"
+
+
+def test_acknowledge_guards(db):
+    cust, part = _seed(db)
+    empty = repo.create_order(db, {"customer_id": cust})
+    with pytest.raises(ValueError):                              # no lines
+        repo.acknowledge_order(db, empty)
+
+    shipped = repo.create_order(db, {"customer_id": cust, "status": "shipped"})
+    repo.add_line(db, shipped, part, qty=1, unit_price=1.0, discount=None)
+    with pytest.raises(ValueError):                              # not an open/unshipped status
+        repo.acknowledge_order(db, shipped)

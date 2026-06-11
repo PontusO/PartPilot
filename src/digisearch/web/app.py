@@ -148,6 +148,40 @@ def create_app(
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
 
+    @app.get("/account/password", response_class=HTMLResponse)
+    def account_password_form(request: Request):
+        if current_user(request) is None:
+            return RedirectResponse("/login", status_code=303)
+        return templates.TemplateResponse(
+            request, "account_password.html", {"error": None, "saved": False}
+        )
+
+    @app.post("/account/password", response_class=HTMLResponse)
+    def account_password_submit(
+        request: Request,
+        current: str = Form(...),
+        new_password: str = Form(...),
+        confirm: str = Form(...),
+    ):
+        user = current_user(request)
+        if user is None:
+            return RedirectResponse("/login", status_code=303)
+
+        def page(error=None, saved=False, status=200):
+            return templates.TemplateResponse(
+                request, "account_password.html", {"error": error, "saved": saved},
+                status_code=status,
+            )
+
+        if store.verify(user.username, current) is None:
+            return page(error="Your current password is incorrect.", status=400)
+        if not new_password:
+            return page(error="The new password can't be empty.", status=400)
+        if new_password != confirm:
+            return page(error="The new passwords don't match.", status=400)
+        store.set_password(user.id, new_password)
+        return page(saved=True)
+
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
         if current_user(request) is None:

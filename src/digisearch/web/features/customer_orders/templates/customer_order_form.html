@@ -70,6 +70,20 @@
         <input id="tax_rate" name="tax_rate" type="number" step="any"
                value="{{ values.get('tax_rate') if values.get('tax_rate') is not none else '' }}">
       </div>
+      <div>
+        <label for="delivery_address_id">Deliver to</label>
+        <select id="delivery_address_id" name="delivery_address_id"
+                data-selected="{{ values.get('delivery_address_id') or '' }}">
+          <option value="">— customer default —</option>
+        </select>
+      </div>
+      <div>
+        <label for="invoice_address_id">Invoice to</label>
+        <select id="invoice_address_id" name="invoice_address_id"
+                data-selected="{{ values.get('invoice_address_id') or '' }}">
+          <option value="">— customer default —</option>
+        </select>
+      </div>
       <div class="full">
         <label for="notes">Notes</label>
         <textarea id="notes" name="notes" rows="2">{{ values.get('notes','') or '' }}</textarea>
@@ -90,6 +104,42 @@
   <p class="note">The current committed work. <b>Click a day</b> to set it as the Required date above.</p>
   <div id="order-cal" class="fccal"></div>
 </div>
+<script>
+  // Delivery/invoice address pickers, driven by the chosen customer's structured addresses.
+  (function () {
+    const custSel = document.getElementById('customer_id');
+    const dSel = document.getElementById('delivery_address_id');
+    const iSel = document.getElementById('invoice_address_id');
+
+    function fill(sel, rows, defKey) {
+      const want = sel.dataset.selected ||
+        (rows.find(r => r[defKey]) ? String(rows.find(r => r[defKey]).id) : '');
+      sel.length = 1;  // keep the "customer default" option
+      rows.forEach(r => {
+        const o = document.createElement('option');
+        o.value = r.id;
+        o.textContent = r.label || r.company || ('Address #' + r.id);
+        sel.appendChild(o);
+      });
+      sel.value = want || '';
+    }
+    async function load() {
+      const cid = custSel.value;
+      dSel.length = 1; iSel.length = 1;
+      if (!cid) return;
+      try {
+        const rows = await fetch('/contacts/' + cid + '/addresses.json').then(r => r.json());
+        fill(dSel, rows.filter(r => r.is_delivery), 'is_default_delivery');
+        fill(iSel, rows.filter(r => r.is_invoice), 'is_default_invoice');
+      } catch (e) { /* leave defaults */ }
+    }
+    custSel.addEventListener('change', () => {
+      dSel.dataset.selected = ''; iSel.dataset.selected = '';  // a new customer → use their defaults
+      load();
+    });
+    load();  // initial: preselect the order's stored / the customer's default addresses
+  })();
+</script>
 <script src="/static/fullcalendar/index.global.min.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {

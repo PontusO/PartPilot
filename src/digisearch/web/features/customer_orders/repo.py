@@ -11,14 +11,17 @@ import re
 
 from ...core import ref_no
 from ...core.db import Database
+from . import export
 
 STATUSES = ("draft", "confirmed", "shipped", "complete", "cancelled")
 OPEN_STATUSES = ("draft", "confirmed", "shipped")
+# An acknowledgement may be (re)issued while the order is still open and unshipped.
+ACK_STATUSES = ("draft", "confirmed")
 
 # Header columns written from the order form (everything except id/timestamps/minimrp_id).
 _ORDER_FIELDS = ("order_ref", "customer_id", "customer_po", "status", "order_date",
                  "required_date", "currency", "discount_rate", "delivery_charge",
-                 "tax_rate", "notes")
+                 "tax_rate", "notes", "delivery_address_id", "invoice_address_id")
 
 
 def summary(db: Database) -> dict:
@@ -127,7 +130,12 @@ def _with_totals(order: dict, lines: list[dict]) -> dict:
 def get_order(db: Database, order_id: int) -> dict | None:
     with db.connect() as conn:
         head = conn.execute(
-            """SELECT o.*, c.name AS customer_name, c.short_name AS customer_short
+            """SELECT o.*, c.name AS customer_name, c.short_name AS customer_short,
+                      c.contact AS customer_contact, c.email AS customer_email,
+                      c.phone AS customer_phone, c.phone2 AS customer_phone2,
+                      c.fax AS customer_fax, c.address AS customer_address,
+                      c.postcode AS customer_postcode, c.country AS customer_country,
+                      c.website AS customer_website
                FROM customer_orders o LEFT JOIN contacts c ON c.id = o.customer_id
                WHERE o.id = ?""",
             (order_id,),
@@ -145,7 +153,37 @@ def get_order(db: Database, order_id: int) -> dict | None:
                ORDER BY COALESCE(l.line_no, 1e9), l.id""",
             (order_id,),
         )]
-    return _with_totals(dict(head), lines)
+        delivery = invoice = None
+        if head["delivery_address_id"]:
+            r = conn.execute("SELECT * FROM contact_addresses WHERE id = ?",
+                             (head["delivery_address_id"],)).fetchone()
+            delivery = dict(r) if r else None
+        if head["invoice_address_id"]:
+            r = conn.execute("SELECT * FROM contact_addresses WHERE id = ?",
+                             (head["invoice_address_id"],)).fetchone()
+            invoice = dict(r) if r else None
+
+    order = _with_totals(dict(head), lines)
+    order["customer"] = {"name": order.get("customer_name"), "contact": order.get("customer_contact"),
+                         "email": order.get("customer_email"), "phone": order.get("customer_phone"),
+                         "phone2": order.get("customer_phone2"), "fax": order.get("customer_fax"),
+                         "address": order.get("customer_address"),
+                         "postcode": order.get("customer_postcode"),
+                         "country": order.get("customer_country"),
+                         "website": order.get("customer_website")}
+    # The chosen structured addresses (None → callers fall back to the base customer address).
+    order["delivery_address"] = delivery
+    order["invoice_address"] = invoice
+    return order
+
+
+def _default_address_id(conn, customer_id: int | None, usage_col: str, default_col: str) -> int | None:
+    if not customer_id:
+        return None
+    row = conn.execute(
+        f"SELECT id FROM contact_addresses WHERE contact_id = ? AND {usage_col} = 1 "
+        f"ORDER BY {default_col} DESC, id LIMIT 1", (customer_id,)).fetchone()
+    return row["id"] if row else None
 
 
 def create_order(db: Database, data: dict) -> int:
@@ -153,6 +191,13 @@ def create_order(db: Database, data: dict) -> int:
     cols = ", ".join(_ORDER_FIELDS)
     placeholders = ", ".join("?" for _ in _ORDER_FIELDS)
     with db.connect() as conn:
+        # Pre-fill the delivery/invoice address from the customer's defaults when not supplied.
+        if data.get("delivery_address_id") is None:
+            data["delivery_address_id"] = _default_address_id(
+                conn, data.get("customer_id"), "is_delivery", "is_default_delivery")
+        if data.get("invoice_address_id") is None:
+            data["invoice_address_id"] = _default_address_id(
+                conn, data.get("customer_id"), "is_invoice", "is_default_invoice")
         order_id = conn.execute(
             f"INSERT INTO customer_orders ({cols}) VALUES ({placeholders})",
             tuple(data.get(f) for f in _ORDER_FIELDS),
@@ -316,6 +361,63 @@ def order_downstream(db: Database, order_id: int) -> dict:
                                          WHERE work_order_id IN ({qmarks}))
                     ORDER BY po.id""", [w["id"] for w in wos])]
     return {"work_orders": wos, "purchase_orders": pos}
+
+
+# ---- order acknowledgement (customer-facing PDF, retained for ISO) ----
+
+def acknowledge_order(db: Database, order_id: int, user: str | None = None) -> int:
+    """Generate the order-acknowledgement PDF, store it immutably in ``co_documents`` and advance a
+    still-draft order to 'confirmed'. Re-issuable after amendments (a new version is appended; older
+    versions are kept). Returns the new document id."""
+    order = get_order(db, order_id)
+    if order is None:
+        raise ValueError("Order not found.")
+    if order["status"] not in ACK_STATUSES:
+        raise ValueError(f"A {order['status']} order can't be acknowledged.")
+    if not order["lines"]:
+        raise ValueError("Add at least one line before acknowledging the order.")
+    ref = order["order_ref"] or ref_no("CO", order_id)
+    content = export.ack_pdf(order, export._company(db))
+    filename = f"OA-{ref}.pdf"
+    with db.connect() as conn:
+        doc_id = conn.execute(
+            "INSERT INTO co_documents (order_id, kind, filename, content, byte_size, created_by) "
+            "VALUES (?, 'pdf', ?, ?, ?, ?)",
+            (order_id, filename, content, len(content), user),
+        ).lastrowid
+        if order["status"] == "draft" and _ack_confirms(conn):
+            conn.execute("UPDATE customer_orders SET status = 'confirmed', updated_at = datetime('now') "
+                         "WHERE id = ?", (order_id,))
+        conn.commit()
+    return doc_id
+
+
+def _ack_confirms(conn) -> bool:
+    """Whether acknowledging a draft order also confirms it (Setup -> Order settings). Defaults to
+    True (unchanged behaviour); only an explicit '0' turns it off. Read directly and defensively so
+    this feature stays decoupled from the setup feature and works even if the table is absent."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'orders.ack_confirms'").fetchone()
+    except Exception:
+        return True
+    return row is None or row["value"] != "0"
+
+
+def get_document(db: Database, order_id: int, kind: str = "pdf") -> dict | None:
+    """The latest archived acknowledgement of ``kind`` for an order."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT filename, content FROM co_documents WHERE order_id = ? AND kind = ? "
+            "ORDER BY id DESC LIMIT 1", (order_id, kind)).fetchone()
+    return dict(row) if row else None
+
+
+def documents_for_order(db: Database, order_id: int) -> list[dict]:
+    with db.connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, kind, filename, byte_size, created_by, created_at FROM co_documents "
+            "WHERE order_id = ? ORDER BY id DESC", (order_id,))]
 
 
 def cancel_order(db: Database, order_id: int) -> None:

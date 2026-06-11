@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Users · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .urow form { margin:0; display:inline; }
+  .urow .acts { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+  .urow select, .urow input[type=password] { width:auto; padding:.35rem .5rem; background:#0d1219;
+    color:var(--fg); border:1px solid var(--line); border-radius:6px; }
+  .addgrid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:0 1rem; align-items:end; }
+  .addgrid label { margin-top:.6rem; }
+  .me { color:var(--muted); font-size:.78rem; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Users</h1>
+  <p class="note">Each person logs in with their own account and belongs to one <b>group</b> (role),
+    which decides what they can see and do. Deactivate accounts that should no longer log in — their
+    name stays on past records and the account can be reactivated later.</p>
+
+  {% if saved %}<div style="background:rgba(70,180,120,.15); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin:1rem 0;">{{ saved }}</div>{% endif %}
+  {% if error %}<div class="err" style="margin:1rem 0;">{{ error }}</div>{% endif %}
+
+  <div style="overflow-x:auto; margin-top:1rem;">
+    <table>
+      <thead>
+        <tr><th>User</th><th>Group</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="urow">
+          <td>
+            <b>{{ u.username }}</b>{% if me and u.id == me.id %} <span class="me">(you)</span>{% endif %}
+            {% if u.full_name %}<br><span class="note">{{ u.full_name }}</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="/setup/users/{{ u.id }}/role">
+              <select name="role" onchange="this.form.submit()">
+                {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == u.role }}>{{ r }}</option>{% endfor %}
+              </select>
+              <noscript><button class="ghost" type="submit">Set</button></noscript>
+            </form>
+          </td>
+          <td>
+            {% if u.active %}<span class="badge ok">active</span>
+            {% else %}<span class="badge muted">inactive</span>{% endif %}
+          </td>
+          <td>
+            <div class="acts">
+              <form method="post" action="/setup/users/{{ u.id }}/password"
+                    onsubmit="return this.password.value !== '';">
+                <input name="password" type="password" placeholder="new password" autocomplete="new-password">
+                <button class="ghost" type="submit">Reset</button>
+              </form>
+              <form method="post" action="/setup/users/{{ u.id }}/active">
+                <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+                {% if u.active %}
+                  <button class="danger" type="submit"
+                    {% if me and u.id == me.id %}disabled title="You can't deactivate yourself"{% endif %}>Deactivate</button>
+                {% else %}
+                  <button class="ghost" type="submit">Reactivate</button>
+                {% endif %}
+              </form>
+              {% if not u.active %}
+              <form method="post" action="/setup/users/{{ u.id }}/delete"
+                    onsubmit="return confirm('Permanently delete {{ u.username }}? This only works for accounts that never logged in.');">
+                <button class="danger" type="submit">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:1.4rem;">
+  <h2 style="font-size:1.1rem; margin:.2rem 0 .8rem;">Add a user</h2>
+  <form method="post" action="/setup/users">
+    <div class="addgrid">
+      <div><label for="username">Username (login)</label>
+        <input id="username" name="username" type="text" autocomplete="off" required></div>
+      <div><label for="full_name">Full name</label>
+        <input id="full_name" name="full_name" type="text" autocomplete="off"></div>
+      <div><label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" required></div>
+      <div><label for="role">Group</label>
+        <select id="role" name="role" style="width:100%; padding:.55rem .65rem; background:#0d1219;
+                color:var(--fg); border:1px solid var(--line); border-radius:7px;">
+          {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == 'purchasing' }}>{{ r }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div style="margin-top:1.2rem;"><button type="submit">Add user</button></div>
+  </form>
+</div>
+{% endblock %}

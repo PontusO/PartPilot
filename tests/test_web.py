@@ -82,7 +82,7 @@ def test_contacts_list_create_and_edit(app):
     r = client.post("/contacts/new",
                     data={"kind": "customer", "name": "Acme Corp", "email": "a@acme.com",
                           "contact": "Jane"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/contacts"
+    assert r.status_code == 303 and r.headers["location"].startswith("/contacts/")  # → detail page
     lst = client.get("/contacts?kind=customer").text
     assert "Acme Corp" in lst and "customer" in lst
 
@@ -356,6 +356,48 @@ def test_company_details_settings(app):
     assert setuprepo.get_company(app.state.database)["name"] == "Invector Labs AB"
 
 
+def test_order_settings_toggle_acknowledge_confirm(app):
+    from digisearch.web.features.contacts import repo as conrepo
+    from digisearch.web.features.customer_orders import repo as corepo
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.setup import repo as setuprepo
+
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+    part = catrepo.create_part(db, part={"part_no": "OS-1"},
+                               supplier_lines=[{"supplier_name": "X", "unit_price": 1.0,
+                                                "reel_qty": 1, "is_default": True}])
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
+
+    # non-admin can't reach order settings
+    buyer = TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    assert buyer.get("/setup/orders", follow_redirects=False).status_code == 403
+
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    assert "checked" in admin.get("/setup/orders").text          # default ON
+    assert setuprepo.get_orders(db)["ack_confirms"] is True
+
+    # turn it OFF (checkbox omitted) → acknowledging no longer confirms a draft
+    assert "Saved" in admin.post("/setup/orders", data={}).text
+    assert setuprepo.get_orders(db)["ack_confirms"] is False
+
+    o_off = corepo.create_order(db, {"customer_id": cust})        # draft
+    corepo.add_line(db, o_off, part, 2, 5.0, None)
+    buyer.post(f"/customer-orders/{o_off}/acknowledge", follow_redirects=False)
+    assert corepo.get_order(db, o_off)["status"] == "draft"       # status left alone
+    assert len(corepo.documents_for_order(db, o_off)) == 1        # PDF still archived
+
+    # turn it back ON → acknowledging confirms the draft again
+    admin.post("/setup/orders", data={"ack_confirms": "1"})
+    assert setuprepo.get_orders(db)["ack_confirms"] is True
+    o_on = corepo.create_order(db, {"customer_id": cust})
+    corepo.add_line(db, o_on, part, 2, 5.0, None)
+    buyer.post(f"/customer-orders/{o_on}/acknowledge", follow_redirects=False)
+    assert corepo.get_order(db, o_on)["status"] == "confirmed"
+
+
 def test_edit_po_line_before_placing(app):
     from digisearch.web.features.catalog import repo as catrepo
     from digisearch.web.features.purchase_orders import repo as porepo
@@ -513,6 +555,58 @@ def test_customer_orders_flow(app):
 
     client.post(f"/customer-orders/{oid}/lines/{lid}/delete", follow_redirects=False)
     assert corepo.get_order(db, oid)["lines"] == []
+
+
+def test_customer_order_acknowledgement_pdf(app):
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.contacts import repo as conrepo
+    from digisearch.web.features.customer_orders import repo as corepo
+
+    db = app.state.database
+    part = catrepo.create_part(db, part={"part_no": "ACK-1", "value": "thing"},
+                               supplier_lines=[{"supplier_name": "X", "unit_price": 3.0,
+                                                "reel_qty": 1, "is_default": True}])
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme AB",
+                                       "address": "1 Road", "postcode": "12345"})
+    oid = corepo.create_order(db, {"customer_id": cust, "order_ref": "SO-ACK"})
+    corepo.add_line(db, oid, part, 4, 10.0, None)
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+
+    # before acknowledging: the detail page offers a preview, and the PDF route serves a live preview
+    page = client.get(f"/customer-orders/{oid}").text
+    assert f"/customer-orders/{oid}/acknowledge" in page and "Preview acknowledgement" in page
+    prev = client.get(f"/customer-orders/{oid}/acknowledgement.pdf")
+    assert prev.status_code == 200 and prev.headers["content-type"] == "application/pdf"
+    assert prev.content[:5] == b"%PDF-"
+
+    # acknowledge: confirms the order and archives an immutable PDF
+    r = client.post(f"/customer-orders/{oid}/acknowledge", follow_redirects=False)
+    assert r.status_code == 303
+    assert corepo.get_order(db, oid)["status"] == "confirmed"
+    assert len(corepo.documents_for_order(db, oid)) == 1
+
+    page2 = client.get(f"/customer-orders/{oid}").text
+    assert "Order acknowledgements" in page2 and f"OA-SO-ACK.pdf" in page2  # ISO archive listed
+    assert "Re-issue acknowledgement" in page2
+
+    # the PDF route now serves the stored copy (same bytes as archived)
+    served = client.get(f"/customer-orders/{oid}/acknowledgement.pdf")
+    assert served.status_code == 200 and served.content == corepo.get_document(db, oid)["content"]
+    assert "OA-SO-ACK.pdf" in served.headers["content-disposition"]
+
+
+def test_customer_order_acknowledge_requires_role(app):
+    from digisearch.web.features.contacts import repo as conrepo
+    from digisearch.web.features.customer_orders import repo as corepo
+
+    db = app.state.database
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
+    oid = corepo.create_order(db, {"customer_id": cust})
+    client = TestClient(app)
+    _login(client, "ware1", "pw")  # warehouse may view but not acknowledge
+    assert client.post(f"/customer-orders/{oid}/acknowledge", follow_redirects=False).status_code == 403
 
 
 def test_despatch_flow(app):
@@ -677,6 +771,50 @@ def test_contacts_supplier_parts_link(app):
     sp = client.get("/catalog/supplier?name=Digikey")
     assert sp.status_code == 200 and "PARTX" in sp.text
     assert re.search(r'href="/catalog/\d+"', sp.text)  # part links to its page
+
+
+def test_contact_addresses_management(app):
+    from digisearch.web.features.contacts import repo as crepo
+
+    db = app.state.database
+    cid = crepo.create_contact(db, {"kind": "customer", "name": "Acme"})
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+
+    page = client.get(f"/contacts/{cid}")
+    assert page.status_code == 200 and "Delivery &amp; invoice addresses" in page.text
+
+    r = client.post(f"/contacts/{cid}/addresses/add",
+                    data={"label": "Plant", "company": "Acme Plant AB", "line1": "2 St",
+                          "city": "Malmo", "country": "Sweden",
+                          "is_delivery": "1", "is_default_delivery": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    addrs = crepo.list_addresses(db, cid)
+    assert len(addrs) == 1 and addrs[0]["is_default_delivery"] == 1
+    aid = addrs[0]["id"]
+
+    js = client.get(f"/contacts/{cid}/addresses.json").json()
+    assert js[0]["id"] == aid and js[0]["is_delivery"] == 1 and js[0]["company"] == "Acme Plant AB"
+
+    client.post(f"/contacts/{cid}/addresses/{aid}/edit",
+                data={"label": "Plant", "line1": "2 St", "city": "Goteborg", "is_delivery": "1"},
+                follow_redirects=False)
+    assert crepo.get_address(db, aid)["city"] == "Goteborg"
+
+    client.post(f"/contacts/{cid}/addresses/{aid}/delete", follow_redirects=False)
+    assert crepo.list_addresses(db, cid) == []
+
+
+def test_contact_address_write_requires_role(app):
+    from digisearch.web.features.contacts import repo as crepo
+
+    cid = crepo.create_contact(app.state.database, {"kind": "customer", "name": "Acme"})
+    ware = TestClient(app)
+    _login(ware, "ware1", "pw")  # warehouse may view but not edit
+    assert ware.get(f"/contacts/{cid}").status_code == 200
+    assert "+ Add address" not in ware.get(f"/contacts/{cid}").text
+    r = ware.post(f"/contacts/{cid}/addresses/add", data={"label": "x"}, follow_redirects=False)
+    assert r.status_code == 403
 
 
 def test_contacts_write_requires_role(app):

@@ -40,7 +40,7 @@
       <tbody>
         {% for c in contacts %}
         <tr>
-          <td>{% if can_edit %}<a href="/contacts/{{ c.id }}/edit">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}{% if c.short_name %} <span class="flag">({{ c.short_name }})</span>{% endif %}</td>
+          <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a>{% if c.short_name %} <span class="flag">({{ c.short_name }})</span>{% endif %}</td>
           <td>
             <span class="badge {{ 'ok' if c.kind == 'supplier' else ('stock' if c.kind == 'customer' else 'muted') }}">{{ c.kind }}</span>
             {% if c.kind == 'supplier' %}

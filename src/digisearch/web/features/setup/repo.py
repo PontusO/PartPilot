@@ -53,3 +53,14 @@ def get_production(db: Database) -> dict:
 def save_production(db: Database, data: dict) -> None:
     set_setting(db, "production.spillage_percent", (data.get("spillage_percent") or "").strip() or None)
     set_setting(db, "production.min_margin_qty", (data.get("min_margin_qty") or "").strip() or None)
+
+
+# ---- order settings ----
+
+def get_orders(db: Database) -> dict:
+    # Default ON (unset → True) so existing behaviour is unchanged; only an explicit "0" turns it off.
+    return {"ack_confirms": get_setting(db, "orders.ack_confirms") != "0"}
+
+
+def save_orders(db: Database, data: dict) -> None:
+    set_setting(db, "orders.ack_confirms", "1" if data.get("ack_confirms") else "0")

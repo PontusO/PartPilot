@@ -98,8 +98,14 @@
   {% endif %}
 
   {% if can_edit and o.status in ('draft', 'confirmed') %}
-  <div style="margin-top:1rem;">
-    <form method="post" action="/customer-orders/{{ o.id }}/cancel" style="margin:0; display:inline"
+  <div style="margin-top:1rem; display:flex; gap:.7rem; flex-wrap:wrap; align-items:center;">
+    <form method="post" action="/customer-orders/{{ o.id }}/acknowledge" style="margin:0"
+          onsubmit="return confirm('{{ 'Re-issue the order acknowledgement? A new PDF version will be stored and kept for ISO records.' if acknowledgements else 'Acknowledge this order? It will be confirmed and an acknowledgement PDF generated to send to the customer.' }}');">
+      <button type="submit" class="ghost">{{ 'Re-issue acknowledgement' if acknowledgements else 'Acknowledge order' }}</button></form>
+    <a href="/customer-orders/{{ o.id }}/acknowledgement.pdf" target="_blank" style="text-decoration:none;
+       background:#0d1219; border:1px solid var(--line); border-radius:7px; padding:.5rem .9rem;">
+      {{ 'Download acknowledgement' if acknowledgements else 'Preview acknowledgement' }}</a>
+    <form method="post" action="/customer-orders/{{ o.id }}/cancel" style="margin:0"
           onsubmit="return confirm('Cancel this customer order? Reserved stock will be released.{% if downstream.work_orders %} Note: {{ downstream.work_orders|length }} linked work order(s) will NOT be cancelled — review them afterwards.{% endif %}');">
       <button type="submit" class="ghost">Cancel order</button></form>
   </div>
@@ -112,6 +118,26 @@
     <div><small>Delivery</small>{{ "%.2f"|format(o.delivery) }}</div>
     <div><small>Tax</small>{% if o.tax_rate %}{{ "%g"|format(o.tax_rate) }}%{% else %}—{% endif %}</div>
   </div>
+
+  {% macro addr_block(title, a, fallback_name) %}
+    <div>
+      <small class="note" style="text-transform:uppercase; letter-spacing:.4px;">{{ title }}</small>
+      <div style="white-space:pre-line; line-height:1.4;">{{ a.company or fallback_name }}{% if a.contact %}
+{{ a.contact }}{% endif %}{% if a.line1 %}
+{{ a.line1 }}{% endif %}{% if a.line2 %}
+{{ a.line2 }}{% endif %}{% if a.city or a.region %}
+{{ [a.city, a.region]|select|join(', ') }}{% endif %}{% if a.postcode %}
+{{ a.postcode }}{% endif %}{% if a.country %}
+{{ a.country }}{% endif %}</div>
+    </div>
+  {% endmacro %}
+  {% if o.invoice_address or o.delivery_address %}
+  <div style="display:flex; gap:2.5rem; flex-wrap:wrap; margin-top:.8rem; font-size:.9rem;">
+    {% if o.invoice_address %}{{ addr_block('Invoice to', o.invoice_address, o.customer_name) }}{% endif %}
+    {% if o.delivery_address %}{{ addr_block('Deliver to', o.delivery_address, o.customer_name) }}{% endif %}
+  </div>
+  {% endif %}
+
   {% if o.notes %}<p class="note" style="margin-top:.6rem;">{{ o.notes }}</p>{% endif %}
 
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Order lines</h2>
@@ -196,6 +222,29 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  {% endif %}
+
+  {% if acknowledgements %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Order acknowledgements
+    <span class="note" style="font-weight:400;">— immutable PDFs retained for ISO records</span></h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Document</th><th>Issued</th><th>By</th><th class="num">Size</th></tr></thead>
+      <tbody>
+        {% for d in acknowledgements %}
+        <tr>
+          <td><a href="/customer-orders/{{ o.id }}/acknowledgement.pdf" target="_blank">{{ d.filename }}</a>
+            {% if loop.first %}<span class="badge ok">latest</span>{% endif %}</td>
+          <td>{{ d.created_at }}</td>
+          <td>{{ d.created_by or '—' }}</td>
+          <td class="num">{% if d.byte_size %}{{ (d.byte_size / 1024) | round(1) }} kB{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="note" style="margin-top:.4rem;">Only the latest version is downloadable here; every issued
+      version is preserved in the database for audit.</p>
   </div>
   {% endif %}
 </div>

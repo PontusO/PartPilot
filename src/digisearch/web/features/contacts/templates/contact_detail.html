@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:.5rem 1.4rem; margin:.4rem 0; }
+  .meta div small { color:var(--muted); display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.4px; }
+  .addr-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:.9rem; margin-top:.8rem; }
+  .addr { background:#0d1219; border:1px solid var(--line); border-radius:10px; padding:.8rem .9rem; }
+  .addr h3 { margin:0 0 .3rem; font-size:1rem; }
+  .addr .lines { color:var(--muted); font-size:.85rem; white-space:pre-line; line-height:1.4; }
+  .addr .tags { margin:.5rem 0; display:flex; gap:.3rem; flex-wrap:wrap; }
+  .addr .acts { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.5rem; }
+  .addr .acts form { margin:0; }
+  .modal { position:fixed; inset:0; background:rgba(8,12,18,.7); display:none;
+           align-items:flex-start; justify-content:center; z-index:60; padding:2.5rem 1rem; }
+  .modal-card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+                width:680px; max-width:100%; max-height:88vh; overflow-y:auto; padding:1rem 1.1rem; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem; }
+  .agrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1rem; }
+  .agrid .full { grid-column:1 / -1; }
+  .checks { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:.8rem; }
+  .checks label { display:flex; align-items:center; gap:.4rem; color:var(--fg); margin:0; }
+  .checks input { width:auto; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/contacts">← Contacts</a></p>
+  <h1>{{ c.name }}
+    <span class="badge {{ 'ok' if c.kind == 'supplier' else ('stock' if c.kind == 'customer' else 'muted') }}">{{ c.kind }}</span>
+    {% if c.short_name %}<span class="note" style="font-weight:400;">({{ c.short_name }})</span>{% endif %}
+  </h1>
+
+  <div class="meta">
+    {% if c.contact %}<div><small>Contact</small>{{ c.contact }}</div>{% endif %}
+    {% if c.email %}<div><small>Email</small><a href="mailto:{{ c.email }}">{{ c.email }}</a></div>{% endif %}
+    {% if c.phone %}<div><small>Phone</small>{{ c.phone }}</div>{% endif %}
+    {% if c.phone2 %}<div><small>Phone 2</small>{{ c.phone2 }}</div>{% endif %}
+    {% if c.fax %}<div><small>Fax</small>{{ c.fax }}</div>{% endif %}
+    {% if c.website %}<div><small>Web</small><a href="{{ c.website }}" target="_blank" rel="noopener">{{ c.website }}</a></div>{% endif %}
+    {% if c.currency %}<div><small>Currency</small>{{ c.currency }}</div>{% endif %}
+    {% if c.discount %}<div><small>Discount</small>{{ "%g"|format(c.discount) }}%</div>{% endif %}
+  </div>
+
+  {% if c.address or c.postcode or c.country %}
+  <div style="margin-top:.6rem;">
+    <small class="note" style="text-transform:uppercase; letter-spacing:.4px;">Registered address</small>
+    <div class="note" style="white-space:pre-line; line-height:1.4;">{{ c.address or '' }}{% if c.postcode %}
+{{ c.postcode }}{% endif %}{% if c.country %}
+{{ c.country }}{% endif %}</div>
+  </div>
+  {% endif %}
+
+  {% if c.notes %}<p class="note" style="margin-top:.6rem;">{{ c.notes }}</p>{% endif %}
+
+  {% if can_edit %}
+  <div style="margin-top:1rem; display:flex; gap:.7rem; flex-wrap:wrap;">
+    <a href="/contacts/{{ c.id }}/edit" style="text-decoration:none; background:var(--accent); color:#fff;
+       font-weight:600; border-radius:7px; padding:.5rem 1rem;">Edit contact</a>
+    <button type="button" class="ghost" onclick="openAddr()">+ Add address</button>
+  </div>
+  {% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Delivery &amp; invoice addresses</h2>
+  <p class="note">Used to ship goods and send invoices — each can have its own company name. Mark a
+    default delivery and a default invoice address; orders pre-fill from those.</p>
+
+  {% if addresses %}
+  <div class="addr-grid">
+    {% for a in addresses %}
+    <div class="addr">
+      <h3>{{ a.company or c.name }}{% if a.label %} <span class="note" style="font-weight:400;">· {{ a.label }}</span>{% endif %}</h3>
+      <div class="lines">{% if a.contact %}{{ a.contact }}
+{% endif %}{{ a.line1 or '' }}{% if a.line2 %}
+{{ a.line2 }}{% endif %}{% if a.city or a.region %}
+{{ [a.city, a.region]|select|join(', ') }}{% endif %}{% if a.postcode %}
+{{ a.postcode }}{% endif %}{% if a.country %}
+{{ a.country }}{% endif %}{% if a.phone %}
+☎ {{ a.phone }}{% endif %}{% if a.email %}
+{{ a.email }}{% endif %}</div>
+      <div class="tags">
+        {% if a.is_default_delivery %}<span class="badge ok">default delivery</span>
+        {% elif a.is_delivery %}<span class="badge stock">delivery</span>{% endif %}
+        {% if a.is_default_invoice %}<span class="badge ok">default invoice</span>
+        {% elif a.is_invoice %}<span class="badge stock">invoice</span>{% endif %}
+      </div>
+      {% if can_edit %}
+      <div class="acts">
+        <button type="button" class="ghost" onclick='editAddr({{ a|tojson }})'>Edit</button>
+        {% if a.is_delivery and not a.is_default_delivery %}
+        <form method="post" action="/contacts/{{ c.id }}/addresses/{{ a.id }}/default">
+          <input type="hidden" name="which" value="delivery">
+          <button type="submit" class="ghost">Make default delivery</button></form>{% endif %}
+        {% if a.is_invoice and not a.is_default_invoice %}
+        <form method="post" action="/contacts/{{ c.id }}/addresses/{{ a.id }}/default">
+          <input type="hidden" name="which" value="invoice">
+          <button type="submit" class="ghost">Make default invoice</button></form>{% endif %}
+        <form method="post" action="/contacts/{{ c.id }}/addresses/{{ a.id }}/delete"
+              onsubmit="return confirm('Delete this address?');">
+          <button type="submit" class="danger">Delete</button></form>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="note">No delivery/invoice addresses yet.{% if can_edit %} Use <b>+ Add address</b> above.{% endif %}</p>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+<div id="addrModal" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b id="addrTitle">Add address</b>
+      <button type="button" class="quiet" onclick="closeAddr()">✕</button>
+    </div>
+    <form id="addrForm" method="post" action="/contacts/{{ c.id }}/addresses/add">
+      <div class="agrid">
+        <div><label for="a_label">Label</label><input id="a_label" name="label" type="text" placeholder="Head office"></div>
+        <div><label for="a_company">Company name</label><input id="a_company" name="company" type="text" placeholder="(defaults to {{ c.name }})"></div>
+        <div><label for="a_contact">Contact person</label><input id="a_contact" name="contact" type="text"></div>
+        <div><label for="a_phone">Phone</label><input id="a_phone" name="phone" type="text"></div>
+        <div class="full"><label for="a_line1">Address line 1</label><input id="a_line1" name="line1" type="text"></div>
+        <div class="full"><label for="a_line2">Address line 2</label><input id="a_line2" name="line2" type="text"></div>
+        <div><label for="a_city">City</label><input id="a_city" name="city" type="text"></div>
+        <div><label for="a_region">Region / state</label><input id="a_region" name="region" type="text"></div>
+        <div><label for="a_postcode">Postcode</label><input id="a_postcode" name="postcode" type="text"></div>
+        <div><label for="a_country">Country</label><input id="a_country" name="country" type="text"></div>
+        <div class="full"><label for="a_email">Email</label><input id="a_email" name="email" type="text"></div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="a_is_delivery" name="is_delivery"> Delivery address</label>
+        <label><input type="checkbox" id="a_is_invoice" name="is_invoice"> Invoice address</label>
+        <label><input type="checkbox" id="a_is_default_delivery" name="is_default_delivery"> Default delivery</label>
+        <label><input type="checkbox" id="a_is_default_invoice" name="is_default_invoice"> Default invoice</label>
+      </div>
+      <div style="margin-top:1rem; display:flex; gap:.7rem;">
+        <button type="submit">Save address</button>
+        <button type="button" class="quiet" onclick="closeAddr()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+  const TEXTF = ['label','company','contact','phone','line1','line2','city','region','postcode','country','email'];
+  const CHK = ['is_delivery','is_invoice','is_default_delivery','is_default_invoice'];
+  function openAddr() {
+    document.getElementById('addrTitle').textContent = 'Add address';
+    document.getElementById('addrForm').action = '/contacts/{{ c.id }}/addresses/add';
+    TEXTF.forEach(f => document.getElementById('a_' + f).value = '');
+    CHK.forEach(f => document.getElementById('a_' + f).checked = false);
+    document.getElementById('addrModal').style.display = 'flex';
+  }
+  function editAddr(a) {
+    document.getElementById('addrTitle').textContent = 'Edit address';
+    document.getElementById('addrForm').action = '/contacts/{{ c.id }}/addresses/' + a.id + '/edit';
+    TEXTF.forEach(f => document.getElementById('a_' + f).value = a[f] || '');
+    CHK.forEach(f => document.getElementById('a_' + f).checked = !!a[f]);
+    document.getElementById('addrModal').style.display = 'flex';
+  }
+  function closeAddr() { document.getElementById('addrModal').style.display = 'none'; }
+  document.getElementById('addrModal').addEventListener('click', e => {
+    if (e.target.id === 'addrModal') closeAddr();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAddr(); });
+</script>
+{% endif %}
+{% endblock %}

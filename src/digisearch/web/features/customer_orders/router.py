@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from ...core.deps import require_role, require_user
 from ..despatch import repo as despatch_repo
 from ..despatch.router import DESPATCH_ROLES
 from ..work_orders import repo as wo_repo
 from ..work_orders.router import WORK_ORDER_ROLES
-from . import repo
+from . import export, repo
 
 router = APIRouter(prefix="/customer-orders")
 
@@ -63,6 +63,8 @@ def _parse_order(form) -> dict:
         "delivery_charge": _num(form.get("delivery_charge")),
         "tax_rate": _num(form.get("tax_rate")),
         "notes": (form.get("notes") or "").strip() or None,
+        "delivery_address_id": _int(form.get("delivery_address_id")),
+        "invoice_address_id": _int(form.get("invoice_address_id")),
     }
 
 
@@ -148,6 +150,7 @@ def _render_detail(request, order_id, user, error=None, status=200):
          "despatches": despatch_repo.despatches_for_order(db, order_id),
          "downstream": repo.order_downstream(db, order_id),
          "wos_by_line": wo_repo.work_orders_for_order(db, order_id),
+         "acknowledgements": repo.documents_for_order(db, order_id),
          "build_short_count": sum(1 for p in proposals if p["category"] == "build")},
         status_code=status,
     )
@@ -214,3 +217,29 @@ def cancel(request: Request, order_id: int):
     except ValueError as exc:
         return _render_detail(request, order_id, user, error=str(exc), status=400)
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
+
+
+@router.post("/{order_id}/acknowledge")
+def acknowledge(request: Request, order_id: int):
+    user = require_role(request, CUSTOMER_ORDER_WRITE_ROLES)
+    try:
+        repo.acknowledge_order(request.app.state.database, order_id, user.username)
+    except ValueError as exc:
+        return _render_detail(request, order_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
+
+
+@router.get("/{order_id}/acknowledgement.pdf")
+def acknowledgement_pdf(request: Request, order_id: int):
+    """Serve the archived acknowledgement if one has been issued, else a live preview of the
+    current order so it can be reviewed before acknowledging."""
+    require_user(request)
+    db = request.app.state.database
+    order = repo.get_order(db, order_id)
+    if order is None:
+        return Response("not found", status_code=404)
+    doc = repo.get_document(db, order_id, "pdf")
+    content = doc["content"] if doc else export.ack_pdf(order, export._company(db))
+    filename = doc["filename"] if doc else f"OA-{order.get('order_ref') or 'CO-' + str(order_id)}.pdf"
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})

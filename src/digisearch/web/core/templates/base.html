@@ -120,10 +120,13 @@
       {% endfor %}
     </nav>
     <div class="who">
-      <div>{{ current_user.username }} &nbsp;<span class="role">{{ current_user.role }}</span></div>
-      <form method="post" action="/logout" style="margin:0">
-        <button class="quiet" type="submit">Log out</button>
-      </form>
+      <div>{{ current_user.full_name or current_user.username }} &nbsp;<span class="role">{{ current_user.role }}</span></div>
+      <div style="display:flex; gap:.5rem; align-items:center;">
+        <a href="/account/password" style="color:var(--muted); font-size:.8rem;">Change password</a>
+        <form method="post" action="/logout" style="margin:0">
+          <button class="quiet" type="submit">Log out</button>
+        </form>
+      </div>
     </div>
   </aside>
   {% endif %}

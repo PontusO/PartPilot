@@ -8,6 +8,20 @@
   <p class="note">{{ order.customer_name or 'No customer' }} — enter the quantity to ship for each line.
     Shipping issues stock out and consumes any reserved allocation.</p>
 
+  {% if order.delivery_address %}{% set a = order.delivery_address %}
+  <div style="margin-top:.6rem; padding:.7rem .95rem; background:#0d1219; border:1px solid var(--line);
+       border-radius:9px; max-width:360px;">
+    <small class="note" style="text-transform:uppercase; letter-spacing:.4px;">Deliver to</small>
+    <div style="white-space:pre-line; line-height:1.4;">{{ a.company or order.customer_name }}{% if a.contact %}
+{{ a.contact }}{% endif %}{% if a.line1 %}
+{{ a.line1 }}{% endif %}{% if a.line2 %}
+{{ a.line2 }}{% endif %}{% if a.city or a.region %}
+{{ [a.city, a.region]|select|join(', ') }}{% endif %}{% if a.postcode %}
+{{ a.postcode }}{% endif %}{% if a.country %}
+{{ a.country }}{% endif %}</div>
+  </div>
+  {% endif %}
+
   {% if not shippable %}
   <div class="note" style="margin-top:1rem;">Nothing left to ship — every line is fully despatched.</div>
   {% else %}

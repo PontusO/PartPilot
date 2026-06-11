@@ -9,12 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+import sqlite3
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 from digisearch.config import Settings
 
+from ...auth import ROLES
 from ...core.deps import require_role
 from ..assemblies.importer import import_boms
 from ..catalog.importer import import_from_minimrp
@@ -35,6 +38,12 @@ TOOLS = [
     {"label": "Production settings", "url": "/setup/production", "icon": "🏭",
      "description": "Production parameters such as the spillage/scrap margin added to each "
                     "work-order batch's component requirements."},
+    {"label": "Order settings", "url": "/setup/orders", "icon": "🧾",
+     "description": "How customer orders behave — e.g. whether acknowledging an order also "
+                    "confirms it."},
+    {"label": "Users", "url": "/setup/users", "icon": "👤",
+     "description": "Add people, set the group (role) they belong to, reset passwords and "
+                    "deactivate accounts that should no longer log in."},
 ]
 
 
@@ -97,6 +106,136 @@ async def save_production(request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "production.html",
         {"production": repo.get_production(request.app.state.database), "saved": True},
+    )
+
+
+# ----- Users -----
+
+def _users_page(request: Request, *, error: str | None = None,
+                saved: str | None = None, status: int = 200):
+    store = request.app.state.store
+    return request.app.state.templates.TemplateResponse(
+        request, "users.html",
+        {"users": store.list_users(), "roles": ROLES, "error": error, "saved": saved,
+         "me": request.app.state.store.get(request.session.get("user_id"))},
+        status_code=status,
+    )
+
+
+@router.get("/users", response_class=HTMLResponse)
+def users_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return _users_page(request)
+
+
+@router.post("/users", response_class=HTMLResponse)
+async def add_user(request: Request):
+    require_role(request, SETUP_ROLES)
+    store = request.app.state.store
+    form = await request.form()
+    username = (form.get("username") or "").strip()
+    password = form.get("password") or ""
+    full_name = (form.get("full_name") or "").strip()
+    role = (form.get("role") or "").strip()
+    if not username or not password:
+        return _users_page(request, error="Username and password are required.", status=400)
+    if role not in ROLES:
+        return _users_page(request, error=f"Unknown group {role!r}.", status=400)
+    try:
+        store.create_user(username, password, role=role, full_name=full_name)
+    except sqlite3.IntegrityError:
+        return _users_page(request, error=f"A user named {username!r} already exists.", status=400)
+    return _users_page(request, saved=f"User {username!r} added.")
+
+
+@router.post("/users/{user_id}/role", response_class=HTMLResponse)
+async def change_role(request: Request, user_id: int):
+    me = require_role(request, SETUP_ROLES)
+    store = request.app.state.store
+    target = store.get_any(user_id)
+    form = await request.form()
+    role = (form.get("role") or "").strip()
+    if role not in ROLES:
+        return _users_page(request, error=f"Unknown group {role!r}.", status=400)
+    if target is None:
+        return _users_page(request, error="No such user.", status=404)
+    if target.id == me.id and role != "admin":
+        return _users_page(request, error="You can't change your own group.", status=400)
+    if target.role == "admin" and role != "admin" and store.count_active_admins() <= 1:
+        return _users_page(request, error="Can't change the last admin's group — "
+                           "promote someone else to admin first.", status=400)
+    store.update_role(user_id, role)
+    return _users_page(request, saved=f"{target.username} is now in the {role} group.")
+
+
+@router.post("/users/{user_id}/password", response_class=HTMLResponse)
+async def reset_password(request: Request, user_id: int):
+    require_role(request, SETUP_ROLES)
+    store = request.app.state.store
+    target = store.get_any(user_id)
+    form = await request.form()
+    password = form.get("password") or ""
+    if target is None:
+        return _users_page(request, error="No such user.", status=404)
+    if not password:
+        return _users_page(request, error="A new password is required.", status=400)
+    store.set_password(user_id, password)
+    return _users_page(request, saved=f"Password reset for {target.username}.")
+
+
+@router.post("/users/{user_id}/active", response_class=HTMLResponse)
+async def toggle_active(request: Request, user_id: int):
+    me = require_role(request, SETUP_ROLES)
+    store = request.app.state.store
+    target = store.get_any(user_id)
+    form = await request.form()
+    active = (form.get("active") or "") == "1"
+    if target is None:
+        return _users_page(request, error="No such user.", status=404)
+    if not active:  # deactivating
+        if target.id == me.id:
+            return _users_page(request, error="You can't deactivate your own account.", status=400)
+        if target.role == "admin" and store.count_active_admins() <= 1:
+            return _users_page(request, error="Can't deactivate the last admin.", status=400)
+    store.set_active(user_id, active)
+    verb = "reactivated" if active else "deactivated"
+    return _users_page(request, saved=f"{target.username} {verb}.")
+
+
+@router.post("/users/{user_id}/delete", response_class=HTMLResponse)
+async def delete_user(request: Request, user_id: int):
+    me = require_role(request, SETUP_ROLES)
+    store = request.app.state.store
+    target = store.get_any(user_id)
+    if target is None:
+        return _users_page(request, error="No such user.", status=404)
+    if target.id == me.id:
+        return _users_page(request, error="You can't delete your own account.", status=400)
+    if store.has_logged_in(user_id):
+        return _users_page(request, error=f"{target.username} has activity on record — "
+                           "deactivate instead of deleting to preserve history.", status=400)
+    store.delete(user_id)
+    return _users_page(request, saved=f"User {target.username!r} deleted.")
+
+
+@router.get("/orders", response_class=HTMLResponse)
+def orders_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return request.app.state.templates.TemplateResponse(
+        request, "orders.html",
+        {"orders": repo.get_orders(request.app.state.database), "saved": False},
+    )
+
+
+@router.post("/orders", response_class=HTMLResponse)
+async def save_orders(request: Request):
+    require_role(request, SETUP_ROLES)
+    form = await request.form()
+    repo.save_orders(request.app.state.database,
+                     {"ack_confirms": form.get("ack_confirms") is not None})
+    return request.app.state.templates.TemplateResponse(
+        request, "orders.html",
+        {"orders": repo.get_orders(request.app.state.database), "saved": True},
     )
 
 
