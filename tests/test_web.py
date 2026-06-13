@@ -1276,3 +1276,83 @@ def test_edit_requires_write_role(app):
     _login(ware, "ware1", "pw")
     assert "/edit" not in ware.get(f"/catalog/{pid}").text
     assert ware.get(f"/catalog/{pid}/edit", follow_redirects=False).status_code == 403
+
+
+# ----- webshop (WooCommerce) sync -----
+
+class _FakeWoo:
+    """Stand-in for WooClient used in the sync route tests (no network)."""
+    def __init__(self, products):
+        self._products = products
+
+    def ping(self):
+        return True
+
+    def iter_products(self):
+        return iter(self._products)
+
+
+def test_webshop_settings_admin_only_and_roundtrip(app):
+    from digisearch.web.features.setup import repo as setuprepo
+    app.state.store.create_user("boss", "pw", role="admin")
+
+    buyer = TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    assert buyer.get("/setup/webshop", follow_redirects=False).status_code == 403
+
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    r = admin.post("/setup/webshop", data={
+        "base_url": "https://ilabs.se", "consumer_key": "ck_x",
+        "consumer_secret": "cs_y", "action": "save"})
+    assert r.status_code == 200 and "Saved" in r.text
+    saved = setuprepo.get_webshop(app.state.database)
+    assert saved["base_url"] == "https://ilabs.se" and saved["configured"] is True
+
+
+def test_webshop_sync_preview_and_apply(app, monkeypatch):
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.setup import repo as setuprepo
+    from digisearch.web.features.setup import router as setup_router
+    from digisearch.woocommerce import WooProduct
+
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+    catrepo.create_part(db, part={"part_no": "99-1"}, supplier_lines=[], opening={"qty": 1})
+    setuprepo.save_webshop(db, {"base_url": "https://ilabs.se",
+                                "consumer_key": "ck", "consumer_secret": "cs"})
+
+    products = [WooProduct(sku="99-1", name="R", description=None, stock_quantity=20,
+                           manage_stock=True, stock_status="instock", type="simple"),
+                WooProduct(sku="98-9", name="Board", description=None, stock_quantity=3,
+                           manage_stock=True, stock_status="instock", type="simple")]
+    monkeypatch.setattr(setup_router, "_build_woo_client", lambda s: _FakeWoo(products))
+
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+
+    # non-admin gated
+    buyer = TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    assert buyer.post("/setup/webshop/sync", follow_redirects=False).status_code == 403
+
+    # preview changes nothing
+    r = admin.post("/setup/webshop/sync", data={"action": "preview"})
+    assert r.status_code == 200 and "Preview only" in r.text
+    assert catrepo.get_part(db, catrepo.find_part_by_part_no(db, "99-1")["id"])["total_qty"] == 1
+    assert catrepo.find_part_by_part_no(db, "98-9") is None
+
+    # apply writes
+    r = admin.post("/setup/webshop/sync", data={"action": "apply"})
+    assert r.status_code == 200 and "Sync applied" in r.text
+    assert catrepo.get_part(db, catrepo.find_part_by_part_no(db, "99-1")["id"])["total_qty"] == 20
+    assert catrepo.find_part_by_part_no(db, "98-9")["kind"] == "ASSY"
+    assert setuprepo.get_webshop(db)["last_sync_at"]  # stamped
+
+
+def test_webshop_sync_blocked_when_unconfigured(app):
+    app.state.store.create_user("boss", "pw", role="admin")
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    r = admin.post("/setup/webshop/sync", data={"action": "apply"})
+    assert r.status_code == 400 and "isn&#39;t configured" in r.text

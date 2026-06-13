@@ -6,6 +6,7 @@ here and add its route. All routes are admin-only.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,9 +18,12 @@ from starlette.concurrency import run_in_threadpool
 
 from digisearch.config import Settings
 
+from digisearch.woocommerce import WooClient, WooError
+
 from ...auth import ROLES
 from ...core.deps import require_role
 from ..assemblies.importer import import_boms
+from ..catalog import woo_sync
 from ..catalog.importer import import_from_minimrp
 from ..contacts.importer import import_contacts
 from . import repo
@@ -44,6 +48,12 @@ TOOLS = [
     {"label": "Users", "url": "/setup/users", "icon": "👤",
      "description": "Add people, set the group (role) they belong to, reset passwords and "
                     "deactivate accounts that should no longer log in."},
+    {"label": "Webshop settings", "url": "/setup/webshop", "icon": "🛒",
+     "description": "Connect the WooCommerce webshop (store URL + read-only API keys) used to "
+                    "pull product stock into PartPilot."},
+    {"label": "Sync webshop", "url": "/setup/webshop/sync", "icon": "🔄",
+     "description": "Pull products from the webshop: match by part number (SKU) and update stock, "
+                    "creating any parts/assemblies that don't exist yet. Webshop is authoritative."},
 ]
 
 
@@ -237,6 +247,90 @@ async def save_orders(request: Request):
         request, "orders.html",
         {"orders": repo.get_orders(request.app.state.database), "saved": True},
     )
+
+
+# ----- Webshop (WooCommerce) -----
+
+def _build_woo_client(settings: dict) -> WooClient:
+    return WooClient(settings["base_url"], settings["consumer_key"], settings["consumer_secret"])
+
+
+@router.get("/webshop", response_class=HTMLResponse)
+def webshop_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return request.app.state.templates.TemplateResponse(
+        request, "webshop.html",
+        {"webshop": repo.get_webshop(request.app.state.database), "saved": False,
+         "tested": None, "error": None},
+    )
+
+
+@router.post("/webshop", response_class=HTMLResponse)
+async def save_webshop(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    templates = request.app.state.templates
+    form = await request.form()
+    data = {f: form.get(f) for f in repo.WEBSHOP_FIELDS}
+    repo.save_webshop(db, data)
+
+    tested, error = None, None
+    if (form.get("action") or "") == "test":
+        settings = repo.get_webshop(db)
+        if not settings["configured"]:
+            error = "Fill in the store URL and both API keys before testing."
+        else:
+            try:
+                await run_in_threadpool(_build_woo_client(settings).ping)
+                tested = "Connected to the webshop successfully."
+            except WooError as exc:
+                error = str(exc)
+    return templates.TemplateResponse(
+        request, "webshop.html",
+        {"webshop": repo.get_webshop(db), "saved": True, "tested": tested, "error": error},
+        status_code=400 if error else 200,
+    )
+
+
+@router.get("/webshop/sync", response_class=HTMLResponse)
+def webshop_sync_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return request.app.state.templates.TemplateResponse(
+        request, "webshop_sync.html",
+        {"webshop": repo.get_webshop(request.app.state.database), "report": None,
+         "dry_run": None, "error": None},
+    )
+
+
+@router.post("/webshop/sync", response_class=HTMLResponse)
+async def webshop_sync_run(request: Request):
+    me = require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    templates = request.app.state.templates
+    form = await request.form()
+    dry_run = (form.get("action") or "preview") != "apply"
+    settings = repo.get_webshop(db)
+
+    def page(report=None, error=None, status=200):
+        return templates.TemplateResponse(
+            request, "webshop_sync.html",
+            {"webshop": repo.get_webshop(db), "report": report, "dry_run": dry_run,
+             "error": error}, status_code=status,
+        )
+
+    if not settings["configured"]:
+        return page(error="The webshop isn't configured yet — set the URL and API keys first.",
+                    status=400)
+    try:
+        client = _build_woo_client(settings)
+        report = await run_in_threadpool(
+            lambda: woo_sync.sync_from_woo(db, list(client.iter_products()),
+                                           user=me.username, dry_run=dry_run))
+    except WooError as exc:
+        return page(error=str(exc), status=502)
+    if not dry_run:
+        repo.set_webshop_synced(db, datetime.now().isoformat(timespec="seconds"))
+    return page(report=report)
 
 
 @router.get("/import", response_class=HTMLResponse)

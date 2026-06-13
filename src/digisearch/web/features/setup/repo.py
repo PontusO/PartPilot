@@ -64,3 +64,28 @@ def get_orders(db: Database) -> dict:
 
 def save_orders(db: Database, data: dict) -> None:
     set_setting(db, "orders.ack_confirms", "1" if data.get("ack_confirms") else "0")
+
+
+# ---- webshop (WooCommerce) settings ----
+
+# Connection details for the read-only WooCommerce product pull, stored as "webshop.<field>".
+WEBSHOP_FIELDS = ("base_url", "consumer_key", "consumer_secret")
+
+
+def get_webshop(db: Database) -> dict:
+    with db.connect() as conn:
+        rows = dict(conn.execute(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'webshop.%'").fetchall())
+    data = {f: rows.get(f"webshop.{f}", "") or "" for f in WEBSHOP_FIELDS}
+    data["last_sync_at"] = rows.get("webshop.last_sync_at") or ""
+    data["configured"] = bool(data["base_url"] and data["consumer_key"] and data["consumer_secret"])
+    return data
+
+
+def save_webshop(db: Database, data: dict) -> None:
+    for f in WEBSHOP_FIELDS:
+        set_setting(db, f"webshop.{f}", (data.get(f) or "").strip() or None)
+
+
+def set_webshop_synced(db: Database, when: str) -> None:
+    set_setting(db, "webshop.last_sync_at", when)

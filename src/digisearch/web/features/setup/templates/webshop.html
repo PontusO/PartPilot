@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Webshop settings · PartPilot{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:620px;">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Webshop settings</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if tested %}<div style="background:rgba(70,180,120,.15); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">{{ tested }}</div>{% endif %}
+  {% if saved and not tested and not error %}<div style="background:rgba(70,180,120,.15);
+       border:1px solid var(--ok); border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">
+       Saved.</div>{% endif %}
+
+  <p class="note">PartPilot connects to the WooCommerce store using a <b>read-only</b> REST API key
+    (it only ever reads products — it never writes to the shop). Create a key in WooCommerce under
+    <i>WooCommerce → Settings → Advanced → REST API</i> with <b>Read</b> permission.</p>
+
+  <form method="post" action="/setup/webshop">
+    <label for="base_url">Store URL</label>
+    <input id="base_url" name="base_url" type="url" placeholder="https://ilabs.se"
+           value="{{ webshop.base_url }}">
+
+    <label for="consumer_key">Consumer key</label>
+    <input id="consumer_key" name="consumer_key" placeholder="ck_…" value="{{ webshop.consumer_key }}">
+
+    <label for="consumer_secret">Consumer secret</label>
+    <input id="consumer_secret" name="consumer_secret" placeholder="cs_…"
+           value="{{ webshop.consumer_secret }}">
+
+    <div style="margin-top:1rem; display:flex; gap:.6rem;">
+      <button type="submit" name="action" value="save">Save</button>
+      <button type="submit" name="action" value="test" class="ghost">Save &amp; test connection</button>
+    </div>
+  </form>
+
+  {% if webshop.configured %}
+  <p class="note" style="margin-top:1.2rem;">Configured. Use
+    <a href="/setup/webshop/sync">Sync webshop</a> to pull products.
+    {% if webshop.last_sync_at %}Last synced {{ webshop.last_sync_at }}.{% endif %}</p>
+  {% endif %}
+</div>
+{% endblock %}

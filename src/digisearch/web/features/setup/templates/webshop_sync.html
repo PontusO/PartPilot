@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Sync webshop · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Sync webshop</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  {% if not webshop.configured %}
+    <div style="background:#33260f; border:1px solid var(--warn); color:#f3c06b;
+                padding:.6rem .8rem; border-radius:7px; margin:1rem 0;">
+      The webshop isn't connected yet. Set the store URL and API keys in
+      <a href="/setup/webshop">Webshop settings</a> first.
+    </div>
+  {% else %}
+    <p class="note">Pulls every published product from the webshop and matches it to PartPilot by
+      <b>part number</b> (the Woo <b>SKU</b>). Matched parts get their stock set to the shop's value;
+      SKUs starting <code>99-</code> create a <b>component</b> and <code>98-</code> a <b>assembly</b>
+      if they don't exist yet. The webshop is authoritative for stock — nothing is written back to it.
+      {% if webshop.last_sync_at %}<br>Last synced {{ webshop.last_sync_at }}.{% endif %}</p>
+
+    {% if report %}
+      <div style="margin:.8rem 0; padding:.5rem .8rem; border-radius:8px;
+           background:{{ 'rgba(70,180,120,.12)' if not dry_run else '#11202e' }};
+           border:1px solid {{ 'var(--ok)' if not dry_run else 'var(--line)' }};">
+        {{ 'Preview only — nothing was changed.' if dry_run else 'Sync applied.' }}
+      </div>
+      <div class="cards" style="margin-top:.5rem;">
+        <div class="card"><b>{{ report.created_parts }}</b><small>components {{ 'to create' if dry_run else 'created' }}</small></div>
+        <div class="card"><b>{{ report.created_assemblies }}</b><small>assemblies {{ 'to create' if dry_run else 'created' }}</small></div>
+        <div class="card"><b>{{ report.updated }}</b><small>stock {{ 'to update' if dry_run else 'updated' }}</small></div>
+        <div class="card"><b>{{ report.unchanged }}</b><small>already in sync</small></div>
+        <div class="card"><b>{{ report.unmanaged }}</b><small>stock not managed</small></div>
+        <div class="card"><b>{{ report.skipped }}</b><small>skipped (other SKU)</small></div>
+        <div class="card"><b>{{ report.errors|length }}</b><small>errors</small></div>
+      </div>
+
+      {% if report.errors %}
+        <h2 style="margin-top:1.2rem;">Errors</h2>
+        <table><thead><tr><th>SKU</th><th>Error</th></tr></thead><tbody>
+          {% for e in report.errors %}<tr><td><code>{{ e.sku }}</code></td><td>{{ e.error }}</td></tr>{% endfor %}
+        </tbody></table>
+      {% endif %}
+
+      {% if report.log %}
+        <details style="margin-top:1rem;"><summary class="note">Detail ({{ report.log|length }} products)</summary>
+          <table style="margin-top:.5rem;"><thead><tr><th>SKU</th><th>Action</th><th>Detail</th></tr></thead><tbody>
+            {% for r in report.log %}<tr><td><code>{{ r.sku }}</code></td><td>{{ r.action }}</td><td class="note">{{ r.detail }}</td></tr>{% endfor %}
+          </tbody></table>
+        </details>
+      {% endif %}
+
+      <form action="/setup/webshop/sync" method="get" style="margin-top:1rem;">
+        <button type="submit" class="ghost">Back</button>
+      </form>
+    {% else %}
+      <form method="post" action="/setup/webshop/sync" onsubmit="showOverlay()"
+            style="display:flex; gap:.6rem; margin-top:1rem;">
+        <button type="submit" name="action" value="preview" class="ghost">Preview (no changes)</button>
+        <button type="submit" name="action" value="apply"
+                onclick="return confirm('Apply webshop stock to PartPilot? This updates on-hand and creates missing parts.');">
+          Apply sync
+        </button>
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div id="overlay">
+  <div class="spin"></div>
+  <div>Talking to the webshop… this can take a moment.</div>
+</div>
+<script>function showOverlay(){ document.getElementById('overlay').style.display = 'flex'; }</script>
+{% endblock %}

@@ -181,6 +181,20 @@ def find_part_id_by_mpn(db: Database, mpn: str | None) -> int | None:
     return row["id"] if row else None
 
 
+def find_part_by_part_no(db: Database, part_no: str | None) -> dict | None:
+    """Look up a part by its canonical ``part_no`` (case-insensitive, exact). Used by the
+    webshop sync, which matches on part number only (unlike ``find_part_id_by_mpn``, which
+    also matches ``mfr_pno``)."""
+    if not (part_no or "").strip():
+        return None
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM parts WHERE lower(part_no) = lower(?) ORDER BY id LIMIT 1",
+            (part_no.strip(),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def _get_or_create_supplier(conn, name: str) -> int:
     row = conn.execute("SELECT id FROM suppliers WHERE lower(name) = lower(?)", (name,)).fetchone()
     if row:
