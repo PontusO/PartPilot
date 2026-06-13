@@ -13,10 +13,12 @@
       <a href="/setup/webshop">Webshop settings</a> first.
     </div>
   {% else %}
-    <p class="note">Pulls every published product from the webshop and matches it to PartPilot by
-      <b>part number</b> (the Woo <b>SKU</b>). Matched parts get their stock set to the shop's value;
-      SKUs starting <code>99-</code> create a <b>component</b> and <code>98-</code> a <b>assembly</b>
-      if they don't exist yet. The webshop is authoritative for stock — nothing is written back to it.
+    <p class="note">Reconciles stock both ways, matching products to PartPilot by <b>part number</b>
+      (the Woo <b>SKU</b>). Webshop <b>sales</b> (stock that dropped in Woo since the last sync) are
+      issued out of PartPilot so planning sees true availability; PartPilot <b>builds/receipts</b>
+      are pushed back so the shop reflects them. SKUs starting <code>99-</code> create a
+      <b>component</b> and <code>98-</code> an <b>assembly</b> if they don't exist yet. Pushing stock
+      to the shop needs an API key with <b>Write</b> permission.
       {% if webshop.last_sync_at %}<br>Last synced {{ webshop.last_sync_at }}.{% endif %}</p>
 
     {% if report %}
@@ -26,9 +28,11 @@
         {{ 'Preview only — nothing was changed.' if dry_run else 'Sync applied.' }}
       </div>
       <div class="cards" style="margin-top:.5rem;">
+        <div class="card"><b>{{ "%g"|format(report.sold) }}</b><small>units sold (issued in)</small></div>
+        <div class="card"><b>{{ report.pushed }}</b><small>{{ 'to push to shop' if dry_run else 'pushed to shop' }}</small></div>
         <div class="card"><b>{{ report.created_parts }}</b><small>components {{ 'to create' if dry_run else 'created' }}</small></div>
         <div class="card"><b>{{ report.created_assemblies }}</b><small>assemblies {{ 'to create' if dry_run else 'created' }}</small></div>
-        <div class="card"><b>{{ report.updated }}</b><small>stock {{ 'to update' if dry_run else 'updated' }}</small></div>
+        <div class="card"><b>{{ report.updated }}</b><small>stock {{ 'to update' if dry_run else 'updated' }} from shop</small></div>
         <div class="card"><b>{{ report.unchanged }}</b><small>already in sync</small></div>
         <div class="card"><b>{{ report.unmanaged }}</b><small>stock not managed</small></div>
         <div class="card"><b>{{ report.skipped }}</b><small>skipped (other SKU)</small></div>
@@ -58,7 +62,7 @@
             style="display:flex; gap:.6rem; margin-top:1rem;">
         <button type="submit" name="action" value="preview" class="ghost">Preview (no changes)</button>
         <button type="submit" name="action" value="apply"
-                onclick="return confirm('Apply webshop stock to PartPilot? This updates on-hand and creates missing parts.');">
+                onclick="return confirm('Reconcile stock with the webshop? This issues sales into PartPilot, creates missing parts, and writes updated quantities back to the shop.');">
           Apply sync
         </button>
       </form>

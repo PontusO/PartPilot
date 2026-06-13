@@ -220,3 +220,48 @@ def test_apply_import_plan_creates_and_links(db):
     childs = {ln["child_part_no"] for ln in repo.get_assembly(db, asm)["lines"]}
     assert childs == {"EXIST-MPN", "NEW-1", "WEIRD"}  # SKIP-NEW left out
     assert catrepo.find_part_id_by_mpn(db, "NEW-1") is not None  # created in catalog
+
+
+def test_convert_to_component_reclassifies_empty_assembly(db):
+    from digisearch.web.features.catalog import repo as catrepo
+
+    # A part mis-entered as an assembly, with stock but no BOM.
+    aid = repo.create_assembly(db, {"part_no": "WAS-ASSY", "value": "really a part",
+                                    "default_build_days": 5})
+    with db.connect() as conn:
+        conn.execute("UPDATE parts SET total_qty = 7 WHERE id = ?", (aid,))
+        conn.commit()
+
+    repo.convert_to_component(db, aid)
+
+    part = catrepo.get_part(db, aid)
+    assert part["kind"] == "PART" and part["default_build_days"] is None
+    assert part["total_qty"] == 7                       # stock preserved
+    assert repo.get_assembly(db, aid) is None           # no longer an assembly
+    # shows up in the parts catalog now
+    assert any(p["part_no"] == "WAS-ASSY" for p in catrepo.list_parts(db)[0])
+
+
+def test_convert_blocked_when_bom_present(db):
+    a, s, c1, c2 = _setup(db)
+    with pytest.raises(ValueError, match="BOM line"):
+        repo.convert_to_component(db, a)
+    assert repo.get_assembly(db, a) is not None          # untouched
+
+
+def test_convert_rejects_non_assembly(db):
+    from digisearch.web.features.catalog import repo as catrepo
+    pid = catrepo.create_part(db, part={"part_no": "PLAIN"}, supplier_lines=[])
+    with pytest.raises(ValueError, match="not an assembly"):
+        repo.convert_to_component(db, pid)
+
+
+def test_convert_used_in_links_survive(db):
+    # SUB-1 (an ASSY) is used in ASM-1; emptying SUB-1's own BOM lets it become a component
+    # while staying a child of ASM-1.
+    a, s, c1, c2 = _setup(db)
+    for ln in repo.get_assembly(db, s)["lines"]:
+        repo.delete_bom_line(db, s, ln["id"])
+    repo.convert_to_component(db, s)
+    parent = repo.get_assembly(db, a)
+    assert "SUB-1" in {ln["child_part_no"] for ln in parent["lines"]}

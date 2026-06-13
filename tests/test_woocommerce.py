@@ -12,9 +12,13 @@ def _client() -> WooClient:
     return WooClient(BASE, "ck_test", "cs_test", max_retries=1)
 
 
+_next_id = [1000]
+
+
 def _product(sku, name="Widget", qty=5, manage=True, **extra):
-    p = {"sku": sku, "name": name, "manage_stock": manage, "stock_quantity": qty,
-         "stock_status": "instock", "type": "simple"}
+    _next_id[0] += 1
+    p = {"id": _next_id[0], "sku": sku, "name": name, "manage_stock": manage,
+         "stock_quantity": qty, "stock_status": "instock", "type": "simple"}
     p.update(extra)
     return p
 
@@ -72,3 +76,34 @@ def test_auth_failure_raises_wooerror():
 def test_ping_ok_on_empty_shop():
     respx.get(PRODUCTS).mock(return_value=httpx.Response(200, json=[]))
     assert _client().ping() is True
+
+
+@respx.mock
+def test_product_carries_woo_id():
+    respx.get(PRODUCTS).mock(return_value=httpx.Response(
+        200, json=[{"id": 77, "sku": "99-1", "name": "R", "manage_stock": True,
+                    "stock_quantity": 5, "type": "simple"}]))
+    assert list(_client().iter_products())[0].id == 77
+
+
+@respx.mock
+def test_update_stock_batch_chunks_and_counts():
+    route = respx.post(f"{BASE}/wp-json/wc/v3/products/batch")
+    # 150 updates -> two chunks (100 + 50); echo back the update arrays
+    def _reply(request):
+        import json
+        body = json.loads(request.content)
+        return httpx.Response(200, json={"update": body["update"]})
+    route.side_effect = _reply
+
+    updates = [(i, float(i)) for i in range(1, 151)]
+    written = _client().update_stock_batch(updates)
+    assert written == 150 and route.call_count == 2
+
+
+@respx.mock
+def test_update_stock_batch_write_denied_raises():
+    respx.post(f"{BASE}/wp-json/wc/v3/products/batch").mock(
+        return_value=httpx.Response(401, json={"message": "read-only key"}))
+    with pytest.raises(WooError, match="write"):
+        _client().update_stock_batch([(1, 5.0)])

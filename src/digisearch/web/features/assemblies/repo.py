@@ -120,6 +120,48 @@ def update_assembly(db: Database, part_id: int, part: dict) -> None:
         conn.commit()
 
 
+def _table_exists(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def convert_to_component(db: Database, part_id: int) -> None:
+    """Reclassify an assembly (kind=ASSY) as a plain component (kind=PART) — for fixing parts
+    that were mis-entered as assemblies. Refuses if the part still has a BOM or any work order,
+    so a real assembly can't be flipped by accident. Its stock, suppliers and where-used links
+    (a component can be a BOM child) are all preserved; the assembly-only ``default_build_days``
+    is cleared."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT kind FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if row is None:
+            raise ValueError("Part not found.")
+        if row["kind"] != "ASSY":
+            raise ValueError("This part is not an assembly.")
+
+        lines = conn.execute(
+            "SELECT COUNT(*) FROM bom_lines WHERE parent_id = ?", (part_id,)
+        ).fetchone()[0]
+        if lines:
+            raise ValueError(
+                f"This assembly still has {lines} BOM line(s) — remove them first, then convert.")
+
+        if _table_exists(conn, "work_orders"):
+            wos = conn.execute(
+                "SELECT COUNT(*) FROM work_orders WHERE assembly_id = ?", (part_id,)
+            ).fetchone()[0]
+            if wos:
+                raise ValueError(
+                    f"This assembly is referenced by {wos} work order(s) — it can't be converted.")
+
+        conn.execute(
+            "UPDATE parts SET kind = 'PART', default_build_days = NULL, "
+            "updated_at = datetime('now') WHERE id = ? AND kind = 'ASSY'",
+            (part_id,),
+        )
+        conn.commit()
+
+
 def add_bom_line(db: Database, parent_id: int, child_id: int, qty_per: float,
                  refdes: str | None) -> None:
     if child_id == parent_id:

@@ -1284,12 +1284,18 @@ class _FakeWoo:
     """Stand-in for WooClient used in the sync route tests (no network)."""
     def __init__(self, products):
         self._products = products
+        self.pushed = []
 
     def ping(self):
         return True
 
     def iter_products(self):
         return iter(self._products)
+
+    def update_stock_batch(self, updates):
+        updates = list(updates)
+        self.pushed.append(updates)
+        return len(updates)
 
 
 def test_webshop_settings_admin_only_and_roundtrip(app):
@@ -1322,9 +1328,9 @@ def test_webshop_sync_preview_and_apply(app, monkeypatch):
     setuprepo.save_webshop(db, {"base_url": "https://ilabs.se",
                                 "consumer_key": "ck", "consumer_secret": "cs"})
 
-    products = [WooProduct(sku="99-1", name="R", description=None, stock_quantity=20,
+    products = [WooProduct(id=1, sku="99-1", name="R", description=None, stock_quantity=20,
                            manage_stock=True, stock_status="instock", type="simple"),
-                WooProduct(sku="98-9", name="Board", description=None, stock_quantity=3,
+                WooProduct(id=2, sku="98-9", name="Board", description=None, stock_quantity=3,
                            manage_stock=True, stock_status="instock", type="simple")]
     monkeypatch.setattr(setup_router, "_build_woo_client", lambda s: _FakeWoo(products))
 
@@ -1350,9 +1356,78 @@ def test_webshop_sync_preview_and_apply(app, monkeypatch):
     assert setuprepo.get_webshop(db)["last_sync_at"]  # stamped
 
 
+def test_webshop_sync_pushes_builds_back(app, monkeypatch):
+    from digisearch.web.features.catalog import repo as catrepo, stock
+    from digisearch.web.features.setup import repo as setuprepo
+    from digisearch.web.features.setup import router as setup_router
+    from digisearch.woocommerce import WooProduct
+
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+    pid = catrepo.create_part(db, part={"part_no": "99-1"}, supplier_lines=[], opening={"qty": 50})
+    setuprepo.save_webshop(db, {"base_url": "https://ilabs.se",
+                                "consumer_key": "ck", "consumer_secret": "cs"})
+
+    woo = WooProduct(id=11, sku="99-1", name="R", description=None, stock_quantity=50,
+                     manage_stock=True, stock_status="instock", type="simple")
+    fake = _FakeWoo([woo])
+    monkeypatch.setattr(setup_router, "_build_woo_client", lambda s: fake)
+
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    admin.post("/setup/webshop/sync", data={"action": "apply"})       # first sync -> baseline 50
+    stock.adjust_stock(db, pid, delta=30, mtype=stock.BUILD, reference="WO")  # build 30 -> 80
+
+    r = admin.post("/setup/webshop/sync", data={"action": "apply"})
+    assert r.status_code == 200
+    assert fake.pushed[-1] == [(11, 80.0)]                            # built qty pushed to Woo
+    assert catrepo.get_part(db, pid)["webshop_synced_qty"] == 80
+
+
 def test_webshop_sync_blocked_when_unconfigured(app):
     app.state.store.create_user("boss", "pw", role="admin")
     admin = TestClient(app)
     _login(admin, "boss", "pw")
     r = admin.post("/setup/webshop/sync", data={"action": "apply"})
     assert r.status_code == 400 and "isn&#39;t configured" in r.text
+
+
+# ----- convert an assembly to a component (fix mis-entered parts) -----
+
+def test_convert_assembly_to_component_route(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import repo as catrepo
+    db = app.state.database
+    aid = asmrepo.create_assembly(db, {"part_no": "98-OOPS", "value": "really a part"})
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")                       # purchasing may edit assemblies
+    r = client.post(f"/assemblies/{aid}/convert-to-component", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/catalog/{aid}"
+    assert catrepo.get_part(db, aid)["kind"] == "PART"
+
+
+def test_convert_blocked_by_work_order(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import repo as catrepo
+    db = app.state.database
+    aid = asmrepo.create_assembly(db, {"part_no": "98-WO"})
+    with db.connect() as conn:
+        conn.execute("INSERT INTO work_orders (assembly_id, qty) VALUES (?, 1)", (aid,))
+        conn.commit()
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    r = client.post(f"/assemblies/{aid}/convert-to-component", follow_redirects=False)
+    assert r.status_code == 400 and "work order" in r.text
+    assert catrepo.get_part(db, aid)["kind"] == "ASSY"
+
+
+def test_convert_requires_write_role(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    db = app.state.database
+    aid = asmrepo.create_assembly(db, {"part_no": "98-GATED"})
+    ware = TestClient(app)
+    _login(ware, "ware1", "pw")                          # warehouse can't edit assemblies
+    assert ware.post(f"/assemblies/{aid}/convert-to-component",
+                     follow_redirects=False).status_code == 403

@@ -47,8 +47,16 @@
        align-items:center; justify-content:center; background:var(--accent); color:#fff;
        font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; cursor:pointer;
        white-space:nowrap;">Add Component to Assy</button>
+    <button type="submit" form="convertForm" style="margin:0; display:flex;
+       align-items:center; justify-content:center; background:var(--accent); color:#fff;
+       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; cursor:pointer;
+       white-space:nowrap;">Convert to component</button>
     {% endif %}
   </div>
+  {% if can_edit %}
+  <form id="convertForm" method="post" action="/assemblies/{{ a.id }}/convert-to-component"
+        onsubmit="return confirm('Convert {{ a.part_no }} from an assembly to a plain component? It moves to the Parts catalog. (Only allowed when it has no BOM lines or work orders.)');"></form>
+  {% endif %}
 
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Bill of materials</h2>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}

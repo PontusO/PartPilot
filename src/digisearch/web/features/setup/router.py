@@ -325,7 +325,7 @@ async def webshop_sync_run(request: Request):
         client = _build_woo_client(settings)
         report = await run_in_threadpool(
             lambda: woo_sync.sync_from_woo(db, list(client.iter_products()),
-                                           user=me.username, dry_run=dry_run))
+                                           client=client, user=me.username, dry_run=dry_run))
     except WooError as exc:
         return page(error=str(exc), status=502)
     if not dry_run:

@@ -110,4 +110,14 @@ MIGRATIONS = [
         ALTER TABLE parts ADD COLUMN default_build_days INTEGER;
         """,
     ),
+    Migration(
+        version=4,
+        name="webshop sync baseline",
+        sql="""
+        -- The part's stock quantity in the WooCommerce webshop as of the last sync (the
+        -- reconcile baseline). NULL = never synced; the first sync adopts Woo's value. Lets the
+        -- two-way sync tell webshop sales (Woo went down) from production (PartPilot went up).
+        ALTER TABLE parts ADD COLUMN webshop_synced_qty REAL;
+        """,
+    ),
 ]

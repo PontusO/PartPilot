@@ -183,6 +183,17 @@ def delete_line(request: Request, part_id: int, line_id: int):
     return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
 
 
+@router.post("/{part_id}/convert-to-component")
+def convert_to_component(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    try:
+        repo.convert_to_component(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_detail(request, part_id, user, error=str(exc), status=400)
+    # It's now a component — its home is the catalog.
+    return RedirectResponse(f"/catalog/{part_id}", status_code=303)
+
+
 # ---- import a CSV BOM (reuses the purchasing tool's resolution) ----
 
 @router.get("/{part_id}/import", response_class=HTMLResponse)

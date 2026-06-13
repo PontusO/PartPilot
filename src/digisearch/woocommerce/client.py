@@ -25,8 +25,10 @@ class WooError(RuntimeError):
 @dataclass
 class WooProduct:
     """The slice of a Woo product PartPilot cares about. ``stock_quantity`` is None when the
-    product doesn't manage stock (``manage_stock=false``) — i.e. quantity is unknown, not zero."""
+    product doesn't manage stock (``manage_stock=false``) — i.e. quantity is unknown, not zero.
+    ``id`` is the Woo product id, needed to push a stock update back."""
 
+    id: int
     sku: str
     name: str
     description: str | None
@@ -74,7 +76,49 @@ class WooClient:
                 return
             page += 1
 
+    def update_stock_batch(self, updates: list[tuple[int, float]]) -> int:
+        """Write new stock quantities to Woo via ``POST /products/batch`` (chunked at 100).
+
+        ``updates`` is a list of ``(product_id, stock_quantity)``. This is the only call that
+        writes to the shop, so it requires an API key with **write** scope. Returns the number
+        of products updated. Raises WooError on failure."""
+        written = 0
+        for chunk in _chunks([u for u in updates if u[0]], 100):
+            body = {"update": [{"id": pid, "stock_quantity": qty} for pid, qty in chunk]}
+            data = self._post("/products/batch", body)
+            written += len((data or {}).get("update") or [])
+        return written
+
     # -- transport ---------------------------------------------------------
+
+    def _post(self, path: str, body: dict):
+        url = f"{self.base_url}{API_ROOT}{path}"
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self._http.post(url, json=body, auth=self._auth,
+                                       headers={"Accept": "application/json",
+                                                "Content-Type": "application/json"})
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                time.sleep(2**attempt)
+                continue
+            if resp.status_code == 429 or resp.status_code >= 500:
+                time.sleep(2**attempt)
+                continue
+            if resp.status_code in (401, 403):
+                raise WooError(
+                    "WooCommerce rejected the write (HTTP "
+                    f"{resp.status_code}). The API key needs Read/Write permission to push stock.")
+            if resp.status_code >= 400:
+                raise WooError(f"WooCommerce write failed: HTTP {resp.status_code} for {path}.")
+            try:
+                return resp.json()
+            except ValueError as exc:
+                raise WooError("WooCommerce returned a non-JSON response to a write.") from exc
+        if last_exc:
+            raise WooError(f"Could not reach WooCommerce at {self.base_url}: {last_exc}") from last_exc
+        raise WooError(f"WooCommerce write failed after {self.max_retries} retries: {path}")
 
     def _get(self, path: str, params: dict):
         url = f"{self.base_url}{API_ROOT}{path}"
@@ -122,6 +166,7 @@ def _to_product(raw: dict) -> WooProduct | None:
     qty = raw.get("stock_quantity")
     stock_quantity = _num(qty) if manage_stock else None
     return WooProduct(
+        id=int(raw.get("id") or 0),
         sku=sku,
         name=(raw.get("name") or "").strip(),
         description=_clean(raw.get("short_description")) or _clean(raw.get("description")),
@@ -130,6 +175,11 @@ def _to_product(raw: dict) -> WooProduct | None:
         stock_status=(raw.get("stock_status") or None),
         type=(raw.get("type") or "simple"),
     )
+
+
+def _chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 
 def _num(value) -> float | None:
