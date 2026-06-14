@@ -74,7 +74,7 @@ def list_parts(
         ).fetchone()[0]
         rows = conn.execute(
             f"""SELECT p.id, p.part_no, p.value, p.category, p.kind,
-                       p.total_qty, p.total_alloc, p.min_qty, p.unit_cost,
+                       p.total_qty, p.total_alloc, p.min_qty, p.unit_cost, p.external_price,
                        (p.total_qty - p.total_alloc) AS free,
                        s.name AS supplier, ps.supplier_pno AS supplier_pno,
                        ps.price_per_uom AS price_per_uom, ps.qty_per_uom AS qty_per_uom

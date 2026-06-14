@@ -68,8 +68,9 @@ def save_orders(db: Database, data: dict) -> None:
 
 # ---- webshop (WooCommerce) settings ----
 
-# Connection details for the read-only WooCommerce product pull, stored as "webshop.<field>".
-WEBSHOP_FIELDS = ("base_url", "consumer_key", "consumer_secret")
+# Connection details for the WooCommerce sync, stored as "webshop.<field>". ``currency`` is an
+# optional override appended to read requests (only needed on multi-currency shops).
+WEBSHOP_FIELDS = ("base_url", "consumer_key", "consumer_secret", "currency")
 
 
 def get_webshop(db: Database) -> dict:

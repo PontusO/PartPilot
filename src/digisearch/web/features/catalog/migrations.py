@@ -120,4 +120,14 @@ MIGRATIONS = [
         ALTER TABLE parts ADD COLUMN webshop_synced_qty REAL;
         """,
     ),
+    Migration(
+        version=5,
+        name="external webshop price",
+        sql="""
+        -- The part's price as advertised on the WooCommerce webshop, copied verbatim by the sync.
+        -- Deliberately separate from the calculated cost (unit_cost): it's the customer-facing shop
+        -- price, kept for book-keeping / inventory valuation reports. NULL until first synced.
+        ALTER TABLE parts ADD COLUMN external_price REAL;
+        """,
+    ),
 ]

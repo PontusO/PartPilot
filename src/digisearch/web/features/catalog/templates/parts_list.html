@@ -44,6 +44,7 @@
           <th>Part No</th><th>Value</th><th>Category</th><th>Kind</th>
           <th class="num">Free</th><th class="num">On hand</th><th class="num">Min</th>
           <th>Supplier</th><th>Supplier P/N</th><th class="num">Unit (SEK)</th>
+          <th class="num">Webshop (SEK)</th>
         </tr>
       </thead>
       <tbody>
@@ -59,9 +60,10 @@
           <td>{{ p.supplier or '' }}</td>
           <td>{{ p.supplier_pno or '' }}</td>
           <td class="num">{% if p.unit_price is not none %}{{ "%.4f"|format(p.unit_price) }}{% endif %}</td>
+          <td class="num">{% if p.external_price is not none %}{{ "%.2f"|format(p.external_price) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        {% if not parts %}<tr><td colspan="10" class="note">No parts match.</td></tr>{% endif %}
+        {% if not parts %}<tr><td colspan="11" class="note">No parts match.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>

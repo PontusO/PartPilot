@@ -105,6 +105,10 @@ def _reconcile_one(db, product, *, user, dry_run, report: SyncReport, pushes) ->
         _create(db, product, kind=kind, user=user, dry_run=dry_run, report=report)
         return
 
+    # Copy the shop price into external_price (book-keeping), independent of stock.
+    if not dry_run and product.price is not None:
+        _set_external_price(db, existing["id"], product.price)
+
     if product.stock_quantity is None:
         report.unmanaged += 1
         report._note(sku, "unmanaged", "Woo does not manage this product's stock")
@@ -188,6 +192,8 @@ def _create(db, product, *, kind, user, dry_run, report: SyncReport) -> None:
 
     # Woo already holds qty, so the baseline starts there and nothing is pushed.
     _set_baseline(db, part_id, qty)
+    if product.price is not None:
+        _set_external_price(db, part_id, product.price)
     report._note(sku, "created", f"{kind}{f', stock {qty:g}' if qty else ''}")
 
 
@@ -206,4 +212,11 @@ def _apply(db, part_id, *, delta, mtype, reference, note, user, baseline) -> Non
 def _set_baseline(db, part_id, qty) -> None:
     with db.connect() as conn:
         conn.execute("UPDATE parts SET webshop_synced_qty = ? WHERE id = ?", (qty, part_id))
+        conn.commit()
+
+
+def _set_external_price(db, part_id, price) -> None:
+    """Copy the webshop price onto the part (book-keeping field, separate from unit_cost)."""
+    with db.connect() as conn:
+        conn.execute("UPDATE parts SET external_price = ? WHERE id = ?", (price, part_id))
         conn.commit()

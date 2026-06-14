@@ -2,6 +2,7 @@ import pytest
 
 from digisearch.web.core import FeatureRegistry
 from digisearch.web.core.db import Database
+from digisearch.web.features.assemblies import repo as assemblies_repo
 from digisearch.web.features.catalog import feature as catalog_feature
 from digisearch.web.features.catalog import repo, stock, woo_sync
 from digisearch.woocommerce import WooProduct
@@ -16,10 +17,10 @@ def db(tmp_path):
     return database
 
 
-def _p(sku, qty=5, manage=True, name="Thing", wid=1):
+def _p(sku, qty=5, manage=True, name="Thing", wid=1, price=None):
     return WooProduct(id=wid, sku=sku, name=name, description=None,
                       stock_quantity=(qty if manage else None),
-                      manage_stock=manage, stock_status="instock", type="simple")
+                      manage_stock=manage, stock_status="instock", type="simple", price=price)
 
 
 def _make_part(db, part_no, qty):
@@ -186,6 +187,43 @@ def test_push_failure_keeps_partpilot_and_baseline_safe(db):
     # PartPilot on-hand stands; baseline stays at Woo's value so the push retries next time
     part = repo.get_part(db, pid)
     assert part["total_qty"] == 90 and part["webshop_synced_qty"] == 50
+
+
+def test_external_price_copied_to_existing_and_new(db):
+    pid = _make_part(db, "99-1", 5)
+    woo_sync.sync_from_woo(db, [
+        _p("99-1", qty=5, price=19.95),
+        _p("99-2", qty=3, price=7.5),       # created by the sync
+    ])
+    assert repo.get_part(db, pid)["external_price"] == 19.95
+    assert repo.find_part_by_part_no(db, "99-2")["external_price"] == 7.5
+    # the copy is separate from the calculated cost
+    assert repo.get_part(db, pid)["unit_cost"] != 19.95
+
+
+def test_external_price_copied_to_assemblies(db):
+    # an existing assembly that matches, and a brand-new one created by the sync
+    aid = assemblies_repo.create_assembly(db, {"part_no": "98-1"})
+    woo_sync.sync_from_woo(db, [
+        _p("98-1", qty=2, price=149.0),
+        _p("98-2", qty=1, price=299.0),     # created as an ASSY
+    ])
+    assert repo.get_part(db, aid)["external_price"] == 149.0
+    created = repo.find_part_by_part_no(db, "98-2")
+    assert created["kind"] == "ASSY" and created["external_price"] == 299.0
+
+
+def test_external_price_not_written_on_dry_run(db):
+    pid = _make_part(db, "99-1", 5)
+    woo_sync.sync_from_woo(db, [_p("99-1", qty=5, price=19.95)], dry_run=True)
+    assert repo.get_part(db, pid)["external_price"] is None
+
+
+def test_missing_woo_price_leaves_field_untouched(db):
+    pid = _make_part(db, "99-1", 5)
+    woo_sync.sync_from_woo(db, [_p("99-1", qty=5, price=10.0)])
+    woo_sync.sync_from_woo(db, [_p("99-1", qty=5, price=None)])   # later sync, price absent
+    assert repo.get_part(db, pid)["external_price"] == 10.0
 
 
 def test_one_bad_product_does_not_abort_run(db):

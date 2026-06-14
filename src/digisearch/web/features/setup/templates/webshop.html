@@ -28,6 +28,13 @@
     <input id="consumer_secret" name="consumer_secret" placeholder="cs_…"
            value="{{ webshop.consumer_secret }}">
 
+    <label for="currency">Currency override <span class="note">(optional)</span></label>
+    <input id="currency" name="currency" placeholder="e.g. SEK" value="{{ webshop.currency }}">
+    <p class="note" style="margin-top:.3rem;">Leave blank unless the shop runs a <b>multi-currency</b>
+      plugin that returns prices in the wrong currency. Set your base currency code (e.g.
+      <code>SEK</code>) to send <code>?currency=…</code> on price reads. PartPilot already prefers the
+      stored base-currency price fields, so this is only a fallback for plugins that need the hint.</p>
+
     <div style="margin-top:1rem; display:flex; gap:.6rem;">
       <button type="submit" name="action" value="save">Save</button>
       <button type="submit" name="action" value="test" class="ghost">Save &amp; test connection</button>

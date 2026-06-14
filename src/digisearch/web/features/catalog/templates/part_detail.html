@@ -22,6 +22,9 @@
     {% if part.unit_cost is not none %}
       <div class="card"><b>{{ "%.4f"|format(part.unit_cost) }}</b><small>unit cost SEK</small></div>
     {% endif %}
+    {% if part.external_price is not none %}
+      <div class="card"><b>{{ "%.2f"|format(part.external_price) }}</b><small>webshop price SEK</small></div>
+    {% endif %}
   </div>
 
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Details</h2>

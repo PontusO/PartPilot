@@ -36,6 +36,7 @@ class WooProduct:
     manage_stock: bool
     stock_status: str | None
     type: str
+    price: float | None = None   # the active shop price (sale price if on sale, else regular)
 
 
 class WooClient:
@@ -45,11 +46,16 @@ class WooClient:
         consumer_key: str,
         consumer_secret: str,
         *,
+        currency: str | None = None,
         http: httpx.Client | None = None,
         max_retries: int = 3,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self._auth = httpx.BasicAuth(consumer_key or "", consumer_secret or "")
+        # Optional currency hint, appended to read requests as ?currency=… . WooCommerce core
+        # ignores it (prices are always base currency), but multi-currency plugins (Aelia, CURCY)
+        # honour it to stop converting prices away from the store's base currency.
+        self._currency = (currency or "").strip() or None
         self._http = http or httpx.Client(timeout=30)
         self.max_retries = max_retries
 
@@ -122,6 +128,8 @@ class WooClient:
 
     def _get(self, path: str, params: dict):
         url = f"{self.base_url}{API_ROOT}{path}"
+        if self._currency:
+            params = {**params, "currency": self._currency}
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):
             try:
@@ -174,7 +182,22 @@ def _to_product(raw: dict) -> WooProduct | None:
         manage_stock=manage_stock,
         stock_status=(raw.get("stock_status") or None),
         type=(raw.get("type") or "simple"),
+        price=_advertised_price(raw),
     )
+
+
+def _advertised_price(raw: dict) -> float | None:
+    """The shop's base-currency advertised price. Prefer the *stored* ``regular_price`` /
+    ``sale_price`` over the computed ``price`` field: multi-currency plugins convert ``price``
+    to the request's display currency, but leave regular/sale in the store's base currency.
+    Sale price wins when the product is on sale; ``price`` is only a last-resort fallback."""
+    regular = _num(raw.get("regular_price"))
+    sale = _num(raw.get("sale_price"))
+    if raw.get("on_sale") and sale is not None:
+        return sale
+    if regular is not None:
+        return regular
+    return _num(raw.get("price"))
 
 
 def _chunks(items: list, size: int):

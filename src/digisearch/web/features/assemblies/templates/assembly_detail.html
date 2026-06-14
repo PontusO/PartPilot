@@ -34,6 +34,9 @@
     <div class="card"><b>{{ a.used_in|length }}</b><small>used in</small></div>
     <div class="card"><b>{{ "%.0f"|format(a.total_qty) }}</b><small>on hand</small></div>
     <div class="card"><b>{{ "%.2f"|format(a.total_cost) }}</b><small>total cost (SEK)</small></div>
+    {% if a.external_price is not none %}
+    <div class="card"><b>{{ "%.2f"|format(a.external_price) }}</b><small>webshop price SEK</small></div>
+    {% endif %}
     {% if can_edit %}
     <a href="/assemblies/{{ a.id }}/edit" style="margin:0 0 0 auto; display:flex;
        align-items:center; justify-content:center; background:var(--accent); color:#fff;

@@ -20,7 +20,7 @@ def list_assemblies(db: Database, search: str | None = None) -> list[dict]:
     like = f"%{search}%" if search else None
     with db.connect() as conn:
         rows = conn.execute(
-            """SELECT p.id, p.part_no, p.value, p.rev, p.total_qty,
+            """SELECT p.id, p.part_no, p.value, p.rev, p.total_qty, p.external_price,
                       (SELECT COUNT(*) FROM bom_lines b WHERE b.parent_id = p.id) AS line_count,
                       (SELECT COUNT(*) FROM bom_lines b WHERE b.child_id = p.id) AS used_in
                FROM parts p

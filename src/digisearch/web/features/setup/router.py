@@ -252,7 +252,8 @@ async def save_orders(request: Request):
 # ----- Webshop (WooCommerce) -----
 
 def _build_woo_client(settings: dict) -> WooClient:
-    return WooClient(settings["base_url"], settings["consumer_key"], settings["consumer_secret"])
+    return WooClient(settings["base_url"], settings["consumer_key"], settings["consumer_secret"],
+                     currency=settings.get("currency") or None)
 
 
 @router.get("/webshop", response_class=HTMLResponse)

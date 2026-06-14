@@ -28,7 +28,8 @@
     <table>
       <thead>
         <tr><th>Part No</th><th>Value / name</th><th>Rev</th>
-            <th class="num">BOM lines</th><th class="num">Used in</th><th class="num">On hand</th></tr>
+            <th class="num">BOM lines</th><th class="num">Used in</th><th class="num">On hand</th>
+            <th class="num">Webshop (SEK)</th></tr>
       </thead>
       <tbody>
         {% for a in assemblies %}
@@ -39,9 +40,10 @@
           <td class="num">{% if a.line_count %}{{ a.line_count }}{% else %}<span class="flag">0</span>{% endif %}</td>
           <td class="num">{{ a.used_in or '' }}</td>
           <td class="num">{{ "%.0f"|format(a.total_qty) }}</td>
+          <td class="num">{% if a.external_price is not none %}{{ "%.2f"|format(a.external_price) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        {% if not assemblies %}<tr><td colspan="6" class="note">No assemblies.</td></tr>{% endif %}
+        {% if not assemblies %}<tr><td colspan="7" class="note">No assemblies.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>

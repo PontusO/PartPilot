@@ -1384,6 +1384,24 @@ def test_webshop_sync_pushes_builds_back(app, monkeypatch):
     assert catrepo.get_part(db, pid)["webshop_synced_qty"] == 80
 
 
+def test_external_price_shows_on_list_pages(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import repo as catrepo
+    db = app.state.database
+    pid = catrepo.create_part(db, part={"part_no": "99-LIST"}, supplier_lines=[])
+    aid = asmrepo.create_assembly(db, {"part_no": "98-LIST"})
+    with db.connect() as conn:
+        conn.execute("UPDATE parts SET external_price = 65 WHERE id IN (?, ?)", (pid, aid))
+        conn.commit()
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    parts_page = client.get("/catalog").text
+    assert "Webshop (SEK)" in parts_page and "65.00" in parts_page
+    asm_page = client.get("/assemblies").text
+    assert "Webshop (SEK)" in asm_page and "65.00" in asm_page
+
+
 def test_webshop_sync_blocked_when_unconfigured(app):
     app.state.store.create_user("boss", "pw", role="admin")
     admin = TestClient(app)

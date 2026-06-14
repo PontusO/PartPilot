@@ -18,7 +18,8 @@ _next_id = [1000]
 def _product(sku, name="Widget", qty=5, manage=True, **extra):
     _next_id[0] += 1
     p = {"id": _next_id[0], "sku": sku, "name": name, "manage_stock": manage,
-         "stock_quantity": qty, "stock_status": "instock", "type": "simple"}
+         "stock_quantity": qty, "stock_status": "instock", "type": "simple",
+         "price": "12.50", "regular_price": "12.50", "sale_price": "", "on_sale": False}
     p.update(extra)
     return p
 
@@ -34,6 +35,7 @@ def test_iter_products_normalizes_fields():
     assert p.sku == "99-100" and p.name == "Resistor"
     assert p.stock_quantity == 42.0 and p.manage_stock is True
     assert p.description == "1k 0402"  # HTML stripped
+    assert p.price == 12.50            # parsed from the shop price string
 
 
 @respx.mock
@@ -84,6 +86,43 @@ def test_product_carries_woo_id():
         200, json=[{"id": 77, "sku": "99-1", "name": "R", "manage_stock": True,
                     "stock_quantity": 5, "type": "simple"}]))
     assert list(_client().iter_products())[0].id == 77
+
+
+@respx.mock
+def test_price_prefers_stored_base_price_over_converted():
+    # A multi-currency plugin converted `price` to EUR, but regular_price stays base SEK.
+    respx.get(PRODUCTS).mock(return_value=httpx.Response(
+        200, json=[_product("99-00230-1", price="6.27", regular_price="65", on_sale=False)]))
+    assert list(_client().iter_products())[0].price == 65.0
+
+
+@respx.mock
+def test_sale_price_used_when_on_sale():
+    respx.get(PRODUCTS).mock(return_value=httpx.Response(
+        200, json=[_product("99-1", price="80", regular_price="100",
+                            sale_price="80", on_sale=True)]))
+    assert list(_client().iter_products())[0].price == 80.0
+
+
+@respx.mock
+def test_price_falls_back_to_price_when_no_regular():
+    respx.get(PRODUCTS).mock(return_value=httpx.Response(
+        200, json=[_product("99-1", price="9.99", regular_price="", on_sale=False)]))
+    assert list(_client().iter_products())[0].price == 9.99
+
+
+@respx.mock
+def test_currency_override_is_sent_on_reads():
+    route = respx.get(PRODUCTS).mock(return_value=httpx.Response(200, json=[]))
+    WooClient(BASE, "ck", "cs", currency="SEK", max_retries=1).ping()
+    assert route.calls.last.request.url.params["currency"] == "SEK"
+
+
+@respx.mock
+def test_no_currency_param_by_default():
+    route = respx.get(PRODUCTS).mock(return_value=httpx.Response(200, json=[]))
+    _client().ping()
+    assert "currency" not in route.calls.last.request.url.params
 
 
 @respx.mock
