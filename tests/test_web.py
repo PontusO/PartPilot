@@ -1384,6 +1384,115 @@ def test_webshop_sync_pushes_builds_back(app, monkeypatch):
     assert catrepo.get_part(db, pid)["webshop_synced_qty"] == 80
 
 
+class _FakeFortnox:
+    def __init__(self, *, new_customer="500", invoice_no="9001"):
+        self.created_customers, self.created_invoices = [], []
+        self._new, self._inv = new_customer, invoice_no
+
+    def find_customer_by_orgno(self, org):
+        return None
+
+    def create_customer(self, payload):
+        self.created_customers.append(payload)
+        return {"CustomerNumber": self._new}
+
+    def create_invoice(self, payload):
+        self.created_invoices.append(payload)
+        return {"DocumentNumber": self._inv}
+
+
+def _ship_order(db, *, linked=False, org_no="556-1"):
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.contacts import repo as conrepo
+    from digisearch.web.features.customer_orders import repo as corepo
+    from digisearch.web.features.despatch import repo as despatch_repo
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme AB", "org_no": org_no})
+    if linked:
+        with db.connect() as conn:
+            conn.execute("UPDATE contacts SET fortnox_customer_number='123' WHERE id=?", (cust,))
+            conn.commit()
+    pid = catrepo.create_part(db, part={"part_no": "99-1", "value": "W"}, supplier_lines=[],
+                              opening={"qty": 50})
+    oid = corepo.create_order(db, {"customer_id": cust})
+    corepo.add_line(db, oid, pid, 2, 50.0, None)
+    return cust, oid
+
+
+def test_fortnox_settings_admin_only_and_connect_needs_config(app):
+    app.state.store.create_user("boss", "pw", role="admin")
+    buyer = TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    assert buyer.get("/setup/fortnox", follow_redirects=False).status_code == 403
+
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    # connecting before config is saved is refused
+    assert admin.get("/setup/fortnox/connect", follow_redirects=False).status_code == 400
+    r = admin.post("/setup/fortnox", data={"client_id": "cid", "client_secret": "sec",
+                                           "redirect_uri": "https://pp/setup/fortnox/callback",
+                                           "default_vat": "25"})
+    assert r.status_code == 200 and "Saved" in r.text
+    # now connect redirects to Fortnox's authorize URL
+    c = admin.get("/setup/fortnox/connect", follow_redirects=False)
+    assert c.status_code == 303 and c.headers["location"].startswith("https://apps.fortnox.se/oauth-v1/auth")
+
+
+def test_contact_org_no_round_trips_through_form(app):
+    from digisearch.web.features.contacts import repo as conrepo
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    r = client.post("/contacts/new", data={"kind": "customer", "name": "Globex",
+                                           "org_no": "556677-8899"}, follow_redirects=False)
+    assert r.status_code in (303, 200)
+    c = [x for x in conrepo.list_contacts(app.state.database) if x["name"] == "Globex"][0]
+    assert conrepo.get_contact(app.state.database, c["id"])["org_no"] == "556677-8899"
+
+
+def test_despatch_auto_invoices_when_fortnox_connected(app, monkeypatch):
+    from digisearch.web.features.despatch import fortnox_invoice as fi
+    from digisearch.web.features.despatch import repo as despatch_repo
+    db = app.state.database
+    cust, oid = _ship_order(db, linked=True)            # already linked → no confirmation needed
+    fake = _FakeFortnox(invoice_no="9001")
+    monkeypatch.setattr(fi, "build_client", lambda db: fake)
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
+    r = client.post(f"/despatch/from-order/{oid}",
+                    data={"ship": str(line_id), f"qty_{line_id}": "2"}, follow_redirects=False)
+    assert r.status_code == 303
+    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    d = despatch_repo.get_despatch(db, desp_id)
+    assert d["invoice_no"] == "9001" and len(fake.created_invoices) == 1
+
+
+def test_despatch_needs_customer_confirmation_then_confirm(app, monkeypatch):
+    from digisearch.web.features.despatch import fortnox_invoice as fi
+    from digisearch.web.features.despatch import repo as despatch_repo
+    db = app.state.database
+    cust, oid = _ship_order(db, linked=False)           # not linked, no Fortnox match → confirm first
+    fake = _FakeFortnox(new_customer="777", invoice_no="9100")
+    monkeypatch.setattr(fi, "build_client", lambda db: fake)
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
+    r = client.post(f"/despatch/from-order/{oid}",
+                    data={"ship": str(line_id), f"qty_{line_id}": "2"}, follow_redirects=False)
+    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    # auto-invoice on despatch stopped to ask: no invoice yet, prompt on the detail page
+    detail = client.get(f"/despatch/{desp_id}").text
+    assert "in Fortnox yet" in detail and "Create customer" in detail
+    assert fake.created_invoices == []
+
+    # confirm → creates customer + invoice
+    r2 = client.post(f"/despatch/{desp_id}/fortnox-invoice", data={"confirm": "1"})
+    assert r2.status_code == 200 and "9100" in r2.text
+    assert len(fake.created_customers) == 1 and len(fake.created_invoices) == 1
+    assert despatch_repo.get_despatch(db, desp_id)["invoice_no"] == "9100"
+
+
 def test_external_price_shows_on_list_pages(app):
     from digisearch.web.features.assemblies import repo as asmrepo
     from digisearch.web.features.catalog import repo as catrepo
@@ -1449,3 +1558,4 @@ def test_convert_requires_write_role(app):
     _login(ware, "ware1", "pw")                          # warehouse can't edit assemblies
     assert ware.post(f"/assemblies/{aid}/convert-to-component",
                      follow_redirects=False).status_code == 403
+

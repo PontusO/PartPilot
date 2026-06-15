@@ -90,3 +90,51 @@ def save_webshop(db: Database, data: dict) -> None:
 
 def set_webshop_synced(db: Database, when: str) -> None:
     set_setting(db, "webshop.last_sync_at", when)
+
+
+# ---- Fortnox (accounting) settings + OAuth tokens ----
+
+# Integration config, stored as "fortnox.<field>". Tokens live under fortnox.access_token /
+# fortnox.refresh_token / fortnox.token_expires_at and are managed separately (they rotate).
+FORTNOX_FIELDS = ("client_id", "client_secret", "redirect_uri", "default_vat", "default_account")
+
+
+def get_fortnox(db: Database) -> dict:
+    with db.connect() as conn:
+        rows = dict(conn.execute(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'fortnox.%'").fetchall())
+    data = {f: rows.get(f"fortnox.{f}", "") or "" for f in FORTNOX_FIELDS}
+    data["default_vat"] = data["default_vat"] or "25"        # Swedish standard rate
+    data["configured"] = bool(data["client_id"] and data["client_secret"] and data["redirect_uri"])
+    data["connected"] = bool(rows.get("fortnox.refresh_token"))
+    return data
+
+
+def save_fortnox(db: Database, data: dict) -> None:
+    for f in FORTNOX_FIELDS:
+        set_setting(db, f"fortnox.{f}", (data.get(f) or "").strip() or None)
+
+
+def save_fortnox_tokens(db: Database, tokens) -> None:
+    set_setting(db, "fortnox.access_token", tokens.access_token)
+    set_setting(db, "fortnox.refresh_token", tokens.refresh_token)
+    set_setting(db, "fortnox.token_expires_at", tokens.expires_at.isoformat())
+
+
+def load_fortnox_tokens(db: Database):
+    """Return the stored FortnoxTokens, or None if the integration isn't connected."""
+    from datetime import datetime
+
+    from digisearch.fortnox import FortnoxTokens
+
+    access = get_setting(db, "fortnox.access_token")
+    refresh = get_setting(db, "fortnox.refresh_token")
+    expires = get_setting(db, "fortnox.token_expires_at")
+    if not (access and refresh and expires):
+        return None
+    return FortnoxTokens(access, refresh, datetime.fromisoformat(expires))
+
+
+def clear_fortnox_tokens(db: Database) -> None:
+    for k in ("access_token", "refresh_token", "token_expires_at"):
+        set_setting(db, f"fortnox.{k}", None)

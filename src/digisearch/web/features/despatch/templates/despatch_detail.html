@@ -34,19 +34,65 @@
     </table>
   </div>
 
-  {% if can_invoice and d.status == 'open' %}
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Invoice</h2>
-  <form method="post" action="/despatch/{{ d.id }}/invoice"
-        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end;
-               background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
-    <div><label for="invoice_no">Invoice no.</label>
-      <input id="invoice_no" name="invoice_no" type="text"
-             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
-    <div><label for="invoice_date">Invoice date</label>
-      <input id="invoice_date" name="invoice_date" type="date"
-             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
-    <button type="submit">Mark invoiced</button>
-  </form>
+
+  {% if fortnox_result %}
+    {% set ok = fortnox_result.status == 'invoiced' %}
+    <div style="margin-bottom:.8rem; padding:.55rem .85rem; border-radius:8px;
+         background:{{ 'rgba(70,180,120,.15)' if ok else '#33260f' }};
+         border:1px solid {{ 'var(--ok)' if ok else 'var(--warn)' }};
+         color:{{ 'inherit' if ok else '#f3c06b' }};">{{ fortnox_result.message }}</div>
+  {% endif %}
+
+  {% if d.invoice_no %}
+    <div style="padding:.6rem .9rem; border-radius:9px; background:rgba(70,180,120,.12);
+         border:1px solid var(--ok);">Invoiced in Fortnox — invoice <b>{{ d.invoice_no }}</b>{% if d.invoice_date %} ({{ d.invoice_date }}){% endif %}.</div>
+  {% elif can_invoice %}
+    {% if fortnox_connected %}
+      {% if customer_preview %}
+        {% set cp = customer_preview %}
+        <p class="note">This customer isn't in Fortnox yet. Confirm to create it there, then invoice:</p>
+        <table style="max-width:480px; margin-bottom:.8rem;">
+          <tbody>
+            <tr><th style="text-align:left;">Name</th><td>{{ cp.Name or '' }}</td></tr>
+            {% if cp.OrganisationNumber %}<tr><th style="text-align:left;">Org. no.</th><td>{{ cp.OrganisationNumber }}</td></tr>{% endif %}
+            {% if cp.Address1 %}<tr><th style="text-align:left;">Address</th><td>{{ cp.Address1 }}{% if cp.ZipCode or cp.City %}, {{ cp.ZipCode }} {{ cp.City }}{% endif %}</td></tr>{% endif %}
+            {% if cp.Email %}<tr><th style="text-align:left;">Email</th><td>{{ cp.Email }}</td></tr>{% endif %}
+            <tr><th style="text-align:left;">VAT type</th><td>{{ cp.VATType }} · {{ cp.Currency }}</td></tr>
+          </tbody>
+        </table>
+        <form method="post" action="/despatch/{{ d.id }}/fortnox-invoice" style="display:inline;">
+          <input type="hidden" name="confirm" value="1">
+          <button type="submit">Create customer &amp; invoice</button>
+        </form>
+      {% else %}
+        {% if d.invoice_error %}
+          <div style="margin-bottom:.7rem; padding:.5rem .8rem; border-radius:7px; background:#33260f;
+               border:1px solid var(--warn); color:#f3c06b;">{{ d.invoice_error }}</div>
+        {% endif %}
+        <form method="post" action="/despatch/{{ d.id }}/fortnox-invoice" style="display:inline;">
+          <button type="submit">{{ 'Retry Fortnox invoice' if d.invoice_error else 'Create Fortnox invoice' }}</button>
+        </form>
+      {% endif %}
+    {% else %}
+      <p class="note">Connect Fortnox in <a href="/setup/fortnox">Setup → Fortnox</a> to create draft
+        invoices automatically when you despatch.</p>
+    {% endif %}
+
+    <details style="margin-top:1rem;">
+      <summary class="note">Record an invoice number manually instead</summary>
+      <form method="post" action="/despatch/{{ d.id }}/invoice"
+            style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-top:.6rem;
+                   background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
+        <div><label for="invoice_no">Invoice no.</label>
+          <input id="invoice_no" name="invoice_no" type="text"
+                 style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+        <div><label for="invoice_date">Invoice date</label>
+          <input id="invoice_date" name="invoice_date" type="date"
+                 style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;"></div>
+        <button type="submit" class="ghost">Mark invoiced</button>
+      </form>
+    </details>
   {% endif %}
 </div>
 {% endblock %}

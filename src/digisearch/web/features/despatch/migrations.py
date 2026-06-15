@@ -43,4 +43,14 @@ MIGRATIONS = [
         CREATE INDEX ix_despline_desp ON despatch_lines(despatch_id);
         """,
     ),
+    Migration(
+        version=2,
+        name="despatch invoice error",
+        sql="""
+        -- Last Fortnox invoicing problem for this despatch (e.g. "awaiting customer confirmation"
+        -- or an API error). NULL when invoiced cleanly or not yet attempted; drives a retry/confirm
+        -- prompt on the despatch. The Fortnox invoice number itself goes in the existing invoice_no.
+        ALTER TABLE despatches ADD COLUMN invoice_error TEXT;
+        """,
+    ),
 ]

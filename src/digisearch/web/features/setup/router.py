@@ -6,6 +6,7 @@ here and add its route. All routes are admin-only.
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -13,11 +14,13 @@ from uuid import uuid4
 import sqlite3
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from digisearch.config import Settings
 
+from digisearch.fortnox import FortnoxError
+from digisearch.fortnox.client import authorize_url, exchange_code
 from digisearch.woocommerce import WooClient, WooError
 
 from ...auth import ROLES
@@ -54,6 +57,9 @@ TOOLS = [
     {"label": "Sync webshop", "url": "/setup/webshop/sync", "icon": "🔄",
      "description": "Pull products from the webshop: match by part number (SKU) and update stock, "
                     "creating any parts/assemblies that don't exist yet. Webshop is authoritative."},
+    {"label": "Fortnox", "url": "/setup/fortnox", "icon": "🧮",
+     "description": "Connect Fortnox accounting and set invoicing defaults. Despatches then create "
+                    "draft customer invoices in Fortnox."},
 ]
 
 
@@ -332,6 +338,72 @@ async def webshop_sync_run(request: Request):
     if not dry_run:
         repo.set_webshop_synced(db, datetime.now().isoformat(timespec="seconds"))
     return page(report=report)
+
+
+# ----- Fortnox (accounting / invoicing) -----
+
+def _fortnox_page(request: Request, *, saved=False, error=None, connected_now=False, status=200):
+    return request.app.state.templates.TemplateResponse(
+        request, "fortnox.html",
+        {"fortnox": repo.get_fortnox(request.app.state.database), "saved": saved,
+         "error": error, "connected_now": connected_now}, status_code=status,
+    )
+
+
+@router.get("/fortnox", response_class=HTMLResponse)
+def fortnox_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return _fortnox_page(request, connected_now=bool(request.query_params.get("connected")))
+
+
+@router.post("/fortnox", response_class=HTMLResponse)
+async def save_fortnox(request: Request):
+    require_role(request, SETUP_ROLES)
+    form = await request.form()
+    repo.save_fortnox(request.app.state.database,
+                      {f: form.get(f) for f in repo.FORTNOX_FIELDS})
+    return _fortnox_page(request, saved=True)
+
+
+@router.get("/fortnox/connect")
+def fortnox_connect(request: Request):
+    require_role(request, SETUP_ROLES)
+    cfg = repo.get_fortnox(request.app.state.database)
+    if not cfg["configured"]:
+        return _fortnox_page(request, error="Save the Client ID, secret and redirect URL first.",
+                             status=400)
+    state = secrets.token_urlsafe(24)
+    request.session["fortnox_oauth_state"] = state
+    return RedirectResponse(
+        authorize_url(cfg["client_id"], cfg["redirect_uri"], state), status_code=303)
+
+
+@router.get("/fortnox/callback", response_class=HTMLResponse)
+def fortnox_callback(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    params = request.query_params
+    expected = request.session.pop("fortnox_oauth_state", None)
+    if params.get("error"):
+        return _fortnox_page(request, error=f"Fortnox declined: {params.get('error')}", status=400)
+    if not params.get("code") or not expected or params.get("state") != expected:
+        return _fortnox_page(request, error="Authorisation failed or expired — try connecting again.",
+                             status=400)
+    cfg = repo.get_fortnox(db)
+    try:
+        tokens = exchange_code(cfg["client_id"], cfg["client_secret"],
+                               params["code"], cfg["redirect_uri"])
+    except FortnoxError as exc:
+        return _fortnox_page(request, error=str(exc), status=502)
+    repo.save_fortnox_tokens(db, tokens)
+    return RedirectResponse("/setup/fortnox?connected=1", status_code=303)
+
+
+@router.post("/fortnox/disconnect", response_class=HTMLResponse)
+async def fortnox_disconnect(request: Request):
+    require_role(request, SETUP_ROLES)
+    repo.clear_fortnox_tokens(request.app.state.database)
+    return _fortnox_page(request, saved=True)
 
 
 @router.get("/import", response_class=HTMLResponse)

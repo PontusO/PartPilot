@@ -38,6 +38,8 @@
     {% if c.fax %}<div><small>Fax</small>{{ c.fax }}</div>{% endif %}
     {% if c.website %}<div><small>Web</small><a href="{{ c.website }}" target="_blank" rel="noopener">{{ c.website }}</a></div>{% endif %}
     {% if c.currency %}<div><small>Currency</small>{{ c.currency }}</div>{% endif %}
+    {% if c.org_no %}<div><small>Org. / VAT no.</small>{{ c.org_no }}</div>{% endif %}
+    {% if c.fortnox_customer_number %}<div><small>Fortnox customer</small>#{{ c.fortnox_customer_number }}</div>{% endif %}
     {% if c.discount %}<div><small>Discount</small>{{ "%g"|format(c.discount) }}%</div>{% endif %}
   </div>
 

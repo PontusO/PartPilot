@@ -7,7 +7,7 @@ from ...core.db import Database
 KINDS = ("supplier", "customer", "other")
 
 _FIELDS = ("kind", "name", "short_name", "contact", "email", "phone", "phone2", "fax",
-           "address", "postcode", "country", "website", "currency", "discount", "notes")
+           "address", "postcode", "country", "org_no", "website", "currency", "discount", "notes")
 
 # Structured address columns written from the address form.
 _ADDRESS_FIELDS = ("label", "company", "contact", "line1", "line2", "city", "region",

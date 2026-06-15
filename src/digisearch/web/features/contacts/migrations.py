@@ -76,4 +76,15 @@ MIGRATIONS = [
         CREATE INDEX ix_ctaddr_contact ON contact_addresses(contact_id);
         """,
     ),
+    Migration(
+        version=3,
+        name="contact org number + fortnox link",
+        sql="""
+        -- Organisation / VAT registration number, used to match (and, with confirmation, create)
+        -- the matching customer in Fortnox so we never duplicate customers there.
+        ALTER TABLE contacts ADD COLUMN org_no TEXT;
+        -- The linked Fortnox CustomerNumber once matched/created; reused on later invoices.
+        ALTER TABLE contacts ADD COLUMN fortnox_customer_number TEXT;
+        """,
+    ),
 ]

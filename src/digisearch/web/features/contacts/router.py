@@ -30,7 +30,7 @@ def _parse_contact(form) -> dict:
         "short_name": s("short_name"), "contact": s("contact"), "email": s("email"),
         "phone": s("phone"), "phone2": s("phone2"), "fax": s("fax"),
         "address": s("address"), "postcode": s("postcode"), "country": s("country"),
-        "website": s("website"),
+        "org_no": s("org_no"), "website": s("website"),
         "currency": s("currency"), "discount": _num(form.get("discount")), "notes": s("notes"),
     }
 

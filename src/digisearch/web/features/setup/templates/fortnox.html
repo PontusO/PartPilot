@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Fortnox · PartPilot{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:640px;">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Fortnox</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if connected_now %}<div style="background:rgba(70,180,120,.15); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">Connected to Fortnox.</div>
+  {% elif saved %}<div style="background:rgba(70,180,120,.15); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">Saved.</div>{% endif %}
+
+  <p class="note">Connect Fortnox so despatching a customer order creates a <b>draft</b> invoice in
+    Fortnox (one per despatch). Create an integration in the
+    <a href="https://www.fortnox.se/developer" target="_blank" rel="noopener">Fortnox Developer Portal</a>
+    with the <code>invoice</code> and <code>customer</code> scopes, set its redirect URL to the value
+    below, and paste the Client ID/Secret here.</p>
+
+  <div style="margin:.8rem 0; padding:.6rem .9rem; border-radius:9px;
+       background:{{ 'rgba(70,180,120,.10)' if fortnox.connected else '#33260f' }};
+       border:1px solid {{ 'var(--ok)' if fortnox.connected else 'var(--warn)' }};">
+    {% if fortnox.connected %}
+      <b style="color:var(--ok);">Connected.</b> Despatches will create draft invoices.
+    {% else %}
+      <b style="color:#f3c06b;">Not connected.</b> Save the details below, then connect.
+    {% endif %}
+  </div>
+
+  <form method="post" action="/setup/fortnox">
+    <label for="client_id">Client ID</label>
+    <input id="client_id" name="client_id" value="{{ fortnox.client_id }}">
+
+    <label for="client_secret">Client secret</label>
+    <input id="client_secret" name="client_secret" value="{{ fortnox.client_secret }}">
+
+    <label for="redirect_uri">Redirect URL</label>
+    <input id="redirect_uri" name="redirect_uri" placeholder="http://partpilot.local/setup/fortnox/callback"
+           value="{{ fortnox.redirect_uri }}">
+    <p class="note" style="margin-top:.3rem;">Must exactly match the redirect URL registered in your
+      Fortnox integration, and end in <code>/setup/fortnox/callback</code>.</p>
+
+    <div style="display:flex; gap:.8rem; flex-wrap:wrap; margin-top:.4rem;">
+      <div style="width:140px;">
+        <label for="default_vat">Default VAT %</label>
+        <input id="default_vat" name="default_vat" value="{{ fortnox.default_vat }}">
+      </div>
+      <div style="width:200px;">
+        <label for="default_account">Default sales account <span class="note">(optional)</span></label>
+        <input id="default_account" name="default_account" placeholder="e.g. 3001"
+               value="{{ fortnox.default_account }}">
+      </div>
+    </div>
+    <p class="note" style="margin-top:.3rem;">Invoices are created as drafts, so your accountant can
+      adjust VAT, accounts and EU/export handling before booking.</p>
+
+    <div style="margin-top:1rem; display:flex; gap:.6rem; align-items:center;">
+      <button type="submit">Save</button>
+      {% if fortnox.configured %}
+        <a href="/setup/fortnox/connect" style="display:flex; align-items:center;
+           justify-content:center; background:var(--accent); color:#fff; font-weight:600;
+           text-decoration:none; border-radius:9px; padding:.55rem 1.2rem;">
+           {{ 'Reconnect' if fortnox.connected else 'Connect to Fortnox' }}</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if fortnox.connected %}
+  <form method="post" action="/setup/fortnox/disconnect" style="margin-top:.8rem;"
+        onsubmit="return confirm('Disconnect Fortnox? Despatches will stop creating invoices until you reconnect.');">
+    <button type="submit" class="danger">Disconnect</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

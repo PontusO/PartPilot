@@ -21,9 +21,16 @@ class Database:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # timeout = how long a write waits for the lock before raising "database is locked".
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # WAL lets readers and a single writer run concurrently (writes don't block reads), which
+        # matters once several people use the app at once. busy_timeout makes overlapping writers
+        # wait rather than fail. NORMAL is the safe, recommended sync level under WAL.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
     def apply_migrations(self, registry: FeatureRegistry) -> list[tuple[str, int]]:
