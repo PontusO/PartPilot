@@ -200,6 +200,43 @@ def test_build_import_plan_classifies(db):
     assert plan[1]["product_url"]  # the verify link is carried into the review screen
 
 
+def test_build_import_plan_builds_ilabs_value(db):
+    """A resolved passive gets the iLabs slash notation; a missing field is flagged for review."""
+    from digisearch.models import (BomLine, Candidate, CompType, LineKind, PartSpec,
+                                   ResolvedLine, Status)
+    from digisearch.web.features.assemblies import import_bom
+    from digisearch.web.features.purchasing.service import ResolvedRun
+
+    # Resistor: BOM has value+tol+package; power comes from the distributor parametric.
+    r_spec = PartSpec(comp_type=CompType.RESISTOR, value_si=1e3, tolerance="5%",
+                      package_imperial="0402")
+    r_cand = Candidate(supplier="Digi-Key", mpn="R-MPN", dk_part_number="R-MPN-ND",
+                       parameters={"Power (Watts)": "0.0625W, 1/16W"})
+    # Capacitor: no voltage anywhere -> built partial and flagged.
+    c_spec = PartSpec(comp_type=CompType.CAPACITOR, value_si=56e-12, tolerance="5%",
+                      package_imperial="0603")
+    c_cand = Candidate(supplier="Digi-Key", mpn="C-MPN", dk_part_number="C-MPN-ND", parameters={})
+    run = ResolvedRun(
+        resolved=[
+            ResolvedLine(line=BomLine(refdes=["R1"], qty=1, value="1k"), kind=LineKind.GENERIC_PASSIVE,
+                         spec=r_spec, chosen=r_cand, status=Status.RESOLVED),
+            ResolvedLine(line=BomLine(refdes=["C1"], qty=1, value="56pF"), kind=LineKind.GENERIC_PASSIVE,
+                         spec=c_spec, chosen=c_cand, status=Status.RESOLVED),
+        ],
+        build_qty=1, currency="SEK", stock_checked=False, mouser_enabled=False,
+    )
+    plan = import_bom.build_import_plan(db, run)
+    assert plan[0]["value"] == "1K/5%/0.0625W/0402" and plan[0]["value_missing"] == []
+    assert plan[1]["value"] == "56pF/5%/0603" and plan[1]["value_missing"] == ["voltage"]
+
+    # Applying the flagged part surfaces it in the review list with its part_id.
+    asm = repo.create_assembly(db, {"part_no": "ASM-V"})
+    result = import_bom.apply_import_plan(db, asm, plan, accepted={0, 1})
+    review_pnos = {r["part_no"] for r in result["review"]}
+    assert review_pnos == {"C-MPN"}                       # only the cap needs checking
+    assert result["review"][0]["missing"] == ["voltage"]
+
+
 def test_apply_import_plan_creates_and_links(db):
     from digisearch.web.features.assemblies import import_bom
     from digisearch.web.features.catalog import repo as catrepo

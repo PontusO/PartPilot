@@ -4,9 +4,10 @@
 {% block content %}
 <div class="panel">
   <p class="note"><a href="/customer-orders/{{ order.id }}">← {{ order.order_ref or 'Order #' ~ order.id }}</a></p>
-  <h1>Despatch {{ order.order_ref or 'order #' ~ order.id }}</h1>
-  <p class="note">{{ order.customer_name or 'No customer' }} — enter the quantity to ship for each line.
-    Shipping issues stock out and consumes any reserved allocation.</p>
+  <h1>Pack &amp; ship {{ order.order_ref or 'order #' ~ order.id }}</h1>
+  <p class="note">{{ order.customer_name or 'No customer' }} — pick the lines and quantities to pack.
+    This opens a <b>packing list</b>; no stock moves until you've packed it, confirmed the package is
+    ready, and dispatched it.</p>
 
   {% if order.delivery_address %}{% set a = order.delivery_address %}
   <div style="margin-top:.6rem; padding:.7rem .95rem; background:#0d1219; border:1px solid var(--line);
@@ -26,7 +27,7 @@
   <div class="note" style="margin-top:1rem;">Nothing left to ship — every line is fully despatched.</div>
   {% else %}
   <form method="post" action="/despatch/from-order/{{ order.id }}"
-        onsubmit="return confirm('Ship the entered quantities? This issues stock out.');">
+        onsubmit="return confirm('Create a packing list for the entered quantities?');">
     <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -57,7 +58,7 @@
       </table>
     </div>
     <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
-      <button type="submit">Despatch</button>
+      <button type="submit">Create packing list</button>
       <button type="button" onclick="window.location.href='/customer-orders/{{ order.id }}'">Cancel</button>
     </div>
   </form>

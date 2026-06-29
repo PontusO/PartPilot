@@ -11,9 +11,11 @@ from __future__ import annotations
 from ...core.db import Database
 from .repo import _location_id
 
-# Movement types. Sign convention is enforced by the caller via the delta.
+# Movement types. Sign convention is enforced by the caller via the delta; no logic branches
+# on the string, so these are purely labels for the ledger/report (the delta carries direction).
 RECEIVE = "RECEIVE"   # goods in (+)
 ISSUE = "ISSUE"       # consumed by a build / shipped (-)
+WOOSALE = "WOOSALE"   # sold via the WooCommerce webshop, applied by the stock sync (-)
 BUILD = "BUILD"       # finished assembly into stock (+)
 ADJUST = "ADJUST"     # manual correction (+/-)
 OPENING = "OPENING"   # opening balance (+)

@@ -5,7 +5,8 @@
   <p class="note"><a href="/catalog">← Parts</a></p>
   <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
     <h1 style="margin:0;">{{ part.part_no }}
-      {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}</h1>
+      {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+      {% if part.unlimited %}<span class="badge ok">∞ unlimited stock</span>{% endif %}</h1>
     {% if can_edit %}
     <a href="/catalog/{{ part.id }}/edit" style="background:var(--accent); color:#fff;
        font-weight:600; text-decoration:none; border-radius:7px; padding:.55rem 1.1rem;
@@ -15,10 +16,10 @@
   <p class="note">{{ part.value or '' }}{% if part.description %} — {{ part.description }}{% endif %}</p>
 
   <div class="cards">
-    <div class="card"><b>{{ "%.0f"|format(part.free) }}</b><small>free</small></div>
-    <div class="card"><b>{{ "%.0f"|format(part.total_qty) }}</b><small>on hand</small></div>
+    <div class="card"><b>{{ '∞' if part.unlimited else "%.0f"|format(part.free) }}</b><small>free</small></div>
+    <div class="card"><b>{{ '∞' if part.unlimited else "%.0f"|format(part.total_qty) }}</b><small>on hand</small></div>
     <div class="card"><b>{{ "%.0f"|format(part.total_alloc) }}</b><small>allocated</small></div>
-    <div class="card"><b>{{ "%.0f"|format(part.min_qty) }}</b><small>min</small></div>
+    {% if not part.unlimited %}<div class="card"><b>{{ "%.0f"|format(part.min_qty) }}</b><small>min</small></div>{% endif %}
     {% if part.unit_cost is not none %}
       <div class="card"><b>{{ "%.4f"|format(part.unit_cost) }}</b><small>unit cost SEK</small></div>
     {% endif %}

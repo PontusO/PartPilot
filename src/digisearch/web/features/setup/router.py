@@ -30,6 +30,7 @@ from ..catalog import woo_sync
 from ..catalog.importer import import_from_minimrp
 from ..contacts.importer import import_contacts
 from . import repo
+from .part_cleanup import build_clients, recover
 
 SETUP_ROLES = frozenset({"admin"})
 
@@ -40,6 +41,10 @@ TOOLS = [
     {"label": "Import from miniMRP", "url": "/setup/import", "icon": "📥",
      "description": "Import or re-sync parts, suppliers, stock and the assembly BOM structure "
                     "from the miniMRP database."},
+    {"label": "Part-number cleanup", "url": "/setup/part-cleanup", "icon": "🧹",
+     "description": "Find parts whose part number is really a distributor order code (no "
+                    "manufacturer P/N captured), look up the manufacturer P/N at Digi-Key/Mouser, "
+                    "and promote it — moving the supplier code into the supplier row."},
     {"label": "Company details", "url": "/setup/company", "icon": "🏢",
      "description": "Your company name and address used on purchase-order PDFs and ISO records."},
     {"label": "Production settings", "url": "/setup/production", "icon": "🏭",
@@ -280,6 +285,7 @@ async def save_webshop(request: Request):
     form = await request.form()
     data = {f: form.get(f) for f in repo.WEBSHOP_FIELDS}
     repo.save_webshop(db, data)
+    repo.set_webshop_time(db, form.get("sync_at_time"))
 
     tested, error = None, None
     if (form.get("action") or "") == "test":
@@ -452,3 +458,87 @@ async def run_import(request: Request):
     finally:
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink()
+
+
+# ----- Part-number cleanup -----
+
+def _cleanup_form_values(form) -> dict[int, dict]:
+    """Pull the editable MPN / manufacturer fields the page submitted, keyed by part id."""
+    values: dict[int, dict] = {}
+    for key in form.keys():
+        for prefix, field in (("mpn_", "mpn"), ("mfr_", "mfr")):
+            if key.startswith(prefix) and key[len(prefix):].isdigit():
+                values.setdefault(int(key[len(prefix):]), {})[field] = (form.get(key) or "").strip()
+    return values
+
+
+def _cleanup_page(request: Request, *, proposals=None, form_values=None,
+                  summary=None, error=None, status=200):
+    db = request.app.state.database
+    proposals = proposals or {}
+    form_values = form_values or {}
+    suspects = repo.find_suspect_parts(db)
+    for s in suspects:
+        prop = proposals.get(s["id"])
+        fv = form_values.get(s["id"], {})
+        s["mpn"] = (prop.mpn if prop and prop.mpn else fv.get("mpn", "")) or ""
+        s["mfr"] = (prop.manufacturer if prop and prop.manufacturer else fv.get("mfr", "")) or ""
+        s["source"] = prop.source if prop else None
+        s["note"] = prop.note if prop else None
+    return request.app.state.templates.TemplateResponse(
+        request, "part_cleanup.html",
+        {"suspects": suspects, "summary": summary, "error": error}, status_code=status)
+
+
+@router.get("/part-cleanup", response_class=HTMLResponse)
+def part_cleanup_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return _cleanup_page(request)
+
+
+@router.post("/part-cleanup", response_class=HTMLResponse)
+async def part_cleanup_run(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    form = await request.form()
+    action = (form.get("action") or "lookup").strip()
+    picked = {int(v) for v in form.getlist("pick") if str(v).isdigit()}
+    form_values = _cleanup_form_values(form)
+
+    if not picked:
+        return _cleanup_page(request, form_values=form_values,
+                             error="Tick at least one part first.", status=400)
+
+    if action == "lookup":
+        try:
+            dk, mouser = build_clients()
+        except Exception as exc:  # missing/invalid Digi-Key credentials
+            return _cleanup_page(request, form_values=form_values,
+                                 error=f"Couldn't reach the distributors: {exc}", status=500)
+        by_id = {s["id"]: s for s in repo.find_suspect_parts(db)}
+        proposals = {}
+        for pid in picked:
+            s = by_id.get(pid)
+            if s:
+                proposals[pid] = await run_in_threadpool(
+                    recover, s["part_no"], s["suppliers"], dk, mouser)
+        found = sum(1 for p in proposals.values() if p.mpn)
+        return _cleanup_page(
+            request, proposals=proposals, form_values=form_values,
+            summary={"kind": "lookup", "looked": len(proposals), "found": found})
+
+    # action == "apply"
+    applied, skipped = [], []
+    for pid in picked:
+        mpn = form_values.get(pid, {}).get("mpn", "")
+        mfr = form_values.get(pid, {}).get("mfr", "")
+        if not mpn:
+            skipped.append((pid, "no manufacturer P/N entered"))
+            continue
+        collision = repo.part_no_taken(db, pid, mpn)
+        if collision is not None:
+            skipped.append((pid, f"'{mpn}' already used by part #{collision}"))
+            continue
+        repo.set_part_mpn(db, pid, mpn, mfr)
+        applied.append((pid, mpn))
+    return _cleanup_page(request, summary={"kind": "apply", "applied": applied, "skipped": skipped})

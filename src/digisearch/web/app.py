@@ -8,8 +8,10 @@ knowing their internals.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -29,11 +31,12 @@ from .features.contacts import feature as contacts_feature
 from .features.customer_orders import feature as customer_orders_feature
 from .features.despatch import feature as despatch_feature
 from .features.goods_receipts import feature as goods_receipts_feature
-from .features.placeholders import make_placeholder
 from .features.planning import feature as planning_feature
 from .features.purchase_orders import feature as purchase_orders_feature
 from .features.purchasing import feature as purchasing_feature
+from .features.reports import feature as reports_feature
 from .features.setup import feature as setup_feature
+from .features.setup.scheduler import webshop_sync_loop
 from .features.work_orders import feature as work_orders_feature
 
 _CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
@@ -54,7 +57,7 @@ FEATURES = [
     despatch_feature,                                                        # order 52 (after Purchasing; needs CO FKs)
     purchase_orders_feature,                                                 # order 45
     goods_receipts_feature,                                                   # order 46 (views PO-owned GRN tables)
-    make_placeholder("reports", "Reports", "📊", 70),
+    reports_feature,                                                         # Reports (order 70)
     setup_feature,                                                          # Setup & Tools (order 80)
 ]
 
@@ -101,7 +104,24 @@ def create_app(
         context_processors=[inject],
     )
 
-    app = FastAPI(title="PartPilot")
+    # Background runners (currently just the webshop auto-sync). Disabled on scratch/test
+    # instances via PARTPILOT_DISABLE_SCHEDULER so a dev session never syncs the live shop.
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        task = None
+        if os.getenv("PARTPILOT_DISABLE_SCHEDULER") != "1":
+            task = asyncio.create_task(webshop_sync_loop(database))
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    app = FastAPI(title="PartPilot", lifespan=lifespan)
     app.add_middleware(SessionMiddleware, secret_key=secret_key, same_site="lax")
     app.state.store = store
     app.state.registry = registry

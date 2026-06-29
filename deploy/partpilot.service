@@ -1,0 +1,30 @@
+[Unit]
+Description=PartPilot web app (production)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=service1
+Group=service1
+WorkingDirectory=/home/service1/partpilot
+
+# Loads DIGIKEY_*/MOUSER_* credentials and PARTPILOT_SECRET_KEY into the process
+# environment (KEY=VALUE format; comment lines are ignored).
+EnvironmentFile=/home/service1/partpilot/.env
+
+# Run the venv console script directly (more robust under systemd than `uv run`).
+# Production binds all interfaces on port 8000 and uses the real database under data/.
+ExecStart=/home/service1/partpilot/.venv/bin/digisearch serve --host 0.0.0.0 --port 8000
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+
+# Light hardening — the service only needs to read/write the project tree.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

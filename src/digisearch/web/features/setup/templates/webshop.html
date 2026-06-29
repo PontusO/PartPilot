@@ -35,6 +35,15 @@
       <code>SEK</code>) to send <code>?currency=…</code> on price reads. PartPilot already prefers the
       stored base-currency price fields, so this is only a fallback for plugins that need the hint.</p>
 
+    <label for="sync_at_time">Daily automatic sync time</label>
+    <input id="sync_at_time" name="sync_at_time" type="time"
+           value="{{ webshop.sync_at_time }}">
+    <p class="note" style="margin-top:.3rem;">Time of day PartPilot automatically pulls from the shop
+      (e.g. <code>05:00</code> — before working hours, so stock never shifts under people mid-day).
+      The automatic run is <b>pull-only</b> — it reads stock, sales and prices but never writes stock
+      back to the shop; use the <a href="/setup/webshop/sync">Sync</a> button for that. Leave blank to
+      disable. Automatic sync does not run on test/scratch instances.</p>
+
     <div style="margin-top:1rem; display:flex; gap:.6rem;">
       <button type="submit" name="action" value="save">Save</button>
       <button type="submit" name="action" value="test" class="ghost">Save &amp; test connection</button>
@@ -45,6 +54,11 @@
   <p class="note" style="margin-top:1.2rem;">Configured. Use
     <a href="/setup/webshop/sync">Sync webshop</a> to pull products.
     {% if webshop.last_sync_at %}Last synced {{ webshop.last_sync_at }}.{% endif %}</p>
+  {% if webshop.sync_at_time %}
+  <p class="note">Auto-sync daily at {{ webshop.sync_at_time }}.
+    {% if webshop.last_auto_sync_at %}Last automatic run {{ webshop.last_auto_sync_at }}
+      — {{ webshop.last_auto_sync_status }}.{% else %}Not run yet.{% endif %}</p>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

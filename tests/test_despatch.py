@@ -33,29 +33,94 @@ def _order(db, qty=20, stock_qty=50):
     return cust, part, oid
 
 
-def test_despatch_ships_stock_and_consumes_allocation(db):
+def _pack_and_dispatch(db, desp_id, user="u"):
+    """Helper: check off every line, confirm ready, and dispatch."""
+    all_lines = {ln["id"] for ln in repo.get_despatch(db, desp_id)["lines"]}
+    repo.set_packing(db, desp_id, all_lines)
+    repo.confirm_packed(db, desp_id, user)
+    repo.dispatch(db, desp_id, user)
+
+
+def test_packing_list_moves_no_stock_until_dispatched(db):
     cust, part, oid = _order(db, qty=20, stock_qty=50)
     corepo.allocate_order(db, oid)                    # reserve 20
-    assert catrepo.get_part(db, part)["total_alloc"] == 20
     line_id = corepo.get_order(db, oid)["lines"][0]["id"]
 
-    desp_id = repo.create_despatch(db, oid, {line_id: 12}, "u")
+    desp_id = repo.create_packing_list(db, oid, {line_id: 12}, "u")
     assert desp_id is not None
+    d = repo.get_despatch(db, desp_id)
+    assert d["status"] == "packing" and d["all_packed"] is False
+    # nothing has moved yet: stock, allocation and shipped_qty untouched
+    p = catrepo.get_part(db, part)
+    assert p["total_qty"] == 50 and p["total_alloc"] == 20
+    assert corepo.get_order(db, oid)["lines"][0]["shipped_qty"] == 0
+    assert not cstock.movements_for_part(db, part)
+
+
+def test_dispatch_ships_stock_and_consumes_allocation(db):
+    cust, part, oid = _order(db, qty=20, stock_qty=50)
+    corepo.allocate_order(db, oid)                    # reserve 20
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    desp_id = repo.create_packing_list(db, oid, {line_id: 12}, "u")
+    _pack_and_dispatch(db, desp_id)
+
     p = catrepo.get_part(db, part)
     assert p["total_qty"] == 38                       # 50 − 12 shipped out
     assert p["total_alloc"] == 8                      # 20 − 12 allocation consumed
     assert corepo.get_order(db, oid)["lines"][0]["shipped_qty"] == 12
 
     d = repo.get_despatch(db, desp_id)
+    assert d["status"] == "open" and d["despatch_date"]
     assert d["lines"][0]["qty"] == 12 and d["lines"][0]["part_id"] == part
     assert abs(d["lines"][0]["unit_price"] - 10.0) < 1e-9
     assert any(m["mtype"] == "ISSUE" for m in cstock.movements_for_part(db, part))
 
 
+def test_cannot_confirm_until_every_line_packed(db):
+    cust, part, oid = _order(db, qty=20, stock_qty=50)
+    corepo.add_line(db, oid, part, 5, 10.0, None)     # a second line
+    line_ids = [ln["id"] for ln in corepo.get_order(db, oid)["lines"]]
+    desp_id = repo.create_packing_list(db, oid, {line_ids[0]: 2, line_ids[1]: 3}, "u")
+
+    desp_lines = repo.get_despatch(db, desp_id)["lines"]
+    repo.set_packing(db, desp_id, {desp_lines[0]["id"]})   # only one of two packed
+    with pytest.raises(ValueError):
+        repo.confirm_packed(db, desp_id, "u")
+    assert repo.get_despatch(db, desp_id)["status"] == "packing"
+
+    repo.set_packing(db, desp_id, {ln["id"] for ln in desp_lines})  # pack both
+    repo.confirm_packed(db, desp_id, "u")
+    assert repo.get_despatch(db, desp_id)["status"] == "packed"
+
+
+def test_cannot_dispatch_before_confirming_ready(db):
+    cust, part, oid = _order(db)
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    desp_id = repo.create_packing_list(db, oid, {line_id: 5}, "u")
+    with pytest.raises(ValueError):
+        repo.dispatch(db, desp_id, "u")               # still 'packing'
+    assert not cstock.movements_for_part(db, part)    # nothing shipped
+
+
+def test_reopen_and_cancel_packing(db):
+    cust, part, oid = _order(db)
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    desp_id = repo.create_packing_list(db, oid, {line_id: 5}, "u")
+    repo.set_packing(db, desp_id, {ln["id"] for ln in repo.get_despatch(db, desp_id)["lines"]})
+    repo.confirm_packed(db, desp_id, "u")
+    repo.reopen_packing(db, desp_id)
+    assert repo.get_despatch(db, desp_id)["status"] == "packing"
+
+    assert repo.cancel_packing(db, desp_id) == oid
+    assert repo.get_despatch(db, desp_id) is None      # discarded, no stock moved
+    assert not cstock.movements_for_part(db, part)
+
+
 def test_full_despatch_marks_order_shipped(db):
     cust, part, oid = _order(db, qty=20, stock_qty=50)
     line_id = corepo.get_order(db, oid)["lines"][0]["id"]
-    repo.create_despatch(db, oid, {line_id: 20}, "u")
+    desp_id = repo.create_packing_list(db, oid, {line_id: 20}, "u")
+    _pack_and_dispatch(db, desp_id)
     assert corepo.get_order(db, oid)["status"] == "shipped"
     assert [ln for ln in repo.shippable_lines(db, oid) if ln["outstanding"] > 0] == []
 
@@ -63,7 +128,8 @@ def test_full_despatch_marks_order_shipped(db):
 def test_invoice_a_despatch(db):
     cust, part, oid = _order(db)
     line_id = corepo.get_order(db, oid)["lines"][0]["id"]
-    desp_id = repo.create_despatch(db, oid, {line_id: 5}, "u")
+    desp_id = repo.create_packing_list(db, oid, {line_id: 5}, "u")
+    _pack_and_dispatch(db, desp_id)
     repo.mark_invoiced(db, desp_id, "INV-100", "2026-06-07")
     d = repo.get_despatch(db, desp_id)
     assert d["status"] == "invoiced" and d["invoice_no"] == "INV-100"

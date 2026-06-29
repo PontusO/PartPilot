@@ -256,9 +256,17 @@ async def import_apply(request: Request, part_id: int):
     job_id = (form.get("job_id") or "").strip()
     accepted = {int(v) for v in form.getlist("accept") if str(v).isdigit()}
 
+    result = None
     if re.fullmatch(r"[0-9a-f]+", job_id):  # guard against path traversal
         plan_path = jobs_dir / f"asmplan-{job_id}.json"
         if plan_path.exists():
-            apply_import_plan(db, part_id, json.loads(plan_path.read_text()), accepted)
+            result = apply_import_plan(db, part_id, json.loads(plan_path.read_text()), accepted)
             plan_path.unlink(missing_ok=True)
-    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+    # Nothing imported, or nothing needs a closer look -> straight back to the assembly.
+    if result is None or not result.get("review"):
+        return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+    # Some created parts have an incomplete value notation: show them with edit links to finish.
+    a = repo.get_assembly(db, part_id)
+    return request.app.state.templates.TemplateResponse(
+        request, "assembly_import_result.html", {"a": a, "result": result})

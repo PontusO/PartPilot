@@ -284,6 +284,40 @@ def test_no_spillage_leaves_requirements_unchanged(db):
     assert req["COMP-A"] == 60 and req["COMP-B"] == 50 and (wo["spillage_percent"] or 0) == 0
 
 
+def test_unlimited_stock_part_never_short_and_not_consumed(db):
+    a, b, sub, top = _setup(db)
+    # A labour line (e.g. SMT Assembly) with unlimited stock, added to TOP-1's BOM.
+    labour = catrepo.create_part(
+        db, part={"part_no": "SMT-ASSY", "unlimited_stock": 1},
+        supplier_lines=[{"supplier_name": "X", "unit_price": 2.5, "reel_qty": 1, "is_default": True}],
+        opening={"qty": 0})
+    asmrepo.add_bom_line(db, top, labour, 1, None)
+
+    wo = repo.create_work_order(db, {"assembly_id": top, "qty": 10})
+    w = repo.get_work_order(db, wo)
+    labour_line = next(ln for ln in w["lines"] if ln["part_no"] == "SMT-ASSY")
+    assert labour_line["unlimited"] is True
+    assert labour_line["short"] == 0           # unlimited -> never short even at 0 on hand
+    # only COMP-B is short; the unlimited labour line is not counted
+    assert w["short_count"] == 1
+
+    repo.issue_work_order(db, wo, "u")
+    assert catrepo.get_part(db, labour)["total_qty"] == 0   # not consumed from stock
+    assert not stock.movements_for_part(db, labour)         # no ISSUE movement posted
+    assert catrepo.get_part(db, a)["total_qty"] == 40       # ordinary parts still consumed
+
+
+def test_unlimited_stock_part_never_below_min(db):
+    pid = catrepo.create_part(
+        db, part={"part_no": "LABOUR", "min_qty": 100, "unlimited_stock": 1},
+        supplier_lines=[{"supplier_name": "X", "unit_price": 1, "reel_qty": 1, "is_default": True}],
+        opening={"qty": 0})
+    parts, _ = catrepo.list_parts(db)
+    row = next(p for p in parts if p["id"] == pid)
+    assert row["unlimited"] is True and row["below_min"] is False
+    assert catrepo.summary(db)["below_min"] == 0   # excluded from the below-min count
+
+
 def test_only_assemblies_with_bom_are_buildable(db):
     _setup(db)
     catrepo.create_part(db, part={"part_no": "LONE"},

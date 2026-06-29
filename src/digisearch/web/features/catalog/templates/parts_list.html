@@ -51,12 +51,12 @@
         {% for p in parts %}
         <tr>
           <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a></td>
-          <td>{{ p.value or '' }}</td>
+          <td><a href="/catalog/{{ p.id }}/edit" target="_blank" rel="noopener">{{ p.value or '' }}</a></td>
           <td>{{ p.category or '' }}</td>
           <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>
-          <td class="num">{% if p.below_min %}<span class="badge bad">{{ "%.0f"|format(p.free) }}</span>{% else %}{{ "%.0f"|format(p.free) }}{% endif %}</td>
-          <td class="num">{{ "%.0f"|format(p.total_qty) }}</td>
-          <td class="num">{{ "%.0f"|format(p.min_qty) }}</td>
+          <td class="num">{% if p.unlimited %}∞{% elif p.below_min %}<span class="badge bad">{{ "%.0f"|format(p.free) }}</span>{% else %}{{ "%.0f"|format(p.free) }}{% endif %}</td>
+          <td class="num">{{ '∞' if p.unlimited else "%.0f"|format(p.total_qty) }}</td>
+          <td class="num">{{ '' if p.unlimited else "%.0f"|format(p.min_qty) }}</td>
           <td>{{ p.supplier or '' }}</td>
           <td>{{ p.supplier_pno or '' }}</td>
           <td class="num">{% if p.unit_price is not none %}{{ "%.4f"|format(p.unit_price) }}{% endif %}</td>

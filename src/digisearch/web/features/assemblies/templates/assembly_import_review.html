@@ -16,7 +16,7 @@
       <table>
         <thead>
           <tr><th>Add?</th><th>RefDes</th><th class="num">Qty</th><th>BOM value</th>
-              <th>Resolved part</th><th>Status</th><th>Note</th></tr>
+              <th>iLabs value</th><th>Resolved part</th><th>Status</th><th>Note</th></tr>
         </thead>
         <tbody>
           {% for it in plan %}
@@ -32,6 +32,10 @@
             <td>{{ it.refdes }}</td>
             <td class="num">{{ it.qty }}</td>
             <td>{{ it.orig }}</td>
+            <td>
+              {% if it.value %}<code>{{ it.value }}</code>{% else %}<span class="flag">—</span>{% endif %}
+              {% if it.value_missing %}<span class="badge warn" title="missing: {{ it.value_missing|join(', ') }}">⚠ {{ it.value_missing|length }}</span>{% endif %}
+            </td>
             <td>
               {% if it.product_url %}<a href="{{ it.product_url }}" target="_blank" rel="noopener">{{ it.part_no or 'view' }}</a>
               {% else %}{{ it.part_no or '' }}{% endif %}

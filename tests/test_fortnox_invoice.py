@@ -53,7 +53,12 @@ def _despatch(db, *, org_no=None, qty=2, price=50.0):
     oid = corepo.create_order(db, {"customer_id": cust})
     corepo.add_line(db, oid, pid, qty, price, None)
     line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
-    desp_id = despatch_repo.create_despatch(db, oid, {line_id: qty})
+    desp_id = despatch_repo.create_packing_list(db, oid, {line_id: qty})
+    # pack every line, confirm ready, and dispatch -> status 'open' (despatched, ready to invoice)
+    all_lines = {ln["id"] for ln in despatch_repo.get_despatch(db, desp_id)["lines"]}
+    despatch_repo.set_packing(db, desp_id, all_lines)
+    despatch_repo.confirm_packed(db, desp_id)
+    despatch_repo.dispatch(db, desp_id)
     return cust, desp_id
 
 

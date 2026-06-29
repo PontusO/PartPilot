@@ -1,0 +1,11 @@
+#!/bin/bash
+# Restart the PartPilot production service (the systemd unit installed from
+# deploy/partpilot.service) and show its status. Use after deploying new code,
+# editing .env, or whenever the running app needs a clean restart.
+set -euo pipefail
+
+SERVICE=partpilot
+
+echo "Restarting ${SERVICE}…"
+sudo systemctl restart "$SERVICE"
+sudo systemctl status "$SERVICE" --no-pager --lines=10

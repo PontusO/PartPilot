@@ -49,6 +49,7 @@ def _parse_part(form) -> dict:
         "rev": (form.get("rev") or "").strip() or None,
         "min_qty": _num(form.get("min_qty")) or 0,
         "notes": (form.get("notes") or "").strip() or None,
+        "unlimited_stock": 1 if form.get("unlimited_stock") else 0,
     }
 
 

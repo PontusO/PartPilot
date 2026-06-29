@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Stock movements · PartPilot{% endblock %}
+{% set badge = {"RECEIVE": "ok", "BUILD": "ok", "OPENING": "stock", "ISSUE": "bad", "WOOSALE": "warn", "ADJUST": "warn"} %}
+{% set type_label = {"RECEIVE": "Goods in", "ISSUE": "Issue / shipped", "WOOSALE": "Webshop sale",
+                     "BUILD": "Build", "ADJUST": "Adjustment", "OPENING": "Opening balance"} %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/reports">← Reports</a></p>
+  <h1>Stock movement ledger</h1>
+
+  <form method="get" action="/reports/stock-movements"
+        style="display:flex; flex-wrap:wrap; gap:.9rem; align-items:flex-end; margin:.4rem 0 1.1rem;">
+    <div>
+      <label style="margin:0 0 .3rem;">From</label>
+      <input type="date" name="start" value="{{ start }}"
+             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;">
+    </div>
+    <div>
+      <label style="margin:0 0 .3rem;">To</label>
+      <input type="date" name="end" value="{{ end }}"
+             style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;">
+    </div>
+    <div>
+      <label style="margin:0 0 .3rem;">Type</label>
+      <select name="mtype"
+              style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for t in types %}<option value="{{ t }}" {{ 'selected' if t == mtype else '' }}>{{ type_label.get(t, t) }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="ghost">Apply</button>
+    {% if mtype or start or end %}<a href="/reports/stock-movements" style="align-self:center;">reset</a>{% endif %}
+  </form>
+
+  <div class="cards">
+    <div class="card"><b>{{ summary.moves }}</b><small>movements</small></div>
+    <div class="card"><b>{{ summary.parts }}</b><small>parts touched</small></div>
+    <div class="card"><b>+{{ "%g"|format(summary.total_in) }}</b><small>units in</small></div>
+    <div class="card"><b>-{{ "%g"|format(summary.total_out) }}</b><small>units out</small></div>
+  </div>
+
+  {% if truncated %}
+  <p class="note">Showing the most recent {{ limit }} movements — narrow the date range to see the rest.</p>
+  {% endif %}
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>When</th><th>Part</th><th>Value</th><th>Type</th>
+        <th class="num">Change</th><th class="num">Balance</th>
+        <th>Location</th><th>Reference</th><th>Note</th><th>User</th>
+      </tr></thead>
+      <tbody>
+        {% for m in rows %}
+        <tr>
+          <td style="white-space:nowrap;">{{ m.moved_at }}</td>
+          <td><a href="/catalog/{{ m.part_id }}">{{ m.part_no }}</a></td>
+          <td>{{ m.value or '' }}</td>
+          <td><span class="badge {{ badge.get(m.mtype, 'muted') }}">{{ m.mtype }}</span></td>
+          <td class="num">{{ "+%g"|format(m.qty_delta) if m.qty_delta > 0 else "%g"|format(m.qty_delta) }}</td>
+          <td class="num">{{ "%g"|format(m.qty_after) }}</td>
+          <td>{{ m.location_name or '' }}</td>
+          <td>{{ m.reference or '' }}</td>
+          <td>{{ m.note or '' }}</td>
+          <td>{{ m.user or '' }}</td>
+        </tr>
+        {% endfor %}
+        {% if not rows %}<tr><td colspan="10" class="note">No stock movements in this range.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

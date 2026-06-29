@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Import done · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/assemblies/{{ a.id }}">← {{ a.part_no }}</a></p>
+  <h1>Imported into {{ a.part_no }}</h1>
+
+  <div class="cards">
+    <div class="card"><b>{{ result.created }}</b><small>parts created</small></div>
+    <div class="card"><b>{{ result.lines_added }}</b><small>BOM lines added</small></div>
+    <div class="card"><b>{{ result.skipped }}</b><small>skipped</small></div>
+  </div>
+
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Needs checking ({{ result.review|length }})</h2>
+  <p class="note">These parts were created but their iLabs <code>value</code> couldn't be fully built —
+    the distributor didn't expose every field. Open each one (new tab), confirm the value and fill
+    the missing detail, then come back here.</p>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Part</th><th>Value so far</th><th>Missing</th><th></th></tr></thead>
+      <tbody>
+        {% for r in result.review %}
+        <tr>
+          <td>{{ r.part_no or '#' ~ r.part_id }}</td>
+          <td>{% if r.value %}<code>{{ r.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
+          <td>{% for m in r.missing %}<span class="badge warn">{{ m }}</span> {% endfor %}</td>
+          <td><a href="/catalog/{{ r.part_id }}/edit" target="_blank" rel="noopener">Edit ↗</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:1.2rem;">
+    <a href="/assemblies/{{ a.id }}"><button type="button">Done — back to {{ a.part_no }}</button></a>
+  </div>
+</div>
+{% endblock %}

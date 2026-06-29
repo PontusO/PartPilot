@@ -53,4 +53,18 @@ MIGRATIONS = [
         ALTER TABLE despatches ADD COLUMN invoice_error TEXT;
         """,
     ),
+    Migration(
+        version=3,
+        name="packing list workflow",
+        sql="""
+        -- A despatch now starts life as a PACKING LIST: the operator checks off each line as it's
+        -- physically packed, then confirms the package is ready before it can be dispatched. No
+        -- stock moves until dispatch. Lifecycle: packing -> packed -> open (dispatched) -> invoiced.
+        -- 'packed' = this line has been checked off the packing list.
+        ALTER TABLE despatch_lines ADD COLUMN packed INTEGER NOT NULL DEFAULT 0;
+        -- When/by whom the package was confirmed ready to ship (the 'packed' transition).
+        ALTER TABLE despatches ADD COLUMN packed_at TEXT;
+        ALTER TABLE despatches ADD COLUMN packed_by TEXT;
+        """,
+    ),
 ]

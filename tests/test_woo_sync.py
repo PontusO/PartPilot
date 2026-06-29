@@ -129,7 +129,7 @@ def test_two_way_sale_and_build_reconciles_and_pushes(db):
     with db.connect() as conn:
         mt = conn.execute("SELECT mtype, reference FROM stock_movements WHERE part_id=? "
                           "ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
-    assert mt["mtype"] == "ISSUE" and mt["reference"] == "woo-sale"
+    assert mt["mtype"] == "WOOSALE" and mt["reference"] == "woo-sale"
 
 
 def test_build_only_pushes_without_touching_partpilot(db):
@@ -224,6 +224,32 @@ def test_missing_woo_price_leaves_field_untouched(db):
     woo_sync.sync_from_woo(db, [_p("99-1", qty=5, price=10.0)])
     woo_sync.sync_from_woo(db, [_p("99-1", qty=5, price=None)])   # later sync, price absent
     assert repo.get_part(db, pid)["external_price"] == 10.0
+
+
+def test_pull_only_adopts_sales_and_prices_without_pushing(db):
+    pid = _make_part(db, "99-1", 120)
+    woo_sync.sync_from_woo(db, [_p("99-1", qty=120, wid=50)])     # baseline=120
+    # webshop sells 20 (Woo 120->100); PartPilot builds 100 (120->220)
+    stock.adjust_stock(db, pid, delta=100, mtype=stock.BUILD, reference="WO-1")
+
+    client = FakePush()
+    report = woo_sync.sync_from_woo(db, [_p("99-1", qty=100, wid=50, price=4.5)],
+                                    client=client, user="auto-sync", push=False)
+
+    # The sale flows into PartPilot and the price is adopted...
+    assert report.sold == 20
+    part = repo.get_part(db, pid)
+    assert part["total_qty"] == 200 and part["external_price"] == 4.5
+    # ...but nothing is pushed to Woo, and the would-be push is reported as pending.
+    assert report.pushed == 0 and report.pending_push == 1 and client.calls == []
+    # Baseline stays at Woo's current value (W), not the un-pushed reconciled qty.
+    assert part["webshop_synced_qty"] == 100
+
+
+def test_pull_only_creates_missing_parts(db):
+    report = woo_sync.sync_from_woo(db, [_p("99-777", qty=8, name="New")], push=False)
+    assert report.created_parts == 1
+    assert repo.find_part_by_part_no(db, "99-777")["total_qty"] == 8
 
 
 def test_one_bad_product_does_not_abort_run(db):

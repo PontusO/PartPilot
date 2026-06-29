@@ -59,24 +59,78 @@ async def ship_from_order_apply(request: Request, order_id: int):
         if qty and qty > 0:
             selections[line_id] = qty
     db = request.app.state.database
-    desp_id = repo.create_despatch(db, order_id, selections, user.username)
+    # Open a packing list — nothing ships until it's packed, confirmed ready and dispatched.
+    desp_id = repo.create_packing_list(db, order_id, selections, user.username)
     if desp_id:
-        # Auto-invoice in Fortnox (only if connected). Despatch is already committed, so any
-        # Fortnox problem is recorded on the despatch (retryable) and never fails the shipment.
-        if fortnox_invoice.build_client(db) is not None:
-            await run_in_threadpool(lambda: fortnox_invoice.invoice_despatch(db, desp_id))
         return RedirectResponse(f"/despatch/{desp_id}", status_code=303)
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
 
 
+# ---- packing list: check off items, confirm ready, dispatch ----
+
+def _line_ids(form) -> set[int]:
+    return {int(v) for v in form.getlist("packed") if str(v).isdigit()}
+
+
+@router.post("/{despatch_id}/pack", response_class=HTMLResponse)
+async def pack(request: Request, despatch_id: int):
+    user = require_role(request, DESPATCH_ROLES)
+    db = request.app.state.database
+    form = await request.form()
+    try:
+        repo.set_packing(db, despatch_id, _line_ids(form))
+        if (form.get("action") or "") == "confirm":
+            repo.confirm_packed(db, despatch_id, user.username)
+    except ValueError as exc:
+        return _render_detail(request, despatch_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/despatch/{despatch_id}", status_code=303)
+
+
+@router.post("/{despatch_id}/reopen")
+def reopen(request: Request, despatch_id: int):
+    require_role(request, DESPATCH_ROLES)
+    repo.reopen_packing(request.app.state.database, despatch_id)
+    return RedirectResponse(f"/despatch/{despatch_id}", status_code=303)
+
+
+@router.post("/{despatch_id}/cancel")
+def cancel(request: Request, despatch_id: int):
+    require_role(request, DESPATCH_ROLES)
+    order_id = repo.cancel_packing(request.app.state.database, despatch_id)
+    return RedirectResponse(f"/customer-orders/{order_id}" if order_id else "/despatch", status_code=303)
+
+
+@router.post("/{despatch_id}/dispatch", response_class=HTMLResponse)
+async def dispatch_action(request: Request, despatch_id: int):
+    user = require_role(request, DESPATCH_ROLES)
+    db = request.app.state.database
+    try:
+        repo.dispatch(db, despatch_id, user.username)
+    except ValueError as exc:
+        return _render_detail(request, despatch_id, user, error=str(exc), status=400)
+    # Dispatch is committed; now auto-invoice in Fortnox (if connected). Any Fortnox problem is
+    # recorded on the despatch (retryable) and never undoes the shipment.
+    if fortnox_invoice.build_client(db) is not None:
+        await run_in_threadpool(lambda: fortnox_invoice.invoice_despatch(db, despatch_id))
+    return RedirectResponse(f"/despatch/{despatch_id}", status_code=303)
+
+
 # ---- despatch note ----
 
-def _render_detail(request: Request, despatch_id: int, user, fortnox_result=None, status=200):
+def _render_detail(request: Request, despatch_id: int, user, fortnox_result=None, status=200,
+                   error=None):
     db = request.app.state.database
     d = repo.get_despatch(db, despatch_id)
     if d is None:
         return request.app.state.templates.TemplateResponse(
             request, "error.html", {"message": "Despatch not found."}, status_code=404)
+    # While packing or packed-but-not-yet-shipped, show the packing list instead of the despatch note.
+    if d["status"] in ("packing", "packed"):
+        return request.app.state.templates.TemplateResponse(
+            request, "packing_list.html",
+            {"d": d, "can_pack": user.role in DESPATCH_ROLES, "error": error},
+            status_code=status,
+        )
     connected = fortnox_invoice.build_client(db) is not None
     # Show the create-customer confirmation when one was just requested, or when the despatch is
     # already sitting in the awaiting-confirmation state (so a plain page load offers it too).

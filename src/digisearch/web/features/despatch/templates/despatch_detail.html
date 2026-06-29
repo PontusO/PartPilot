@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ d.despatch_no or 'Despatch #' ~ d.id }} · PartPilot{% endblock %}
 {% set badge = {'open':'stock','invoiced':'ok'} %}
+{% set status_label = {'open':'Despatched','invoiced':'Invoiced'} %}
 {% block content %}
 <div class="panel">
   <p class="note"><a href="/despatch">← Despatch</a>{% if d.order_id %} · <a href="/customer-orders/{{ d.order_id }}">{{ d.order_ref or 'order' }}</a>{% endif %}</p>
   <h1>{{ d.despatch_no or 'Despatch #' ~ d.id }}
-    <span class="badge {{ badge.get(d.status, 'muted') }}">{{ d.status }}</span></h1>
+    <span class="badge {{ badge.get(d.status, 'muted') }}">{{ status_label.get(d.status, d.status) }}</span></h1>
   <p class="note">{{ d.customer_name or 'No customer' }}
     {% if d.despatch_date %} — shipped {{ d.despatch_date }}{% endif %}
     {% if d.invoice_no %} · invoice {{ d.invoice_no }}{% if d.invoice_date %} ({{ d.invoice_date }}){% endif %}{% endif %}</p>

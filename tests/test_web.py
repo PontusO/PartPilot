@@ -628,17 +628,38 @@ def test_despatch_flow(app):
     assert f"/despatch/from-order/{oid}" in client.get(f"/customer-orders/{oid}").text
     assert "SH-1" in client.get(f"/despatch/from-order/{oid}").text
 
+    from digisearch.web.features.despatch import repo as despatch_repo
+
     line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    # 1) creating a packing list moves no stock yet
     r = client.post(f"/despatch/from-order/{oid}",
                     data={"ship": str(line_id), f"qty_{line_id}": "25"}, follow_redirects=False)
     assert r.status_code == 303 and "/despatch/" in r.headers["location"]
+    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    assert catrepo.get_part(db, part)["total_qty"] == 40  # nothing shipped during packing
+    pack_page = client.get(f"/despatch/{desp_id}").text
+    assert "Packing list" in pack_page and "SH-1" in pack_page
+
+    desp_line = despatch_repo.get_despatch(db, desp_id)["lines"][0]["id"]
+    # 2) try to confirm without packing every line -> rejected
+    bad = client.post(f"/despatch/{desp_id}/pack", data={"action": "confirm"})
+    assert "Pack every item" in bad.text
+    assert despatch_repo.get_despatch(db, desp_id)["status"] == "packing"
+
+    # 3) pack the line and confirm the package is ready (still no stock moved)
+    client.post(f"/despatch/{desp_id}/pack",
+                data={"action": "confirm", "packed": str(desp_line)}, follow_redirects=False)
+    assert despatch_repo.get_despatch(db, desp_id)["status"] == "packed"
+    assert catrepo.get_part(db, part)["total_qty"] == 40
+
+    # 4) dispatch -> now stock ships and the order is shipped
+    client.post(f"/despatch/{desp_id}/dispatch", follow_redirects=False)
     assert catrepo.get_part(db, part)["total_qty"] == 15  # 40 − 25 shipped
     assert corepo.get_order(db, oid)["status"] == "shipped"
     assert "DN-" in client.get("/despatch").text
 
-    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
     client.post(f"/despatch/{desp_id}/invoice", data={"invoice_no": "INV-9"}, follow_redirects=False)
-    assert "invoiced" in client.get(f"/despatch/{desp_id}").text
+    assert "Invoiced" in client.get(f"/despatch/{desp_id}").text
 
 
 def test_customer_order_allocation(app):
@@ -825,11 +846,37 @@ def test_contacts_write_requires_role(app):
     assert ware.post("/contacts/new", data={"name": "X"}, follow_redirects=False).status_code == 403
 
 
-def test_placeholder_page_renders(app):
+def test_reports_index_and_stock_ledger(app):
+    from digisearch.web.features.catalog import repo, stock
+
+    db = app.state.database
+    repo.create_part(db, part={"part_no": "99-001", "value": "10uF", "description": "cap"},
+                     supplier_lines=[], opening={"qty": 0})
+    pid = repo.find_part_by_part_no(db, "99-001")["id"]
+    stock.adjust_stock(db, pid, delta=100, mtype=stock.OPENING, reference="init", user="alice")
+    stock.adjust_stock(db, pid, delta=-5, mtype=stock.WOOSALE, reference="woo-sale",
+                       note="WooCommerce sale", user="auto-sync")
+
     client = TestClient(app)
     _login(client, "buyer1", "pw")
-    r = client.get("/reports")
-    assert r.status_code == 200 and "Reports" in r.text and "coming soon" in r.text.lower()
+
+    idx = client.get("/reports")
+    assert idx.status_code == 200 and 'href="/reports/stock-movements"' in idx.text
+
+    led = client.get("/reports/stock-movements")
+    assert led.status_code == 200
+    # Both movements show; the sale carries its own WOOSALE type and the running balance (100-5=95).
+    assert "WooCommerce sale" in led.text and "auto-sync" in led.text and "95" in led.text
+    assert ">WOOSALE<" in led.text  # webshop sales are broken out from generic issues
+
+    # The movement-type filter narrows to a single kind.
+    sales = client.get("/reports/stock-movements?mtype=WOOSALE")
+    assert sales.status_code == 200 and "WooCommerce sale" in sales.text
+    assert ">OPENING<" not in sales.text  # the opening-balance row is filtered out
+
+    # A date range with no movements comes back empty, not erroring.
+    empty = client.get("/reports/stock-movements?start=2000-01-01&end=2000-01-02")
+    assert empty.status_code == 200 and "No stock movements in this range." in empty.text
 
 
 def test_placeholder_respects_role(app):
@@ -1106,6 +1153,82 @@ def test_setup_import_with_uploaded_file(app, monkeypatch):
     assert r.status_code == 200 and "bom lines" in r.text and "Import complete" in r.text
     # the browsed/uploaded file was imported (a temp copy named after it), not the (None) default
     assert captured["path"] and captured["path"].endswith("mrp5data")
+
+
+def _seed_suspect_part(app, part_no="123-4567-ND", supplier="Digikey"):
+    """A part whose part_no is really a supplier order code, with no manufacturer P/N."""
+    db = app.state.database
+    with db.connect() as c:
+        c.execute("INSERT INTO parts (part_no, value, category, mfr_pno) VALUES (?,?,?,NULL)",
+                  (part_no, "10K 0402", "RESISTOR"))
+        pid = c.execute("SELECT id FROM parts WHERE part_no=?", (part_no,)).fetchone()["id"]
+        sid = c.execute("INSERT INTO suppliers (name) VALUES (?)", (supplier,)).lastrowid
+        c.execute("INSERT INTO part_suppliers (part_id, supplier_id, supplier_pno, qty_per_uom) "
+                  "VALUES (?,?,?,1)", (pid, sid, part_no))
+        c.commit()
+    return pid
+
+
+def test_part_cleanup_lookup_and_apply(app, monkeypatch):
+    import digisearch.web.features.setup.router as setup_router
+    from digisearch.web.features.setup.part_cleanup import Recovery
+
+    app.state.store.create_user("admin9", "pw", role="admin")
+    pid = _seed_suspect_part(app)
+
+    # non-admin is locked out
+    buyer = TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    assert buyer.get("/setup/part-cleanup", follow_redirects=False).status_code == 403
+
+    admin = TestClient(app)
+    _login(admin, "admin9", "pw")
+
+    # the suspect part is listed
+    page = admin.get("/setup/part-cleanup")
+    assert page.status_code == 200 and "123-4567-ND" in page.text
+
+    # apply with nothing ticked -> guarded
+    assert admin.post("/setup/part-cleanup", data={"action": "apply"}).status_code == 400
+
+    # look up (distributors mocked) fills in the recovered MPN + manufacturer
+    monkeypatch.setattr(setup_router, "build_clients", lambda: (object(), None))
+    monkeypatch.setattr(setup_router, "recover",
+                        lambda part_no, sups, dk, mo: Recovery(mpn="RC0402FR-0710KL",
+                                                               manufacturer="Yageo", source="Digi-Key"))
+    looked = admin.post("/setup/part-cleanup", data={"action": "lookup", "pick": str(pid)})
+    assert looked.status_code == 200 and "RC0402FR-0710KL" in looked.text and "Yageo" in looked.text
+
+    # apply the (edited) values
+    applied = admin.post("/setup/part-cleanup", data={
+        "action": "apply", "pick": str(pid),
+        f"mpn_{pid}": "RC0402FR-0710KL", f"mfr_{pid}": "Yageo"})
+    assert applied.status_code == 200
+    with app.state.database.connect() as c:
+        row = c.execute("SELECT part_no, mfr_pno, mfr_name FROM parts WHERE id=?", (pid,)).fetchone()
+    assert row["part_no"] == "RC0402FR-0710KL" and row["mfr_pno"] == "RC0402FR-0710KL"
+    assert row["mfr_name"] == "Yageo"
+    # no longer a suspect
+    assert "Nothing to clean up" in admin.get("/setup/part-cleanup").text
+
+
+def test_part_cleanup_skips_collision(app):
+    app.state.store.create_user("admin10", "pw", role="admin")
+    pid = _seed_suspect_part(app)
+    # another part already owns the target MPN
+    with app.state.database.connect() as c:
+        c.execute("INSERT INTO parts (part_no, mfr_pno) VALUES ('EXISTING-MPN','EXISTING-MPN')")
+        c.commit()
+
+    admin = TestClient(app)
+    _login(admin, "admin10", "pw")
+    r = admin.post("/setup/part-cleanup",
+                   data={"action": "apply", "pick": str(pid), f"mpn_{pid}": "EXISTING-MPN"})
+    assert r.status_code == 200 and "already used by part" in r.text
+    # the suspect part was left untouched
+    with app.state.database.connect() as c:
+        row = c.execute("SELECT part_no, mfr_pno FROM parts WHERE id=?", (pid,)).fetchone()
+    assert row["part_no"] == "123-4567-ND" and row["mfr_pno"] is None
 
 
 def _setup_assembly(app):
@@ -1418,6 +1541,20 @@ def _ship_order(db, *, linked=False, org_no="556-1"):
     return cust, oid
 
 
+def _pack_confirm_dispatch(client, db, oid, qty=2):
+    """Drive the web flow: open a packing list, pack+confirm it, dispatch it. Returns despatch id."""
+    from digisearch.web.features.despatch import repo as despatch_repo
+    line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
+    r = client.post(f"/despatch/from-order/{oid}",
+                    data={"ship": str(line_id), f"qty_{line_id}": str(qty)}, follow_redirects=False)
+    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    desp_line = despatch_repo.get_despatch(db, desp_id)["lines"][0]["id"]
+    client.post(f"/despatch/{desp_id}/pack",
+                data={"action": "confirm", "packed": str(desp_line)}, follow_redirects=False)
+    client.post(f"/despatch/{desp_id}/dispatch", follow_redirects=False)
+    return desp_id
+
+
 def test_fortnox_settings_admin_only_and_connect_needs_config(app):
     app.state.store.create_user("boss", "pw", role="admin")
     buyer = TestClient(app)
@@ -1458,11 +1595,7 @@ def test_despatch_auto_invoices_when_fortnox_connected(app, monkeypatch):
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
-    line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
-    r = client.post(f"/despatch/from-order/{oid}",
-                    data={"ship": str(line_id), f"qty_{line_id}": "2"}, follow_redirects=False)
-    assert r.status_code == 303
-    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    desp_id = _pack_confirm_dispatch(client, db, oid)   # auto-invoices on dispatch
     d = despatch_repo.get_despatch(db, desp_id)
     assert d["invoice_no"] == "9001" and len(fake.created_invoices) == 1
 
@@ -1477,10 +1610,7 @@ def test_despatch_needs_customer_confirmation_then_confirm(app, monkeypatch):
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
-    line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
-    r = client.post(f"/despatch/from-order/{oid}",
-                    data={"ship": str(line_id), f"qty_{line_id}": "2"}, follow_redirects=False)
-    desp_id = int(r.headers["location"].rsplit("/", 1)[1])
+    desp_id = _pack_confirm_dispatch(client, db, oid)
     # auto-invoice on despatch stopped to ask: no invoice yet, prompt on the detail page
     detail = client.get(f"/despatch/{desp_id}").text
     assert "in Fortnox yet" in detail and "Create customer" in detail

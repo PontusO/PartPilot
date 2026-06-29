@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Reports · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Reports</h1>
+  <p class="note">Read-only views over what the rest of PartPilot records.</p>
+
+  <div class="downloads" style="margin-top:1rem;">
+    <a href="/reports/stock-movements">📦 Stock movement ledger</a>
+  </div>
+  <p class="note" style="margin-top:.6rem;">Every quantity change — receipts, builds, issues,
+    manual adjustments and webshop sync — with a running balance, browsable by date range.</p>
+</div>
+{% endblock %}

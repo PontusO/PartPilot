@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Packing {{ d.despatch_no or '#' ~ d.id }} · PartPilot{% endblock %}
+{% set is_packed = d.status == 'packed' %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/despatch">← Despatch</a>{% if d.order_id %} · <a href="/customer-orders/{{ d.order_id }}">{{ d.order_ref or 'order' }}</a>{% endif %}</p>
+  <h1>Packing list {{ d.despatch_no or '#' ~ d.id }}
+    <span class="badge {{ 'stock' if is_packed else 'muted' }}">{{ 'Ready to ship' if is_packed else 'Packing' }}</span></h1>
+  <p class="note">{{ d.customer_name or 'No customer' }} —
+    {% if is_packed %}package confirmed ready{% if d.packed_by %} by {{ d.packed_by }}{% endif %}. Dispatch it to ship the goods and issue stock.
+    {% else %}check off each item as you pack it, then confirm the package is ready to ship. Nothing ships until you dispatch it.{% endif %}</p>
+
+  {% if error %}<div class="err" style="margin-top:1rem;">{{ error }}</div>{% endif %}
+
+  <div class="cards">
+    <div class="card"><b>{{ d.packed_count }}/{{ d.lines|length }}</b><small>items packed</small></div>
+    <div class="card"><b>{{ "%.2f"|format(d.total) }}</b><small>value</small></div>
+  </div>
+
+  <form method="post" action="/despatch/{{ d.id }}/pack">
+    <div style="overflow-x:auto; margin-top:1rem;">
+      <table>
+        <thead>
+          <tr><th style="width:3rem;">Packed</th><th>Product</th><th>Value</th><th class="num">Qty to pack</th></tr>
+        </thead>
+        <tbody>
+          {% for ln in d.lines %}
+          <tr>
+            <td class="num"><input type="checkbox" name="packed" value="{{ ln.id }}"
+                                   {{ 'checked' if ln.packed else '' }} {{ 'disabled' if is_packed or not can_pack else '' }}></td>
+            <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}<span class="note">(no part)</span>{% endif %}</td>
+            <td>{{ ln.value or '' }}</td>
+            <td class="num">{{ "%g"|format(ln.qty) }}</td>
+          </tr>
+          {% endfor %}
+          {% if not d.lines %}<tr><td colspan="4" class="note">This packing list has no items.</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if can_pack and not is_packed %}
+    <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center; flex-wrap:wrap;">
+      <button type="submit" name="action" value="save" class="ghost">Save progress</button>
+      <button type="submit" name="action" value="confirm">Confirm package ready to ship</button>
+      <span class="note">All {{ d.lines|length }} item(s) must be packed before you can confirm.</span>
+    </div>
+    {% endif %}
+  </form>
+
+  {% if can_pack and is_packed %}
+  <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center; flex-wrap:wrap;">
+    <form method="post" action="/despatch/{{ d.id }}/dispatch" style="margin:0"
+          onsubmit="return confirm('Dispatch this package? This ships the goods and issues stock out.');">
+      <button type="submit">Dispatch now (ship &amp; issue stock)</button>
+    </form>
+    <form method="post" action="/despatch/{{ d.id }}/reopen" style="margin:0">
+      <button type="submit" class="ghost">Reopen packing</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if can_pack %}
+  <form method="post" action="/despatch/{{ d.id }}/cancel" style="margin-top:1.2rem"
+        onsubmit="return confirm('Discard this packing list? No stock has moved.');">
+    <button type="submit" class="danger">Cancel packing list</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

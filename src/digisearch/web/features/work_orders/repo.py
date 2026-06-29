@@ -116,7 +116,7 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
             return None
         lines = [dict(r) for r in conn.execute(
             """SELECT wl.id, wl.part_id, wl.qty_required, wl.qty_issued, wl.line_no,
-                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc
+                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc, p.unlimited_stock
                FROM work_order_lines wl JOIN parts p ON p.id = wl.part_id
                WHERE wl.work_order_id = ? ORDER BY COALESCE(wl.line_no, 1e9), wl.id""",
             (wo_id,),
@@ -124,8 +124,10 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
     wo = dict(head)
     short_count = 0
     for d in lines:
+        d["unlimited"] = bool(d["unlimited_stock"])
+        # Unlimited parts (e.g. SMT Assembly) never run out, so they're always available, never short.
         d["available"] = (d["total_qty"] or 0) - (d["total_alloc"] or 0)
-        d["short"] = max(0.0, (d["qty_required"] or 0) - d["available"])
+        d["short"] = 0.0 if d["unlimited"] else max(0.0, (d["qty_required"] or 0) - d["available"])
         if d["short"] > 0:
             short_count += 1
     wo["lines"] = lines
@@ -292,8 +294,12 @@ def issue_work_order(db: Database, wo_id: int, user: str | None = None) -> None:
             raise ValueError("Work order not found.")
         if wo["status"] != "allocated":
             raise ValueError(f"Only an allocated work order can be issued (this one is {wo['status']}).")
-        for ln in conn.execute("SELECT * FROM work_order_lines WHERE work_order_id = ?", (wo_id,)):
-            if ln["qty_required"]:
+        for ln in conn.execute(
+            "SELECT wl.*, p.unlimited_stock FROM work_order_lines wl "
+            "JOIN parts p ON p.id = wl.part_id WHERE wl.work_order_id = ?", (wo_id,),
+        ):
+            # Unlimited parts (e.g. SMT Assembly) carry cost only — never consume them from stock.
+            if ln["qty_required"] and not ln["unlimited_stock"]:
                 stock.post_movement(conn, ln["part_id"], delta=-ln["qty_required"], mtype=stock.ISSUE,
                                     reference=_wo_ref(wo), note="work order issue", user=user,
                                     location_id=wo["location_id"])

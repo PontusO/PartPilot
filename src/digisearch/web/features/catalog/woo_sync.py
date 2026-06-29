@@ -9,7 +9,7 @@ of the last sync):
     woo_delta = W - B           # how Woo moved (sales are negative)
     R         = P + woo_delta   # PartPilot's reconciled on-hand (its own builds are in P)
 
-We post ``woo_delta`` into PartPilot (ISSUE for a sale, ADJUST for a manual webshop increase)
+We post ``woo_delta`` into PartPilot (WOOSALE for a sale, ADJUST for a manual webshop increase)
 and push ``R`` back to the shop, then set the baseline to whatever Woo actually ends up at.
 After a sync ``PartPilot on-hand == Woo qty == baseline`` so drift reconciles every cycle with
 no double-counting.
@@ -44,6 +44,7 @@ class SyncReport:
     skipped: int = 0          # SKU prefix not 98-/99-
     sold: float = 0.0         # units issued from webshop sales
     pushed: int = 0           # products whose Woo stock was set (or would be, in a preview)
+    pending_push: int = 0     # pull-only run: products PartPilot is ahead on, push deferred
     log: list[dict] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
 
@@ -69,7 +70,14 @@ def kind_for_sku(sku: str) -> str | None:
 
 
 def sync_from_woo(db: Database, products, *, client=None, user: str | None = None,
-                  dry_run: bool = False) -> SyncReport:
+                  dry_run: bool = False, push: bool = True) -> SyncReport:
+    """Reconcile PartPilot against the webshop's products.
+
+    ``push=False`` makes this a **pull-only** run: webshop sales still flow into PartPilot and
+    prices/new parts are adopted, but PartPilot's own stock is never written back to Woo (the
+    deferred quantities are reported as ``pending_push``). The scheduled auto-sync uses this so
+    an unattended timer never mutates the live shop; the manual button keeps ``push=True``.
+    """
     report = SyncReport()
     pushes: list[tuple[int, int, float]] = []   # (part_id, woo_product_id, new_qty)
     for product in products:
@@ -79,7 +87,10 @@ def sync_from_woo(db: Database, products, *, client=None, user: str | None = Non
             report.errors.append({"sku": getattr(product, "sku", "?"), "error": str(exc)})
 
     report.pushed = len(pushes)
-    if pushes and not dry_run:
+    if pushes and not dry_run and not push:
+        report.pending_push = report.pushed   # pulled only — leave Woo (and the baseline) alone
+        report.pushed = 0
+    elif pushes and not dry_run:
         if client is None:
             raise ValueError("A WooCommerce client is required to push stock updates.")
         try:
@@ -139,7 +150,7 @@ def _reconcile_one(db, product, *, user, dry_run, report: SyncReport, pushes) ->
 
     if changed_pp:
         if woo_delta < 0:
-            mtype, ref, note = stock.ISSUE, SALE_REFERENCE, "WooCommerce sale"
+            mtype, ref, note = stock.WOOSALE, SALE_REFERENCE, "WooCommerce sale"
             report.sold += -woo_delta
         else:
             mtype, ref, note = stock.ADJUST, SYNC_REFERENCE, "WooCommerce stock increase"

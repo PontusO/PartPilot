@@ -130,4 +130,28 @@ MIGRATIONS = [
         ALTER TABLE parts ADD COLUMN external_price REAL;
         """,
     ),
+    Migration(
+        version=6,
+        name="unlimited-stock parts",
+        sql="""
+        -- Flags a part as having unlimited stock that never runs out: used for non-physical
+        -- "parts" like SMT Assembly or other labour/service lines that sit in an assembly's BOM
+        -- purely to carry a cost into the rolled-up product cost. Such parts are never short, never
+        -- below their reorder point, and are not consumed from stock when a work order is issued.
+        ALTER TABLE parts ADD COLUMN unlimited_stock INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    Migration(
+        version=7,
+        name="distinct webshop-sale movement type",
+        sql="""
+        -- Webshop sales used to be logged as generic ISSUE movements (stock out). They now get
+        -- their own movement type, WOOSALE, so the ledger/report can tell a Woo sale apart from a
+        -- work-order issue or a despatch shipment. Backfill historical rows by their sync
+        -- reference ('woo-sale') so old and new sales read consistently. mtype is a display/filter
+        -- label only — nothing branches on it — so re-tagging is safe.
+        UPDATE stock_movements SET mtype = 'WOOSALE'
+         WHERE mtype = 'ISSUE' AND reference = 'woo-sale';
+        """,
+    ),
 ]

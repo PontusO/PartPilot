@@ -44,9 +44,12 @@ def _consume_allocation(conn, order_line_id: int, qty: float) -> None:
 
 def summary(db: Database) -> dict:
     with db.connect() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM despatches").fetchone()[0]
-        open_n = conn.execute("SELECT COUNT(*) FROM despatches WHERE status = 'open'").fetchone()[0]
-    return {"total": total, "open": open_n, "invoiced": total - open_n}
+        rows = dict(conn.execute(
+            "SELECT status, COUNT(*) FROM despatches GROUP BY status").fetchall())
+    total = sum(rows.values())
+    # 'packing' + 'packed' are pre-dispatch (still on the bench); 'open' is dispatched, awaiting invoice.
+    return {"total": total, "packing": rows.get("packing", 0) + rows.get("packed", 0),
+            "open": rows.get("open", 0), "invoiced": rows.get("invoiced", 0)}
 
 
 def list_despatches(db: Database, search: str | None = None) -> list[dict]:
@@ -76,7 +79,7 @@ def get_despatch(db: Database, despatch_id: int) -> dict | None:
         if head is None:
             return None
         lines = [dict(r) for r in conn.execute(
-            """SELECT l.id, l.qty, l.unit_price, l.part_id, p.part_no, p.value
+            """SELECT l.id, l.qty, l.unit_price, l.part_id, l.packed, p.part_no, p.value
                FROM despatch_lines l LEFT JOIN parts p ON p.id = l.part_id
                WHERE l.despatch_id = ? ORDER BY l.id""",
             (despatch_id,),
@@ -84,8 +87,11 @@ def get_despatch(db: Database, despatch_id: int) -> dict | None:
     d = dict(head)
     for ln in lines:
         ln["line_total"] = (ln["qty"] or 0) * (ln["unit_price"] or 0)
+        ln["packed"] = bool(ln["packed"])
     d["lines"] = lines
     d["total"] = sum(ln["line_total"] for ln in lines)
+    d["packed_count"] = sum(1 for ln in lines if ln["packed"])
+    d["all_packed"] = bool(lines) and all(ln["packed"] for ln in lines)
     return d
 
 
@@ -138,13 +144,17 @@ def shippable_lines(db: Database, order_id: int) -> list[dict]:
     return out
 
 
-# ---- create a despatch (ship) ----
+# ---- create a packing list (no stock moves yet) ----
 
-def create_despatch(db: Database, order_id: int, selections: dict[int, float],
-                    user: str | None = None) -> int | None:
-    """Ship ``selections`` ({order_line_id: qty}) from a customer order. Posts ISSUE movements,
-    consumes allocation, bumps shipped_qty, and flips the order to 'shipped' when fully shipped.
-    Returns the new despatch id, or None if nothing was shipped."""
+def create_packing_list(db: Database, order_id: int, selections: dict[int, float],
+                        user: str | None = None) -> int | None:
+    """Open a PACKING LIST for ``selections`` ({order_line_id: qty}) from a customer order.
+
+    This records *what to pack* — it does NOT move stock or touch the order. The operator checks
+    each line off (``set_packing``), confirms the package is ready (``confirm_packed``), and only
+    then is it dispatched (``dispatch``), which is when stock actually ships. Returns the new
+    despatch id (status 'packing'), or None if nothing was selected.
+    """
     with db.connect() as conn:
         order = conn.execute("SELECT customer_id FROM customer_orders WHERE id = ?", (order_id,)).fetchone()
         if order is None:
@@ -153,42 +163,134 @@ def create_despatch(db: Database, order_id: int, selections: dict[int, float],
             "SELECT id, part_id, ordered_qty, shipped_qty, unit_price, discount_percent "
             "FROM customer_order_lines WHERE order_id = ?", (order_id,))}
 
-        to_ship = {lid: q for lid, q in selections.items() if lid in lines and q and q > 0}
-        if not to_ship:
+        to_pack = {lid: q for lid, q in selections.items() if lid in lines and q and q > 0}
+        if not to_pack:
             return None
 
         desp_id = conn.execute(
-            "INSERT INTO despatches (order_id, customer_id, despatch_date, status) "
-            "VALUES (?, ?, date('now'), 'open')",
+            "INSERT INTO despatches (order_id, customer_id, status) VALUES (?, ?, 'packing')",
             (order_id, order["customer_id"]),
         ).lastrowid
-        desp_ref = ref_no("DN", desp_id)
-        conn.execute("UPDATE despatches SET despatch_no = ? WHERE id = ?", (desp_ref, desp_id))
+        conn.execute("UPDATE despatches SET despatch_no = ? WHERE id = ?", (ref_no("DN", desp_id), desp_id))
 
-        for line_id, qty in to_ship.items():
+        for line_id, qty in to_pack.items():
             ln = lines[line_id]
             net = (ln["unit_price"] or 0) * (1 - (ln["discount_percent"] or 0) / 100.0)
-            if ln["part_id"]:
-                stock.post_movement(conn, ln["part_id"], delta=-qty, mtype=stock.ISSUE,
-                                    reference=desp_ref, note="despatch", user=user)
-                _consume_allocation(conn, line_id, qty)
-            conn.execute("UPDATE customer_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?",
-                         (qty, line_id))
             conn.execute(
                 "INSERT INTO despatch_lines (despatch_id, order_line_id, part_id, qty, unit_price) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (desp_id, line_id, ln["part_id"], qty, net),
             )
-
-        outstanding = conn.execute(
-            "SELECT COALESCE(SUM(ordered_qty - shipped_qty), 0) FROM customer_order_lines WHERE order_id = ?",
-            (order_id,),
-        ).fetchone()[0]
-        if outstanding <= 0:
-            conn.execute("UPDATE customer_orders SET status = 'shipped', updated_at = datetime('now') "
-                         "WHERE id = ? AND status != 'cancelled'", (order_id,))
         conn.commit()
     return desp_id
+
+
+# ---- packing: check items off, then confirm ready to ship ----
+
+def set_packing(db: Database, despatch_id: int, packed_line_ids: set[int]) -> None:
+    """Persist which lines have been checked off the packing list. Only while still 'packing'."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT status FROM despatches WHERE id = ?", (despatch_id,)).fetchone()
+        if row is None:
+            raise ValueError("Despatch not found.")
+        if row["status"] != "packing":
+            raise ValueError("This packing list is no longer being packed.")
+        for ln in conn.execute("SELECT id FROM despatch_lines WHERE despatch_id = ?", (despatch_id,)):
+            conn.execute("UPDATE despatch_lines SET packed = ? WHERE id = ?",
+                         (1 if ln["id"] in packed_line_ids else 0, ln["id"]))
+        conn.commit()
+
+
+def confirm_packed(db: Database, despatch_id: int, user: str | None = None) -> None:
+    """Mark the package ready to ship. Requires every line checked off. Status -> 'packed'.
+    No stock has moved yet — dispatch is the next, separate step."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT status FROM despatches WHERE id = ?", (despatch_id,)).fetchone()
+        if row is None:
+            raise ValueError("Despatch not found.")
+        if row["status"] != "packing":
+            raise ValueError(f"Only a packing list can be confirmed (this one is {row['status']}).")
+        lines = conn.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(packed), 0) AS packed FROM despatch_lines "
+            "WHERE despatch_id = ?", (despatch_id,)).fetchone()
+        if lines["n"] == 0 or lines["packed"] < lines["n"]:
+            raise ValueError("Pack every item before confirming the package is ready.")
+        conn.execute(
+            "UPDATE despatches SET status = 'packed', packed_at = datetime('now'), packed_by = ?, "
+            "updated_at = datetime('now') WHERE id = ?", (user, despatch_id))
+        conn.commit()
+
+
+def reopen_packing(db: Database, despatch_id: int) -> None:
+    """Send a 'ready to ship' package back to packing (e.g. to add/remove an item). No stock moved."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT status FROM despatches WHERE id = ?", (despatch_id,)).fetchone()
+        if row is None:
+            raise ValueError("Despatch not found.")
+        if row["status"] != "packed":
+            raise ValueError("Only a confirmed package can be reopened for packing.")
+        conn.execute(
+            "UPDATE despatches SET status = 'packing', packed_at = NULL, packed_by = NULL, "
+            "updated_at = datetime('now') WHERE id = ?", (despatch_id,))
+        conn.commit()
+
+
+def cancel_packing(db: Database, despatch_id: int) -> int | None:
+    """Discard a packing list before it ships (status packing/packed, no stock moved). Returns the
+    order id it belonged to (for redirecting), or None if it wasn't found."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT status, order_id FROM despatches WHERE id = ?",
+                           (despatch_id,)).fetchone()
+        if row is None:
+            return None
+        if row["status"] not in ("packing", "packed"):
+            raise ValueError("Only a packing list that hasn't shipped can be cancelled.")
+        conn.execute("DELETE FROM despatches WHERE id = ?", (despatch_id,))  # lines cascade
+        conn.commit()
+        return row["order_id"]
+
+
+# ---- dispatch: ship the confirmed package (this is where stock moves) ----
+
+def dispatch(db: Database, despatch_id: int, user: str | None = None) -> None:
+    """Ship a confirmed package. Posts ISSUE movements, consumes allocation, bumps shipped_qty,
+    stamps the despatch date, flips the order to 'shipped' when fully shipped, and marks the
+    despatch 'open' (despatched, awaiting invoice). Requires status 'packed'."""
+    with db.connect() as conn:
+        d = conn.execute("SELECT id, order_id, despatch_no, status FROM despatches WHERE id = ?",
+                         (despatch_id,)).fetchone()
+        if d is None:
+            raise ValueError("Despatch not found.")
+        if d["status"] != "packed":
+            raise ValueError(f"Confirm the package is ready before dispatching (this one is {d['status']}).")
+        desp_ref = d["despatch_no"] or ref_no("DN", despatch_id)
+        order_id = d["order_id"]
+
+        for ln in conn.execute(
+            "SELECT id, order_line_id, part_id, qty FROM despatch_lines WHERE despatch_id = ?",
+            (despatch_id,),
+        ).fetchall():
+            if ln["part_id"]:
+                stock.post_movement(conn, ln["part_id"], delta=-ln["qty"], mtype=stock.ISSUE,
+                                    reference=desp_ref, note="despatch", user=user)
+                if ln["order_line_id"]:
+                    _consume_allocation(conn, ln["order_line_id"], ln["qty"])
+            if ln["order_line_id"]:
+                conn.execute("UPDATE customer_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?",
+                             (ln["qty"], ln["order_line_id"]))
+
+        conn.execute(
+            "UPDATE despatches SET status = 'open', despatch_date = date('now'), "
+            "updated_at = datetime('now') WHERE id = ?", (despatch_id,))
+
+        if order_id is not None:
+            outstanding = conn.execute(
+                "SELECT COALESCE(SUM(ordered_qty - shipped_qty), 0) FROM customer_order_lines "
+                "WHERE order_id = ?", (order_id,)).fetchone()[0]
+            if outstanding <= 0:
+                conn.execute("UPDATE customer_orders SET status = 'shipped', updated_at = datetime('now') "
+                             "WHERE id = ? AND status != 'cancelled'", (order_id,))
+        conn.commit()
 
 
 def mark_invoiced(db: Database, despatch_id: int, invoice_no: str | None, invoice_date: str | None) -> None:

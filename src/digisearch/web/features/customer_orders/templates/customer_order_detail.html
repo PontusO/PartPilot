@@ -61,7 +61,7 @@
     {% if can_ship %}
     <a href="/despatch/from-order/{{ o.id }}" style="margin:{{ '0' if can_build else '0 0 0 auto' }}; display:flex;
        align-items:center; justify-content:center; background:var(--accent); color:#fff; font-weight:600;
-       border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none; white-space:nowrap;">Despatch / ship</a>
+       border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none; white-space:nowrap;">Pack &amp; ship</a>
     {% endif %}
     {% if can_edit %}
     <a href="/customer-orders/{{ o.id }}/edit" style="margin:0; display:flex; align-items:center;
@@ -216,7 +216,9 @@
         <tr>
           <td><a href="/despatch/{{ d.id }}">{{ d.despatch_no or 'DN#' ~ d.id }}</a></td>
           <td>{{ d.despatch_date or '' }}</td>
-          <td><span class="badge {{ 'ok' if d.status == 'invoiced' else 'stock' }}">{{ d.status }}</span></td>
+          {% set dn_badge = {'packing':'muted', 'packed':'warn', 'open':'stock', 'invoiced':'ok'} %}
+          {% set dn_label = {'packing':'Packing', 'packed':'Ready to ship', 'open':'Despatched', 'invoiced':'Invoiced'} %}
+          <td><span class="badge {{ dn_badge.get(d.status, 'stock') }}">{{ dn_label.get(d.status, d.status) }}</span></td>
           <td>{{ d.invoice_no or '' }}</td>
         </tr>
         {% endfor %}

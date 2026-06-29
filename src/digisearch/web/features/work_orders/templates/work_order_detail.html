@@ -104,7 +104,7 @@
           <td>{{ ln.value or '' }}</td>
           <td class="num">{{ "%g"|format(ln.qty_required) }}</td>
           <td class="num">{{ "%g"|format(ln.qty_issued) }}</td>
-          <td class="num">{{ "%g"|format(ln.available) }}</td>
+          <td class="num">{{ '∞' if ln.unlimited else "%g"|format(ln.available) }}</td>
           <td class="num">{% if ln.short > 0 %}<span class="badge bad">{{ "%g"|format(ln.short) }}</span>{% endif %}</td>
         </tr>
         {% endfor %}

@@ -125,10 +125,11 @@ def shortage_suggestions(db: Database) -> list[dict]:
         out = []
         for part_id, required in demand.items():
             part = conn.execute(
-                "SELECT part_no, value, total_qty, total_alloc FROM parts WHERE id = ?", (part_id,)
+                "SELECT part_no, value, total_qty, total_alloc, unlimited_stock "
+                "FROM parts WHERE id = ?", (part_id,)
             ).fetchone()
-            if part is None:
-                continue
+            if part is None or part["unlimited_stock"]:
+                continue  # unlimited parts (e.g. SMT Assembly) never run short -> never purchased
             free = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
             incoming = on_order.get(part_id, 0) or 0
             short = required - free - incoming

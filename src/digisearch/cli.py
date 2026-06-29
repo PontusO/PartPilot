@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -44,20 +48,67 @@ def auth_test(
                   "Credentials are valid.")
 
 
+def _make_scratch_db() -> tuple[Path, Path]:
+    """Copy the live database into a throwaway temp dir and point the app at it via env vars.
+
+    Uses SQLite's backup API (not a plain file copy) so the snapshot includes any un-checkpointed
+    WAL pages. Sets PARTPILOT_DATA_DIR + PARTPILOT_DB so this process — and any reload subprocesses,
+    which inherit the environment — read/write the copy, leaving the real database untouched.
+    Returns (scratch_dir, scratch_db).
+    """
+    from .web.core.paths import db_path as live_db_path
+
+    src = live_db_path()
+    scratch_dir = Path(tempfile.mkdtemp(prefix="partpilot-scratch-"))
+    scratch_db = scratch_dir / "partpilot.db"
+    if src.exists():
+        src_conn = sqlite3.connect(src)
+        dst_conn = sqlite3.connect(scratch_db)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
+    os.environ["PARTPILOT_DATA_DIR"] = str(scratch_dir)  # also isolates jobs/ (uploads + reports)
+    os.environ["PARTPILOT_DB"] = str(scratch_db)
+    # Never let a throwaway test instance auto-sync against the live webshop on a timer.
+    os.environ["PARTPILOT_DISABLE_SCHEDULER"] = "1"
+    return scratch_dir, scratch_db
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind address. Use 0.0.0.0 to allow LAN access."),
     port: int = typer.Option(8000, help="Port to listen on."),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
+    scratch_db: bool = typer.Option(
+        False, "--scratch-db",
+        help="Dev/testing: run against a throwaway COPY of the database (and a fresh jobs dir). "
+             "All changes are discarded when the server stops; the real database is never touched.",
+    ),
 ):
     """Run the PartPilot web app (upload a BOM, resolve it for purchasing in the browser)."""
     import uvicorn
+
+    scratch_dir = None
+    if scratch_db:
+        scratch_dir, scratch_path = _make_scratch_db()
+        console.print(
+            f"[yellow]Scratch mode[/] — running against a temporary copy of the database at "
+            f"[bold]{scratch_path}[/].\n  Changes are [bold]discarded[/] when the server stops; "
+            "the real database is untouched."
+        )
 
     console.print(
         f"Starting PartPilot on [bold]http://{host}:{port}[/] "
         f"{'(LAN-accessible)' if host == '0.0.0.0' else '(local only — use --host 0.0.0.0 for LAN)'}"
     )
-    uvicorn.run("digisearch.web.app:create_app", host=host, port=port, factory=True, reload=reload)
+    try:
+        uvicorn.run("digisearch.web.app:create_app", host=host, port=port, factory=True, reload=reload)
+    finally:
+        if scratch_dir is not None:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
+            console.print(f"[dim]Removed scratch database at {scratch_dir}[/]")
 
 
 @app.command(name="import-catalog")

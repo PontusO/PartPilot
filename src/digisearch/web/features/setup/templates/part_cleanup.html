@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Part-number cleanup · PartPilot{% endblock %}
+{% block content %}
+<style>
+  #cleanup td, #cleanup th { padding:.4rem .5rem; vertical-align:top; }
+  #cleanup input[type=text] { width:100%; min-width:130px; margin:0; }
+  #cleanup .src { font-size:.78rem; }
+</style>
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Part-number cleanup</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  {% if summary and summary.kind == 'apply' %}
+    <div style="background:#0d1219; border:1px solid var(--line); border-radius:7px;
+                padding:.6rem .8rem; margin:.8rem 0;">
+      <b>{{ summary.applied|length }}</b> part(s) updated.
+      {% if summary.skipped %}<b>{{ summary.skipped|length }}</b> skipped:
+        {% for pid, why in summary.skipped %}<br><span class="note">#{{ pid }} — {{ why }}</span>{% endfor %}
+      {% endif %}
+    </div>
+  {% elif summary and summary.kind == 'lookup' %}
+    <p class="note">Looked up {{ summary.looked }} part(s) — found a manufacturer P/N for
+      <b>{{ summary.found }}</b>. Review/edit below, then tick and <b>Apply</b>.</p>
+  {% endif %}
+
+  {% if not suspects %}
+    <p class="note" style="margin-top:1rem;">✅ No parts found whose part number is a distributor
+      order code. Nothing to clean up.</p>
+  {% else %}
+    <p class="note">These parts have <b>no manufacturer P/N</b>, and their part number matches one
+      of their own supplier order codes — i.e. a distributor number is standing in for the
+      manufacturer part number. Tick the ones to work on, <b>Look up</b> to fetch the manufacturer
+      P/N from Digi-Key/Mouser (uses API quota), edit if needed, then <b>Apply</b>. Applying sets
+      both the part number and manufacturer P/N to the MPN; the supplier order code stays in the
+      supplier row.</p>
+
+    <form method="post" action="/setup/part-cleanup">
+      <div style="overflow-x:auto;">
+        <table id="cleanup">
+          <thead>
+            <tr>
+              <th><input type="checkbox" onclick="document.querySelectorAll('input[name=pick]').forEach(c=>c.checked=this.checked)"></th>
+              <th>Current part #</th><th>Value</th><th>Sourced from</th>
+              <th>Manufacturer P/N</th><th>Manufacturer</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in suspects %}
+            <tr>
+              <td class="num"><input type="checkbox" name="pick" value="{{ s.id }}"></td>
+              <td><a href="/catalog/{{ s.id }}/edit" target="_blank" rel="noopener">{{ s.part_no }}</a></td>
+              <td class="note">{{ s.value or '' }}</td>
+              <td class="note">
+                {% for sup in s.suppliers %}{{ sup.supplier or '?' }}: <code>{{ sup.supplier_pno }}</code><br>{% endfor %}
+              </td>
+              <td><input type="text" name="mpn_{{ s.id }}" value="{{ s.mpn }}" placeholder="manufacturer P/N"></td>
+              <td><input type="text" name="mfr_{{ s.id }}" value="{{ s.mfr }}" placeholder="manufacturer"></td>
+              <td class="src">
+                {% if s.source %}<span class="badge ok">{{ s.source }}</span>
+                {% elif s.note %}<span class="flag" title="{{ s.note }}">no match</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:1rem; display:flex; gap:.8rem; align-items:center;">
+        <button type="submit" name="action" value="lookup" class="ghost">🔎 Look up selected</button>
+        <button type="submit" name="action" value="apply">Apply selected</button>
+        <span class="note">{{ suspects|length }} part(s) need attention</span>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

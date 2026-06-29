@@ -75,6 +75,7 @@ def list_parts(
         rows = conn.execute(
             f"""SELECT p.id, p.part_no, p.value, p.category, p.kind,
                        p.total_qty, p.total_alloc, p.min_qty, p.unit_cost, p.external_price,
+                       p.unlimited_stock,
                        (p.total_qty - p.total_alloc) AS free,
                        s.name AS supplier, ps.supplier_pno AS supplier_pno,
                        ps.price_per_uom AS price_per_uom, ps.qty_per_uom AS qty_per_uom
@@ -87,7 +88,9 @@ def list_parts(
     for r in rows:
         d = dict(r)
         d["unit_price"] = _unit_price(d["price_per_uom"], d["qty_per_uom"])
-        d["below_min"] = d["free"] < (d["min_qty"] or 0)
+        d["unlimited"] = bool(d["unlimited_stock"])
+        # An unlimited part never runs out, so it can never be below its reorder point.
+        d["below_min"] = (not d["unlimited"]) and d["free"] < (d["min_qty"] or 0)
         parts.append(d)
     return parts, total
 
@@ -139,6 +142,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
         )]
     part["suppliers"] = suppliers
     part["stock"] = stock
+    part["unlimited"] = bool(part.get("unlimited_stock"))
     part["free"] = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
     return part
 
@@ -150,7 +154,7 @@ def summary(db: Database) -> dict:
             "SELECT COUNT(DISTINCT category) FROM parts WHERE kind != 'ASSY'"
         ).fetchone()[0]
         n_below = conn.execute(
-            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' "
+            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND unlimited_stock = 0 "
             "AND (total_qty - total_alloc) < min_qty AND min_qty > 0"
         ).fetchone()[0]
     return {"parts": n_parts, "categories": n_cats, "below_min": n_below}
@@ -232,11 +236,12 @@ def create_part(
         part_id = conn.execute(
             """INSERT INTO parts
                (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
-                unit_cost, min_qty, total_qty, notes)
-               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?)""",
+                unit_cost, min_qty, total_qty, notes, unlimited_stock)
+               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?)""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
-             part.get("min_qty") or 0, opening_qty, part.get("notes")),
+             part.get("min_qty") or 0, opening_qty, part.get("notes"),
+             1 if part.get("unlimited_stock") else 0),
         ).lastrowid
 
         for s in supplier_lines:
@@ -275,11 +280,13 @@ def update_part(
     with db.connect() as conn:
         conn.execute(
             """UPDATE parts SET part_no=?, value=?, description=?, category=?, mfr_name=?,
-               mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, updated_at=datetime('now')
+               mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, unlimited_stock=?,
+               updated_at=datetime('now')
                WHERE id=?""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
-             part.get("min_qty") or 0, part.get("notes"), part_id),
+             part.get("min_qty") or 0, part.get("notes"),
+             1 if part.get("unlimited_stock") else 0, part_id),
         )
 
         conn.execute("DELETE FROM part_suppliers WHERE part_id = ?", (part_id,))
