@@ -512,6 +512,17 @@ def devmgmt_delete(request: Request, part_id: int):
     if not variant.get("retired_at"):
         return _render_detail(request, part_id, user,
                               error="Retire this product before deleting it.", status=400)
+    # The retire flag reaches devmgmt via a queued push; deleting before that push has flushed
+    # would drop it (delete supersedes the queued upsert) and devmgmt would then refuse the DELETE
+    # forever (its own retire-before-delete guard). Only relevant when devmgmt is actually
+    # configured — otherwise there is no remote state to converge with.
+    sync = devmgmt_outbox.status_for(db, "variant", variant["ref"])
+    if sync and sync["status"] == "pending" and DevmgmtConfig.from_env() is not None:
+        return _render_detail(
+            request, part_id, user,
+            error="This product still has a push queued to devmgmt (the retire flag). "
+                  "Wait for the sync to run (about 20 s) and try again.",
+            status=409)
     refs = devmgmt_repo.variant_device_count(db, variant["ref"])
     if refs:
         return _render_detail(

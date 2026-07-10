@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}devmgmt product — {{ a.part_no }} · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
+  .formgrid .full { grid-column:1 / -1; }
+  .req::after { content:" *"; color:var(--bad); }
+  .subhead { font-size:1rem; margin:1.4rem 0 .4rem; padding-top:1rem; border-top:1px solid var(--line); }
+  .ft-row { display:grid; grid-template-columns:1fr 1fr 200px 40px; gap:.6rem; align-items:end;
+            margin-bottom:.5rem; }
+  .ft-row .rm { background:transparent; border:1px solid var(--line); color:var(--muted);
+                border-radius:8px; height:38px; cursor:pointer; }
+  .ft-row .rm:hover { color:var(--bad); border-color:var(--bad); }
+  textarea { width:100%; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85rem; }
+</style>
+
+<div class="panel">
+  <p class="note"><a href="/assemblies/{{ a.id }}">← {{ a.part_no }}</a></p>
+  <h1>{{ 'Edit' if values.editing else 'Publish' }} devmgmt product</h1>
+  <p class="note">Assembly <b>{{ a.part_no }}</b>{% if a.value %} — {{ a.value }}{% endif %}.
+    Saving pushes this product to devmgmt automatically.</p>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  <form method="post" action="/assemblies/{{ a.id }}/devmgmt">
+    <input type="hidden" name="editing" value="{{ '1' if values.editing else '0' }}">
+
+    <h2 class="subhead" style="border-top:0; padding-top:0;">Product model</h2>
+    <div class="formgrid">
+      <div>
+        <label for="model_ref" class="req">Model ref</label>
+        <input id="model_ref" name="model_ref" type="text" value="{{ values.model_ref }}"
+               placeholder="e.g. the part number" {{ 'readonly' if values.editing }} required>
+      </div>
+      <div>
+        <label for="model_name" class="req">Model name</label>
+        <input id="model_name" name="model_name" type="text" value="{{ values.model_name }}"
+               placeholder="Connectivity840" required>
+      </div>
+      <div>
+        <label for="radio_capabilities">Radio capabilities</label>
+        <input id="radio_capabilities" name="radio_capabilities" value="{{ values.radio_capabilities }}"
+               placeholder="ble, lorawan, cellular">
+      </div>
+      <div>
+        <label for="board_revs" class="req">Board revisions</label>
+        <input id="board_revs" name="board_revs" value="{{ values.board_revs }}"
+               placeholder="B, C" required>
+      </div>
+    </div>
+    <p class="note">Comma-separated. Board-revision refs are generated as
+      <code>{model-ref}-{rev}</code>.</p>
+
+    <h2 class="subhead">Variant / SKU</h2>
+    <div class="formgrid">
+      <div>
+        <label for="sku" class="req">SKU</label>
+        <input id="sku" name="sku" type="text" value="{{ values.sku }}"
+               placeholder="CONN840-WEBSHOP" required>
+      </div>
+      <div>
+        <label for="enabled_radios">Enabled radios</label>
+        <input id="enabled_radios" name="enabled_radios" value="{{ values.enabled_radios }}"
+               placeholder="ble, lorawan, cellular">
+      </div>
+      <div class="full">
+        <label for="radio_config">Radio config (JSON, optional)</label>
+        <textarea id="radio_config" name="radio_config" rows="4"
+                  placeholder='{"lorawan": {"profile_id": "0100000A", "lns_default": "ttn"}}'>{{ values.radio_config }}</textarea>
+      </div>
+    </div>
+    <p class="note">The SKU is the variant’s stable id sent to devmgmt. Enabled radios must be a
+      subset of the model’s radio capabilities.
+      {% if values.editing %}<br>The SKU’s underlying id is fixed once published, so you can rename
+      the SKU freely without breaking the devmgmt link.{% endif %}</p>
+
+    <h2 class="subhead">Factory firmware targets</h2>
+    <p class="note">One row per flashable component shipped on the board.</p>
+    <div id="targets">
+      {% for t in values.targets %}
+      <div class="ft-row">
+        <div>
+          {% if loop.first %}<label>Component</label>{% endif %}
+          <input name="ft_component" value="{{ t.component }}" placeholder="mcu">
+        </div>
+        <div>
+          {% if loop.first %}<label>Factory firmware ref</label>{% endif %}
+          <input name="ft_firmware" value="{{ t.factory_firmware_ref }}" placeholder="MCU-CONN840-1.2.0">
+        </div>
+        <div>
+          {% if loop.first %}<label>Update method</label>{% endif %}
+          <select name="ft_method">
+            {% for m in methods %}
+            <option value="{{ m }}" {{ 'selected' if t.update_method == m }}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="button" class="rm" title="Remove" onclick="this.closest('.ft-row').remove()">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" onclick="addTarget()" class="quiet" style="margin-top:.2rem;">+ Add firmware target</button>
+
+    <div style="margin-top:1.3rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit">{{ 'Save & push' if values.editing else 'Publish & push' }}</button>
+      <button type="button" onclick="window.location.href='/assemblies/{{ a.id }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  function addTarget() {
+    const rows = document.getElementById('targets');
+    const tpl = document.createElement('div');
+    tpl.className = 'ft-row';
+    tpl.innerHTML = `
+      <div><input name="ft_component" placeholder="mcu"></div>
+      <div><input name="ft_firmware" placeholder="MCU-CONN840-1.2.0"></div>
+      <div><select name="ft_method">
+        {% for m in methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+      </select></div>
+      <button type="button" class="rm" title="Remove" onclick="this.closest('.ft-row').remove()">✕</button>`;
+    rows.appendChild(tpl);
+  }
+</script>
+{% endblock %}

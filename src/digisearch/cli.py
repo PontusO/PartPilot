@@ -151,6 +151,125 @@ def import_catalog(
     console.print(table)
 
 
+# Demo catalog used by `devmgmt-push --seed-demo` — the Connectivity840 example from
+# docs/partpilot-integration.md, so the pushed payloads match the §5 samples exactly.
+_DEMO_MODEL = dict(
+    ref="PM-CONN840",
+    name="Connectivity840",
+    radio_capabilities=["ble", "lorawan", "cellular"],
+    board_revisions=[{"ref": "PM-CONN840-B", "rev": "B"}, {"ref": "PM-CONN840-C", "rev": "C"}],
+)
+_DEMO_VARIANT = dict(
+    ref="SKU-CONN840-WEBSHOP",
+    model_ref="PM-CONN840",
+    sku="CONN840-WEBSHOP",
+    enabled_radios=["ble", "lorawan", "cellular"],
+    radio_config={"lorawan": {"profile_id": "0100000A", "lns_default": "ttn"}},
+    flashable_targets=[
+        {"component": "mcu", "factory_firmware_ref": "MCU-CONN840-1.2.0", "update_method": "ota_via_mcu"},
+        {"component": "lte_modem", "factory_firmware_ref": "ADRASTEA-06.006", "update_method": "local_serial"},
+        {"component": "wifi_module", "factory_firmware_ref": "ESP-2.1", "update_method": "ota_via_mcu"},
+    ],
+)
+_DEMO_DEVICE = dict(
+    serial="CONN840-000042",
+    variant_ref="SKU-CONN840-WEBSHOP",
+    board_rev="C",
+    radios=[
+        {"tech": "lorawan", "identity": {"dev_eui": "0011223344556677", "join_eui": "0102030405060708"},
+         "secrets": {"app_key": "00112233445566778899AABBCCDDEEFF"}},
+        {"tech": "cellular", "identity": {"imei": "350000000000017", "iccid": "8934071100000000017"}},
+        {"tech": "ble", "identity": {"ble_addr": "AABBCCDDEEFF"}},
+    ],
+)
+
+
+@app.command(name="devmgmt-push")
+def devmgmt_push(
+    serial: Optional[str] = typer.Option(
+        None, "--serial", help="Serial of the device build to push. Defaults to the demo device "
+                               "when --seed-demo is given."),
+    seed_demo: bool = typer.Option(
+        False, "--seed-demo", help="Insert a demo model + variant + device (the Connectivity840 "
+                                   "example) before pushing — into a throwaway COPY of the "
+                                   "database, which is discarded afterwards; the real database "
+                                   "is never touched."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Build and print the three §5 payloads without calling devmgmt."),
+):
+    """Push a device (and the model/variant it references) to devmgmt, in referential order.
+
+    First-milestone trigger: prove the §5 contract end to end. With --dry-run it needs no devmgmt
+    connection at all; otherwise it reads DEVMGMT_* from the environment (see .env.example)."""
+    from .devmgmt import DevmgmtClient, DevmgmtConfig, DevmgmtError
+    from .web.app import FEATURES
+    from .web.core import FeatureRegistry
+    from .web.core.db import Database
+    from .web.core.paths import db_path
+    from .web.features.catalog import devmgmt_push as push, devmgmt_repo
+
+    # Demo data must never land in the live catalog: seeding there would also enqueue outbox jobs
+    # that the running service's sync loop pushes to the real devmgmt. Seed a scratch copy instead
+    # (same isolation as `serve --scratch-db`) and discard it when done.
+    scratch_dir = None
+    if seed_demo:
+        scratch_dir, scratch_db = _make_scratch_db()
+        console.print(
+            f"[yellow]Scratch mode[/] — demo data goes into a temporary copy of the database at "
+            f"[bold]{scratch_db}[/]; the real database is untouched.")
+    try:
+        db = Database(db_path())
+        registry = FeatureRegistry()
+        registry.register(*FEATURES)
+        db.apply_migrations(registry)
+
+        if seed_demo:
+            devmgmt_repo.upsert_model(db, **_DEMO_MODEL)
+            devmgmt_repo.upsert_variant(db, **_DEMO_VARIANT)
+            devmgmt_repo.create_device(db, **_DEMO_DEVICE)
+            console.print(f"[green]Seeded[/] demo catalog + device [bold]{_DEMO_DEVICE['serial']}[/].")
+
+        target = serial or (_DEMO_DEVICE["serial"] if seed_demo else None)
+        if not target:
+            console.print("[red]Error:[/] pass --serial <serial> (or --seed-demo to push the demo device).")
+            raise typer.Exit(1)
+
+        try:
+            model, variant, device = push.build_payloads(db, target)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise typer.Exit(1)
+
+        if dry_run:
+            console.print("[bold]Dry run[/] — payloads that would be POSTed (no devmgmt call):")
+            for title, payload in (("POST /api/v1/catalog/models", model),
+                                   ("POST /api/v1/catalog/variants", variant),
+                                   ("POST /api/v1/provisioning/devices", device)):
+                console.print(f"\n[cyan]{title}[/]")
+                console.print_json(data=payload)
+            return
+
+        config = DevmgmtConfig.from_env()
+        if not config:
+            console.print(
+                "[red]Error:[/] devmgmt isn't configured. Set DEVMGMT_BASE_URL (and DEVMGMT_* auth "
+                "vars) in .env, or use --dry-run to preview the payloads.")
+            raise typer.Exit(1)
+        try:
+            client = DevmgmtClient(config.base_url, auth=config.build_auth())
+            push.push_device(db, client, target)
+        except (DevmgmtError, RuntimeError) as exc:
+            console.print(f"[red]devmgmt push failed:[/] {exc}")
+            raise typer.Exit(1)
+        console.print(
+            f"[green]Pushed[/] {target} → devmgmt at [bold]{config.base_url}[/] "
+            f"(model {model['ref']}, variant {variant['ref']}).")
+    finally:
+        if scratch_dir is not None:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
+            console.print(f"[dim]Removed scratch database at {scratch_dir}[/]")
+
+
 @app.command()
 def resolve(
     input: Path = typer.Argument(..., exists=True, readable=True, help="BOM file (.csv/.xlsx)."),

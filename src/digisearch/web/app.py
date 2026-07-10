@@ -27,6 +27,7 @@ from .core.deps import Forbidden, LoginRequired, current_user
 from .core.paths import data_dir as default_data_dir, db_path as default_db_path
 from .features.assemblies import feature as assemblies_feature
 from .features.catalog import feature as catalog_feature
+from .features.catalog.devmgmt_sync import devmgmt_sync_loop
 from .features.contacts import feature as contacts_feature
 from .features.customer_orders import feature as customer_orders_feature
 from .features.despatch import feature as despatch_feature
@@ -104,18 +105,21 @@ def create_app(
         context_processors=[inject],
     )
 
-    # Background runners (currently just the webshop auto-sync). Disabled on scratch/test
-    # instances via PARTPILOT_DISABLE_SCHEDULER so a dev session never syncs the live shop.
+    # Background runners: the webshop auto-sync and the devmgmt outbox flush. Both are disabled on
+    # scratch/test instances via PARTPILOT_DISABLE_SCHEDULER so a dev session never touches the live
+    # shop or devmgmt. The devmgmt loop self-skips ticks when devmgmt isn't configured.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        task = None
+        tasks: list[asyncio.Task] = []
         if os.getenv("PARTPILOT_DISABLE_SCHEDULER") != "1":
-            task = asyncio.create_task(webshop_sync_loop(database))
+            tasks.append(asyncio.create_task(webshop_sync_loop(database)))
+            tasks.append(asyncio.create_task(devmgmt_sync_loop(database)))
         try:
             yield
         finally:
-            if task is not None:
+            for task in tasks:
                 task.cancel()
+            for task in tasks:
                 try:
                     await task
                 except asyncio.CancelledError:

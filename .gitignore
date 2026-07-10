@@ -1,6 +1,12 @@
 # Secrets and credentials
 .env
 
+# mTLS certificates / private keys (devmgmt client identity, etc.) — never commit key material
+certs/
+
+# Editor/backup droppings
+*.bak
+
 # DigiSearch on-disk cache (API responses + token)
 .digisearch_cache/
 

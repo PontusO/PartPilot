@@ -39,6 +39,27 @@ uv run digisearch import-catalog           # seed PartPilot DB from miniMRP (use
 There is no linter/formatter configured. `requirements.txt` exists but `pyproject.toml` + `uv.lock`
 are the source of truth for dependencies.
 
+## Deployment (production web app)
+
+Production runs the web app as a **systemd service** `partpilot.service` (unit at
+`/etc/systemd/system/partpilot.service`): `WorkingDirectory=/home/service1/partpilot`,
+`EnvironmentFile=…/.env`, `ExecStart=…/.venv/bin/digisearch serve --host 0.0.0.0 --port 8000`.
+
+**After changing server-side Python (routers, repos, `app.py`, etc.) or `.env`, restart the
+service** — the process imports modules once at startup, so code and env changes are NOT picked up
+until a restart (needs sudo):
+
+```bash
+sudo systemctl restart partpilot.service
+```
+
+Gotcha that looks like a bug: Jinja templates **hot-reload from disk** on every request, but Python
+code does not. Editing a template *and* its route handler, then not restarting, renders the new
+template against the old handler's context — variables come through undefined (e.g. a panel showing
+"not configured" because the handler that passes `devmgmt_configured` hasn't loaded yet). If the UI
+looks half-updated, restart before debugging. Migrations are additive and run on startup, so a
+restart also applies any new ones.
+
 ## Tests
 
 - `pytest` config lives in `pyproject.toml` (`testpaths = ["tests"]`).

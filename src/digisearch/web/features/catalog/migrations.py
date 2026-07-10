@@ -154,4 +154,132 @@ MIGRATIONS = [
          WHERE mtype = 'ISSUE' AND reference = 'woo-sale';
         """,
     ),
+    Migration(
+        version=8,
+        name="devmgmt device catalog + build records",
+        sql="""
+        -- The product-catalog layer PartPilot pushes to devmgmt (docs/partpilot-integration.md).
+        -- Sits ABOVE the parts/assemblies tables: a variant layers radio + firmware metadata onto
+        -- an existing buildable assembly (parts.kind='ASSY'). All `ref` values are opaque, stable,
+        -- PartPilot-controlled strings that both sides key on and never reuse. JSON-shaped columns
+        -- (radio_capabilities, enabled_radios, radio_config, radios) are stored as TEXT and
+        -- (de)serialized in the repo — SQLite has no native array/object type.
+
+        CREATE TABLE product_models (
+            id                 INTEGER PRIMARY KEY,
+            ref                TEXT NOT NULL UNIQUE,        -- shared model ref, e.g. "PM-CONN840"
+            name               TEXT NOT NULL,
+            radio_capabilities TEXT NOT NULL DEFAULT '[]', -- JSON array, e.g. ["ble","lorawan"]
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE board_revisions (
+            id       INTEGER PRIMARY KEY,
+            model_id INTEGER NOT NULL REFERENCES product_models(id) ON DELETE CASCADE,
+            ref      TEXT NOT NULL UNIQUE,                  -- shared board-rev ref, e.g. "PM-CONN840-C"
+            rev      TEXT NOT NULL,                         -- human label, e.g. "C"
+            UNIQUE (model_id, rev)
+        );
+        CREATE INDEX ix_boardrev_model ON board_revisions(model_id);
+
+        CREATE TABLE variants (
+            id             INTEGER PRIMARY KEY,
+            ref            TEXT NOT NULL UNIQUE,            -- shared variant ref, e.g. "SKU-CONN840-WEBSHOP"
+            model_id       INTEGER NOT NULL REFERENCES product_models(id) ON DELETE CASCADE,
+            assembly_id    INTEGER REFERENCES parts(id),   -- the buildable BOM (parts.kind='ASSY')
+            sku            TEXT NOT NULL UNIQUE,            -- human SKU string; the catalog join key
+            enabled_radios TEXT NOT NULL DEFAULT '[]',     -- JSON array, subset of the model's radios
+            radio_config   TEXT,                           -- JSON object or NULL
+            created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX ix_variants_model ON variants(model_id);
+
+        -- Per-component factory firmware a variant ships with (docs §5.2). update_method is a
+        -- property of the component on this board that devmgmt projects verbatim.
+        CREATE TABLE variant_flashable_targets (
+            id                   INTEGER PRIMARY KEY,
+            variant_id           INTEGER NOT NULL REFERENCES variants(id) ON DELETE CASCADE,
+            component            TEXT NOT NULL,             -- e.g. "mcu", "lte_modem", "wifi_module"
+            factory_firmware_ref TEXT NOT NULL,             -- e.g. "MCU-CONN840-1.2.0"
+            update_method        TEXT NOT NULL
+                CHECK (update_method IN ('ota_via_mcu', 'local_serial', 'local_usb')),
+            line_no              INTEGER                    -- display / push order
+        );
+        CREATE INDEX ix_flashtarget_variant ON variant_flashable_targets(variant_id);
+
+        -- One row per manufactured unit (docs §5.3). owner_token is stored in PLAINTEXT: PartPilot
+        -- is the issuer and needs it to (re)generate the device QR/label; devmgmt stores only its
+        -- hash. `radios` is a JSON array of {tech, identity{}, secrets{}} captured at test-station
+        -- provision time. work_order_id is a soft link (no FK — work_orders is a later-registered
+        -- feature, so a real FK would invert migration order). pushed_at records the last
+        -- successful devmgmt push; NULL = not yet pushed.
+        CREATE TABLE device_builds (
+            id            INTEGER PRIMARY KEY,
+            serial        TEXT NOT NULL UNIQUE,            -- globally unique; the devmgmt handle
+            variant_id    INTEGER NOT NULL REFERENCES variants(id),
+            board_rev     TEXT NOT NULL,                  -- rev label, must exist on the model
+            owner_token   TEXT NOT NULL,                  -- high-entropy, per device (plaintext here)
+            radios        TEXT NOT NULL DEFAULT '[]',     -- JSON array of radio identities + secrets
+            work_order_id INTEGER,                        -- soft link to work_orders(id); optional
+            pushed_at     TEXT,                           -- last successful devmgmt push (ISO), or NULL
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX ix_devicebuilds_variant ON device_builds(variant_id);
+        """,
+    ),
+    Migration(
+        version=9,
+        name="devmgmt push outbox",
+        sql="""
+        -- Transactional outbox for the devmgmt auto-triggers. Catalog edits (model/variant upserts)
+        -- and work-order completion enqueue a row here IN THE SAME TRANSACTION as the change, so the
+        -- intent to push is durable even if devmgmt is down; a background loop (devmgmt_sync) drains
+        -- it with retry. Keeping the network call out of the request path means a WO can always be
+        -- finished even when devmgmt is unreachable. `ref` is the model.ref / variant.ref /
+        -- device.serial to push; UNIQUE(kind, ref) coalesces repeated edits of the same object into
+        -- one pending job (re-enqueue resets it to pending with a fresh attempt count).
+        CREATE TABLE devmgmt_outbox (
+            id          INTEGER PRIMARY KEY,
+            kind        TEXT NOT NULL,          -- 'model' | 'variant' | 'device'
+            ref         TEXT NOT NULL,          -- model.ref / variant.ref / device.serial
+            status      TEXT NOT NULL DEFAULT 'pending',  -- pending | done | error
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            last_error  TEXT,
+            enqueued_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (kind, ref)
+        );
+        CREATE INDEX ix_devmgmt_outbox_status ON devmgmt_outbox(status);
+        """,
+    ),
+    Migration(
+        version=10,
+        name="devmgmt retire lifecycle",
+        sql="""
+        -- Soft-retire timestamps for the active -> retired -> deleted lifecycle (docs §7). A
+        -- non-null retired_at means the model/variant is retired: PartPilot hides it from default
+        -- listings and pushes "retired": true so devmgmt hides it too, but it stays resolvable for
+        -- devices that already reference it. NULL = active. Hard delete (guarded: retire first, no
+        -- references) removes the row entirely and is propagated via a DELETE outbox job.
+        ALTER TABLE product_models ADD COLUMN retired_at TEXT;
+        ALTER TABLE variants        ADD COLUMN retired_at TEXT;
+        """,
+    ),
+    Migration(
+        version=11,
+        name="devmgmt outbox retry backoff + generation counter",
+        sql="""
+        -- next_attempt_at: earliest time a pending job is due again (NULL = due now). Written with
+        -- exponential backoff on transient failures so an outage is probed at a decaying rate
+        -- instead of every tick, and jobs are never permanently abandoned while devmgmt is down.
+        -- seq: bumped on every (re-)enqueue of the same (kind, ref); the flusher's status updates
+        -- are guarded on it so completing an in-flight push can't clobber a concurrent re-enqueue
+        -- (the push used pre-edit data — the row must stay pending so the edit is re-sent).
+        ALTER TABLE devmgmt_outbox ADD COLUMN next_attempt_at TEXT;
+        ALTER TABLE devmgmt_outbox ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]
