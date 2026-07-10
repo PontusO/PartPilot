@@ -74,7 +74,14 @@
         {% for ln in a.lines %}
         <tr>
           <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
-          <td class="num">{{ "%g"|format(ln.qty_per) }}</td>
+          <td class="num">
+            <span class="v{{ ln.id }}">{{ "%g"|format(ln.qty_per) }}</span>
+            {% if can_edit %}
+            <input class="e{{ ln.id }}" form="ef{{ ln.id }}" name="qty_per" type="number"
+                   step="any" min="1" value="{{ "%g"|format(ln.qty_per) }}"
+                   style="display:none; width:72px; margin:0; text-align:right;">
+            {% endif %}
+          </td>
           <td>
             {% if ln.child_kind == 'ASSY' %}
               <a href="/assemblies/{{ ln.child_id }}">{{ ln.child_part_no }}</a>
@@ -87,12 +94,29 @@
           <td>{{ ln.child_category or '' }}</td>
           <td class="num">{% if ln.unit_cost is not none %}{{ "%.4f"|format(ln.unit_cost) }}{% endif %}</td>
           <td class="num">{% if ln.line_cost is not none %}{{ "%.2f"|format(ln.line_cost) }}{% endif %}</td>
-          <td class="flag">{{ ln.refdes or '' }}</td>
+          <td class="flag">
+            <span class="v{{ ln.id }}">{{ ln.refdes or '' }}</span>
+            {% if can_edit %}
+            <input class="e{{ ln.id }}" form="ef{{ ln.id }}" name="refdes" type="text"
+                   value="{{ ln.refdes or '' }}" placeholder="C1, C2…"
+                   style="display:none; width:100%; min-width:150px; margin:0;">
+            {% endif %}
+          </td>
           {% if can_edit %}
-          <td class="num">
-            <form method="post" action="/assemblies/{{ a.id }}/lines/{{ ln.id }}/delete"
-                  style="margin:0" onsubmit="return confirm('Remove this line?');">
+          <td class="num" style="white-space:nowrap;">
+            <button type="button" id="editbtn{{ ln.id }}" class="ghost" style="margin-right:.4rem;"
+                    onclick="rowEdit({{ ln.id }}, true)"
+                    title="Edit qty &amp; reference designators">Edit</button>
+            <form id="rmform{{ ln.id }}" method="post"
+                  action="/assemblies/{{ a.id }}/lines/{{ ln.id }}/delete"
+                  style="display:inline; margin:0" onsubmit="return confirm('Remove this line?');">
               <button type="submit" class="danger" title="Remove line">Remove</button>
+            </form>
+            <form id="ef{{ ln.id }}" method="post"
+                  action="/assemblies/{{ a.id }}/lines/{{ ln.id }}/edit"
+                  style="display:none; margin:0">
+              <button type="submit" class="ghost" style="margin-right:.4rem;">Save</button>
+              <button type="button" class="quiet" onclick="rowEdit({{ ln.id }}, false)">Cancel</button>
             </form>
           </td>
           {% endif %}
@@ -128,6 +152,91 @@
       </tbody>
     </table>
   </div>
+  {% endif %}
+</div>
+
+{# ---- Device management (devmgmt) publish panel ---- #}
+<div class="panel">
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <h2 style="font-size:1.05rem; margin:0;">Device management (devmgmt)</h2>
+    {% if product %}
+      {% set st = sync.status if sync else none %}
+      <span style="display:flex; gap:.5rem; align-items:baseline;">
+        {% if product.variant.retired_at %}
+        <span class="flag" style="font-size:.85rem; color:var(--warn);">● Retired {{ product.variant.retired_at[:10] }}</span>
+        {% endif %}
+        <span class="flag" style="font-size:.85rem;
+          {% if st == 'done' %}color:var(--ok);{% elif st == 'error' %}color:var(--bad);{% endif %}">
+          {% if st == 'done' %}✓ Synced{% elif st == 'pending' %}⏳ Push pending{% elif st == 'error' %}⚠ Sync error{% else %}Not yet queued{% endif %}
+        </span>
+      </span>
+    {% endif %}
+  </div>
+
+  {% if product %}
+    <p class="note" style="margin-top:.5rem;">
+      Published as SKU <b>{{ product.variant.sku }}</b>
+      (model <b>{{ product.model.name }}</b> · {{ product.model.ref }})
+    </p>
+    {% if product.variant.retired_at %}
+    <p class="note" style="margin-top:.4rem; color:var(--warn);">
+      Retired — hidden from the devmgmt catalog and customers, but still resolvable for devices that
+      already reference it. Un-retire to make it visible again, or delete it permanently.
+    </p>
+    {% endif %}
+    <div class="cards" style="margin-top:.6rem;">
+      <div class="card"><b>{{ product.variant.enabled_radios|length }}</b><small>enabled radios</small></div>
+      <div class="card"><b>{{ product.model.board_revisions|length }}</b><small>board revisions</small></div>
+      <div class="card"><b>{{ product.variant.flashable_targets|length }}</b><small>firmware targets</small></div>
+    </div>
+    {% if product.variant.enabled_radios %}
+    <p class="note" style="margin-top:.6rem;">Radios: {{ product.variant.enabled_radios|join(', ') }}</p>
+    {% endif %}
+    {% if sync and sync.status == 'error' and sync.last_error %}
+    <div class="err" style="margin-top:.6rem;">Last push error: {{ sync.last_error }}</div>
+    {% endif %}
+    {% if can_edit %}
+    <div style="margin-top:.9rem; display:flex; gap:.7rem; flex-wrap:wrap;">
+      <a href="/assemblies/{{ a.id }}/devmgmt" style="display:inline-flex; align-items:center;
+         background:var(--accent); color:#fff; font-weight:600; border-radius:9px;
+         padding:.45rem 1.1rem; text-decoration:none;">Edit devmgmt product</a>
+      <form method="post" action="/assemblies/{{ a.id }}/devmgmt/push" style="margin:0;">
+        <button type="submit">Push now</button>
+      </form>
+      {% if product.variant.retired_at %}
+      <form method="post" action="/assemblies/{{ a.id }}/devmgmt/unretire" style="margin:0;">
+        <button type="submit">Un-retire</button>
+      </form>
+      <form method="post" action="/assemblies/{{ a.id }}/devmgmt/delete" style="margin:0;"
+            onsubmit="return confirm('Permanently delete SKU {{ product.variant.sku }} from devmgmt and PartPilot? This can’t be undone.');">
+        <button type="submit" class="danger">Delete</button>
+      </form>
+      {% else %}
+      <form method="post" action="/assemblies/{{ a.id }}/devmgmt/retire" style="margin:0;"
+            onsubmit="return confirm('Retire SKU {{ product.variant.sku }}? It stays resolvable for existing devices but is hidden from the catalog.');">
+        <button type="submit">Retire</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% else %}
+    <p class="note" style="margin-top:.5rem;">
+      This assembly isn’t published to devmgmt. Publishing registers it as a product (a model + a
+      SKU with its radios and factory firmware) so devmgmt can host firmware and run claiming.
+    </p>
+    {% if can_edit %}
+    <div style="margin-top:.8rem;">
+      <a href="/assemblies/{{ a.id }}/devmgmt" style="display:inline-flex; align-items:center;
+         background:var(--accent); color:#fff; font-weight:600; border-radius:9px;
+         padding:.45rem 1.1rem; text-decoration:none;">Publish to devmgmt</a>
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {% if not devmgmt_configured %}
+  <p class="note" style="margin-top:.8rem; color:var(--muted);">
+    devmgmt isn’t configured on this server — changes are queued and will sync automatically once it is.
+  </p>
   {% endif %}
 </div>
 
@@ -169,6 +278,15 @@
   </div>
 </div>
 <script>
+  // Toggle a BOM row between its read-only view and inline-editable qty + refdes fields.
+  function rowEdit(id, on) {
+    document.querySelectorAll('.v' + id).forEach(el => { el.style.display = on ? 'none' : ''; });
+    document.querySelectorAll('.e' + id).forEach(el => { el.style.display = on ? '' : 'none'; });
+    document.getElementById('editbtn' + id).style.display = on ? 'none' : '';
+    document.getElementById('rmform' + id).style.display = on ? 'none' : 'inline';
+    document.getElementById('ef' + id).style.display = on ? 'inline' : 'none';
+    if (on) { const first = document.querySelector('.e' + id); if (first) first.focus(); }
+  }
   function openAdd() {
     document.getElementById('addModal').style.display = 'flex';
     const s = document.getElementById('partsearch'); s.value = ''; filterParts(); s.focus();

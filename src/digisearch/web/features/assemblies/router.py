@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import uuid
 from pathlib import Path
 
@@ -11,7 +12,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
+from digisearch.devmgmt import DevmgmtConfig
+
 from ...core.deps import require_role, require_user
+from ..catalog import devmgmt_outbox, devmgmt_repo
 from ..purchasing.service import resolve_bom_file
 from . import repo
 from .import_bom import apply_import_plan, build_import_plan
@@ -20,6 +24,9 @@ router = APIRouter(prefix="/assemblies")
 
 # Roles allowed to edit a BOM (same as catalog writes).
 ASSEMBLY_WRITE_ROLES = frozenset({"admin", "purchasing"})
+
+# The three ways a component's factory firmware is written on the board (docs §5.2).
+UPDATE_METHODS = ("ota_via_mcu", "local_serial", "local_usb")
 
 
 def _num(v) -> float | None:
@@ -141,6 +148,11 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             request, "error.html", {"message": "Assembly not found."}, status_code=404
         )
     can_edit = user.role in ASSEMBLY_WRITE_ROLES
+    # devmgmt publish panel: the product (if any) linked to this assembly + its sync state.
+    product = devmgmt_repo.product_for_assembly(db, part_id)
+    sync = None
+    if product and product.get("variant"):
+        sync = devmgmt_outbox.status_for(db, "variant", product["variant"]["ref"])
     return templates.TemplateResponse(
         request,
         "assembly_detail.html",
@@ -149,6 +161,9 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             "can_edit": can_edit,
             "parts": repo.parts_for_picker(db, part_id) if can_edit else [],
             "error": error,
+            "product": product,
+            "sync": sync,
+            "devmgmt_configured": DevmgmtConfig.from_env() is not None,
         },
         status_code=status,
     )
@@ -173,6 +188,19 @@ async def add_line(request: Request, part_id: int):
         repo.add_bom_line(request.app.state.database, part_id, child_id, qty_per, refdes)
     except ValueError as exc:
         return _render_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/lines/{line_id}/edit")
+async def edit_line(request: Request, part_id: int, line_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    form = await request.form()
+    qty_per = _num(form.get("qty_per"))
+    refdes = (form.get("refdes") or "").strip() or None
+    if qty_per is None or qty_per <= 0:
+        return _render_detail(request, part_id, user,
+                              error="Quantity must be greater than zero.", status=400)
+    repo.update_bom_line(request.app.state.database, part_id, line_id, qty_per, refdes)
     return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
 
 
@@ -270,3 +298,226 @@ async def import_apply(request: Request, part_id: int):
     a = repo.get_assembly(db, part_id)
     return request.app.state.templates.TemplateResponse(
         request, "assembly_import_result.html", {"a": a, "result": result})
+
+
+# ---- publish this assembly to devmgmt (product = a model + a variant/SKU) ----
+
+def _slug(text: str) -> str:
+    """Normalize a part number / SKU into a wire-safe ref: collapse runs of non-alphanumerics to a
+    single '-'. Case is preserved so the ref reads like the part number it came from."""
+    return re.sub(r"-+", "-", re.sub(r"[^A-Za-z0-9]+", "-", (text or "").strip())).strip("-")
+
+
+def _csv_list(text: str | None) -> list[str]:
+    """Split a comma/newline-separated field into a clean, de-duplicated list (order preserved)."""
+    out: list[str] = []
+    for token in re.split(r"[,\n]", text or ""):
+        token = token.strip()
+        if token and token not in out:
+            out.append(token)
+    return out
+
+
+def _parse_targets(form) -> list[dict]:
+    """Flashable-target rows from the repeated ft_* fields; blank rows dropped."""
+    components = form.getlist("ft_component")
+    firmwares = form.getlist("ft_firmware")
+    methods = form.getlist("ft_method")
+    targets = []
+    for i, component in enumerate(components):
+        component = (component or "").strip()
+        firmware = (firmwares[i] if i < len(firmwares) else "").strip()
+        method = (methods[i] if i < len(methods) else "").strip()
+        if not component and not firmware:      # an untouched / cleared row
+            continue
+        targets.append({"component": component, "factory_firmware_ref": firmware,
+                        "update_method": method})
+    return targets
+
+
+def _devmgmt_defaults(a: dict) -> dict:
+    """Sensible starting values when first publishing an assembly (derived from the part). The
+    model ref is just the part number; the variant ref isn't asked for — it's the SKU (see POST)."""
+    return {
+        "editing": False,
+        "model_ref": _slug(a["part_no"]), "model_name": a.get("value") or a["part_no"],
+        "radio_capabilities": "", "board_revs": (a.get("rev") or "A"),
+        "sku": a["part_no"],
+        "enabled_radios": "", "radio_config": "",
+        "targets": [{"component": "", "factory_firmware_ref": "", "update_method": "ota_via_mcu"}],
+    }
+
+
+def _devmgmt_values_from_product(product: dict) -> dict:
+    """Pre-fill the form from an already-published product for editing."""
+    model, variant = product["model"], product["variant"]
+    return {
+        "editing": True,
+        "model_ref": model["ref"], "model_name": model["name"],
+        "radio_capabilities": ", ".join(model["radio_capabilities"]),
+        "board_revs": ", ".join(b["rev"] for b in model["board_revisions"]),
+        "sku": variant["sku"],
+        "enabled_radios": ", ".join(variant["enabled_radios"]),
+        "radio_config": json.dumps(variant["radio_config"], indent=2) if variant["radio_config"] else "",
+        "targets": variant["flashable_targets"] or [
+            {"component": "", "factory_firmware_ref": "", "update_method": "ota_via_mcu"}],
+    }
+
+
+def _render_devmgmt_form(request, a, values, *, error=None, status=200):
+    return request.app.state.templates.TemplateResponse(
+        request, "devmgmt_product_form.html",
+        {"a": a, "values": values, "methods": UPDATE_METHODS, "error": error},
+        status_code=status,
+    )
+
+
+@router.get("/{part_id}/devmgmt", response_class=HTMLResponse)
+def devmgmt_form(request: Request, part_id: int):
+    require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    a = repo.get_assembly(db, part_id)
+    if a is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Assembly not found."}, status_code=404)
+    product = devmgmt_repo.product_for_assembly(db, part_id)
+    values = _devmgmt_values_from_product(product) if product else _devmgmt_defaults(a)
+    return _render_devmgmt_form(request, a, values)
+
+
+@router.post("/{part_id}/devmgmt", response_class=HTMLResponse)
+async def devmgmt_publish(request: Request, part_id: int):
+    require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    a = repo.get_assembly(db, part_id)
+    if a is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Assembly not found."}, status_code=404)
+
+    form = await request.form()
+    model_ref = _slug(form.get("model_ref"))
+    model_name = (form.get("model_name") or "").strip()
+    sku = (form.get("sku") or "").strip()
+    capabilities = _csv_list(form.get("radio_capabilities"))
+    board_revs = _csv_list(form.get("board_revs"))
+    enabled = _csv_list(form.get("enabled_radios"))
+    targets = _parse_targets(form)
+    raw_config = (form.get("radio_config") or "").strip()
+
+    # A variant IS its SKU, so we don't ask for a separate ref: a new variant's ref is derived from
+    # its SKU. On edit we keep the ORIGINAL ref (snapshot from the first SKU) so renaming the SKU
+    # updates the same devmgmt variant instead of creating a new one.
+    existing = devmgmt_repo.product_for_assembly(db, part_id)
+    if existing and existing.get("variant"):
+        variant_ref = existing["variant"]["ref"]
+    else:
+        variant_ref = _slug(sku)
+
+    # Echo back exactly what was submitted (post-normalization) so an error re-render keeps it.
+    values = {
+        "editing": bool(existing and existing.get("variant")),
+        "model_ref": model_ref, "model_name": model_name,
+        "radio_capabilities": ", ".join(capabilities), "board_revs": ", ".join(board_revs),
+        "sku": sku, "enabled_radios": ", ".join(enabled),
+        "radio_config": raw_config,
+        "targets": targets or [{"component": "", "factory_firmware_ref": "", "update_method": "ota_via_mcu"}],
+    }
+
+    def fail(msg, status=400):
+        return _render_devmgmt_form(request, a, values, error=msg, status=status)
+
+    if not (model_ref and model_name and sku):
+        return fail("Model ref, model name and SKU are all required.")
+    if not board_revs:
+        return fail("Add at least one board revision (e.g. “C”) — devices reference it.")
+    unknown = [r for r in enabled if r not in capabilities]
+    if unknown:
+        return fail(f"Enabled radio(s) {', '.join(unknown)} aren’t in the model’s capabilities.")
+    for t in targets:
+        if not t["component"] or not t["factory_firmware_ref"]:
+            return fail("Each firmware target needs both a component and a firmware ref.")
+        if t["update_method"] not in UPDATE_METHODS:
+            return fail(f"Firmware target “{t['component']}” has an invalid update method.")
+    radio_config = None
+    if raw_config:
+        try:
+            radio_config = json.loads(raw_config)
+        except json.JSONDecodeError as exc:
+            return fail(f"Radio config isn’t valid JSON: {exc}")
+        if not isinstance(radio_config, dict):
+            return fail("Radio config must be a JSON object (e.g. {\"lorawan\": {…}}).")
+
+    board_revisions = [{"ref": f"{model_ref}-{rev}", "rev": rev} for rev in board_revs]
+    try:
+        devmgmt_repo.upsert_model(db, ref=model_ref, name=model_name,
+                                  radio_capabilities=capabilities, board_revisions=board_revisions)
+        devmgmt_repo.upsert_variant(db, ref=variant_ref, model_ref=model_ref, sku=sku,
+                                    enabled_radios=enabled, radio_config=radio_config,
+                                    assembly_id=part_id, flashable_targets=targets)
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        # e.g. a ref/SKU already used by a different assembly's product.
+        return fail(f"Couldn’t save: {exc}")
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/devmgmt/push")
+def devmgmt_push_now(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    product = devmgmt_repo.product_for_assembly(db, part_id)
+    if product is None or not product.get("variant"):
+        return _render_detail(request, part_id, user,
+                              error="Publish this assembly to devmgmt before pushing.", status=400)
+    devmgmt_outbox.enqueue_product(db, product["model"]["ref"], product["variant"]["ref"])
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+def _variant_ref_or_error(request, part_id, user):
+    """The published variant ref for this assembly, or a rendered 400 if there's no product."""
+    product = devmgmt_repo.product_for_assembly(request.app.state.database, part_id)
+    if product is None or not product.get("variant"):
+        return None, _render_detail(request, part_id, user,
+                                    error="This assembly isn’t published to devmgmt.", status=400)
+    return product["variant"], None
+
+
+@router.post("/{part_id}/devmgmt/retire")
+def devmgmt_retire(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    variant, err = _variant_ref_or_error(request, part_id, user)
+    if err:
+        return err
+    devmgmt_repo.set_variant_retired(request.app.state.database, variant["ref"], True)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/devmgmt/unretire")
+def devmgmt_unretire(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    variant, err = _variant_ref_or_error(request, part_id, user)
+    if err:
+        return err
+    devmgmt_repo.set_variant_retired(request.app.state.database, variant["ref"], False)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/devmgmt/delete")
+def devmgmt_delete(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    variant, err = _variant_ref_or_error(request, part_id, user)
+    if err:
+        return err
+    # Guards enforce the retire→delete discipline (docs §7); PartPilot is authoritative for both.
+    if not variant.get("retired_at"):
+        return _render_detail(request, part_id, user,
+                              error="Retire this product before deleting it.", status=400)
+    refs = devmgmt_repo.variant_device_count(db, variant["ref"])
+    if refs:
+        return _render_detail(
+            request, part_id, user,
+            error=f"{refs} device(s) still reference this SKU — remove them before deleting.",
+            status=400)
+    # Local hard-delete + queued devmgmt DELETE (no network in the request path).
+    devmgmt_repo.delete_variant(db, variant["ref"])
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)

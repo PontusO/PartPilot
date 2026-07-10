@@ -180,6 +180,17 @@ def add_bom_line(db: Database, parent_id: int, child_id: int, qty_per: float,
         conn.commit()
 
 
+def update_bom_line(db: Database, parent_id: int, line_id: int, qty_per: float,
+                    refdes: str | None) -> None:
+    """Update a single BOM line's quantity and reference designators (scoped to its parent)."""
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE bom_lines SET qty_per = ?, refdes = ? WHERE id = ? AND parent_id = ?",
+            (qty_per or 1, refdes, line_id, parent_id),
+        )
+        conn.commit()
+
+
 def delete_bom_line(db: Database, parent_id: int, line_id: int) -> None:
     with db.connect() as conn:
         conn.execute(

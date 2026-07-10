@@ -1320,6 +1320,55 @@ def test_assembly_bom_add_and_delete(app):
     assert "no BOM lines yet" in after
 
 
+def test_assembly_bom_line_inline_edit(app):
+    import re
+    from digisearch.web.features.assemblies import repo as asmrepo
+
+    asm, comp = _setup_assembly(app)
+    db = app.state.database
+    asmrepo.add_bom_line(db, asm, comp, 5, "R1, R2")
+    line_id = asmrepo.get_assembly(db, asm)["lines"][0]["id"]
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+
+    # The row exposes an Edit control (blue .ghost button) and an edit form for the line.
+    det = client.get(f"/assemblies/{asm}").text
+    assert f"/assemblies/{asm}/lines/{line_id}/edit" in det
+    assert 'onclick="rowEdit(' in det
+    assert re.search(r'name="qty_per"[^>]*value="5"', det)
+
+    # Editing updates qty and reference designators.
+    r = client.post(f"/assemblies/{asm}/lines/{line_id}/edit",
+                    data={"qty_per": "8", "refdes": "R1, R2, R3"}, follow_redirects=False)
+    assert r.status_code == 303
+    line = asmrepo.get_assembly(db, asm)["lines"][0]
+    assert line["qty_per"] == 8 and line["refdes"] == "R1, R2, R3"
+
+    # Zero / negative quantity is rejected (line unchanged).
+    bad = client.post(f"/assemblies/{asm}/lines/{line_id}/edit",
+                      data={"qty_per": "0", "refdes": "R1"}, follow_redirects=False)
+    assert bad.status_code == 400
+    assert asmrepo.get_assembly(db, asm)["lines"][0]["qty_per"] == 8
+
+
+def test_assembly_bom_line_edit_requires_write_role(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+
+    asm, comp = _setup_assembly(app)
+    db = app.state.database
+    asmrepo.add_bom_line(db, asm, comp, 1, None)
+    line_id = asmrepo.get_assembly(db, asm)["lines"][0]["id"]
+
+    ware = TestClient(app)
+    _login(ware, "ware1", "pw")  # warehouse may view but not edit
+    assert "rowEdit(" not in ware.get(f"/assemblies/{asm}").text  # no edit controls rendered
+    r = ware.post(f"/assemblies/{asm}/lines/{line_id}/edit",
+                  data={"qty_per": "9"}, follow_redirects=False)
+    assert r.status_code == 403
+    assert asmrepo.get_assembly(db, asm)["lines"][0]["qty_per"] == 1  # unchanged
+
+
 def test_new_assembly_flow(app):
     client = TestClient(app)
     _login(client, "buyer1", "pw")
