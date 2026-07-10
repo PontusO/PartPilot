@@ -87,4 +87,24 @@ MIGRATIONS = [
         ALTER TABLE contacts ADD COLUMN fortnox_customer_number TEXT;
         """,
     ),
+    Migration(
+        version=4,
+        name="backfill supplier contacts into catalog suppliers",
+        # One-time bridge: the part-edit and PO supplier dropdowns read the catalog `suppliers`
+        # table, not `contacts`, so supplier-kind contacts added before the mirror-on-save existed
+        # were invisible there. Insert a `suppliers` row for every supplier contact that has no
+        # name-matching one yet. Safe because `contacts` (registered after `catalog` in FEATURES)
+        # runs its migrations after `suppliers` already exists. Imported suppliers already have a
+        # matching `suppliers` row (same name), so this only fills in UI-created ones.
+        sql="""
+        INSERT INTO suppliers (name, short_name, url, currency, minimrp_id)
+        SELECT c.name, c.short_name, c.website, c.currency, NULL
+        FROM contacts c
+        WHERE c.kind = 'supplier'
+          AND NOT EXISTS (
+              SELECT 1 FROM suppliers s WHERE lower(s.name) = lower(c.name)
+          )
+        GROUP BY lower(c.name);
+        """,
+    ),
 ]

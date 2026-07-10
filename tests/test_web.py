@@ -95,6 +95,39 @@ def test_contacts_list_create_and_edit(app):
     assert "Acme Inc" in client.get("/contacts").text
 
 
+def test_supplier_contact_mirrors_into_catalog_suppliers(app):
+    """A supplier added in Contacts must appear in the part-edit / PO supplier dropdown, which
+    reads the catalog ``suppliers`` table (not ``contacts``)."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")  # purchasing -> can edit
+
+    db = app.state.database
+    assert not any(s["name"] == "Widget Supply AB" for s in catrepo.suppliers(db))
+
+    r = client.post("/contacts/new",
+                    data={"kind": "supplier", "name": "Widget Supply AB", "currency": "SEK",
+                          "website": "https://widgets.example"}, follow_redirects=False)
+    assert r.status_code == 303
+    mirrored = [s for s in catrepo.suppliers(db) if s["name"] == "Widget Supply AB"]
+    assert len(mirrored) == 1  # now selectable on the part form
+
+    # A non-supplier contact must NOT create a suppliers row.
+    client.post("/contacts/new", data={"kind": "customer", "name": "Buyer Co"},
+                follow_redirects=False)
+    assert not any(s["name"] == "Buyer Co" for s in catrepo.suppliers(db))
+
+    # Editing the same-named supplier contact updates its mirror in place (no duplicate row).
+    from digisearch.web.features.contacts import repo as conrepo
+    sup_cid = conrepo.list_contacts(db, search="Widget")[0]["id"]
+    client.post(f"/contacts/{sup_cid}/edit",
+                data={"kind": "supplier", "name": "Widget Supply AB", "currency": "USD"},
+                follow_redirects=False)
+    rows = [s for s in catrepo.suppliers(db) if s["name"] == "Widget Supply AB"]
+    assert len(rows) == 1  # still exactly one — matched by name, updated not duplicated
+
+
 def test_planning_calendar_events_and_reschedule(app):
     from digisearch.web.features.assemblies import repo as asmrepo
     from digisearch.web.features.catalog import repo as catrepo

@@ -206,6 +206,48 @@ def _get_or_create_supplier(conn, name: str) -> int:
     return conn.execute("INSERT INTO suppliers (name) VALUES (?)", (name,)).lastrowid
 
 
+def upsert_supplier(
+    db: Database, *, name: str, short_name: str | None = None, url: str | None = None,
+    currency: str | None = None, minimrp_id: int | None = None,
+) -> int | None:
+    """Create/update a ``suppliers`` row so it appears in the part-edit and PO supplier dropdowns.
+
+    The procurement supplier master (``suppliers``) and the Contacts address book
+    (``contacts`` WHERE kind='supplier') are otherwise unlinked, so a supplier added in Contacts
+    never shows up on parts/POs. Contacts mirrors itself here on save via this function. Matches an
+    existing row by ``minimrp_id`` first (the shared miniMRP AddID), then by case-insensitive name.
+    Blank incoming fields never overwrite existing values (COALESCE), so editing a contact can't
+    erase a currency/short_name a PO already relies on. Returns the supplier id.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    with db.connect() as conn:
+        row = None
+        if minimrp_id is not None:
+            row = conn.execute(
+                "SELECT id FROM suppliers WHERE minimrp_id = ?", (minimrp_id,)).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT id FROM suppliers WHERE lower(name) = lower(?)", (name,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE suppliers SET name = ?, short_name = COALESCE(?, short_name), "
+                "url = COALESCE(?, url), currency = COALESCE(?, currency), "
+                "minimrp_id = COALESCE(minimrp_id, ?) WHERE id = ?",
+                (name, short_name, url, currency, minimrp_id, row["id"]),
+            )
+            sid = row["id"]
+        else:
+            sid = conn.execute(
+                "INSERT INTO suppliers (name, short_name, url, currency, minimrp_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (name, short_name, url, currency, minimrp_id),
+            ).lastrowid
+        conn.commit()
+        return sid
+
+
 def _location_id(conn, location_id: int | None) -> int:
     if location_id:
         return location_id

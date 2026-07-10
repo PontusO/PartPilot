@@ -2,6 +2,7 @@ import pytest
 
 from digisearch.web.core import FeatureRegistry
 from digisearch.web.core.db import Database
+from digisearch.web.features.catalog import feature as catalog_feature
 from digisearch.web.features.contacts import feature as contacts_feature
 from digisearch.web.features.contacts import importer, repo
 
@@ -10,7 +11,9 @@ from digisearch.web.features.contacts import importer, repo
 def db(tmp_path):
     database = Database(tmp_path / "c.db")
     reg = FeatureRegistry()
-    reg.register(contacts_feature)
+    # catalog first (as in production) so `suppliers` exists — contacts mirrors supplier-kind
+    # contacts into it and the v4 backfill migration writes to it.
+    reg.register(catalog_feature, contacts_feature)
     database.apply_migrations(reg)
     return database
 
@@ -108,6 +111,59 @@ def test_default_flag_is_exclusive_per_usage(db):
     inv = repo.create_address(db, cid, {"label": "Bill", "is_invoice": 1, "is_default_invoice": 1})
     assert repo.default_invoice_address(db, cid)["id"] == inv
     assert repo.default_delivery_address(db, cid)["id"] == a1
+
+
+def test_upsert_supplier_matches_and_never_wipes(db):
+    from digisearch.web.features.catalog import repo as catrepo
+
+    sid = catrepo.upsert_supplier(db, name="Acme Parts", short_name="ACM", currency="SEK",
+                                  url="https://acme.example")
+    assert [s["name"] for s in catrepo.suppliers(db)] == ["Acme Parts"]
+
+    # Same name (case-insensitive) updates the existing row, doesn't duplicate.
+    again = catrepo.upsert_supplier(db, name="acme parts", currency="USD")
+    assert again == sid
+    with db.connect() as conn:
+        row = conn.execute("SELECT short_name, url, currency FROM suppliers WHERE id=?",
+                           (sid,)).fetchone()
+    # currency updated; blank short_name/url did NOT overwrite the earlier values (COALESCE).
+    assert row["currency"] == "USD" and row["short_name"] == "ACM"
+    assert row["url"] == "https://acme.example"
+
+
+def test_upsert_supplier_matches_by_minimrp_id_across_rename(db):
+    from digisearch.web.features.catalog import repo as catrepo
+
+    sid = catrepo.upsert_supplier(db, name="Old Name", minimrp_id=42)
+    # Same miniMRP id but a new name -> same row is updated (renamed), not a new one.
+    again = catrepo.upsert_supplier(db, name="New Name", minimrp_id=42)
+    assert again == sid
+    assert [s["name"] for s in catrepo.suppliers(db)] == ["New Name"]
+
+
+def test_backfill_migration_seeds_suppliers_from_supplier_contacts(db):
+    """The v4 contacts migration bridges pre-existing supplier contacts into `suppliers`.
+    Re-running its exact SQL is a no-op (idempotent) and ignores non-supplier contacts."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    repo.create_contact(db, {"kind": "supplier", "name": "Legacy Sup", "website": "https://x"})
+    repo.create_contact(db, {"kind": "customer", "name": "Some Customer"})
+
+    backfill = """
+        INSERT INTO suppliers (name, short_name, url, currency, minimrp_id)
+        SELECT c.name, c.short_name, c.website, c.currency, NULL
+        FROM contacts c
+        WHERE c.kind = 'supplier'
+          AND NOT EXISTS (SELECT 1 FROM suppliers s WHERE lower(s.name) = lower(c.name))
+        GROUP BY lower(c.name);
+    """
+    with db.connect() as conn:
+        conn.executescript(backfill)
+        conn.executescript(backfill)  # idempotent re-run
+        conn.commit()
+
+    names = [s["name"] for s in catrepo.suppliers(db)]
+    assert names == ["Legacy Sup"]  # supplier seeded once; customer ignored
 
 
 def test_addresses_cascade_on_contact_delete(db):
