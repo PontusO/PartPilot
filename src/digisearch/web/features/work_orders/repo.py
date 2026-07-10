@@ -12,7 +12,7 @@ from datetime import date
 
 from ...core import add_workdays, iso, parse_date, ref_no, sub_workdays, workdays_between
 from ...core.db import Database
-from ..catalog import stock
+from ..catalog import devmgmt_outbox, stock
 
 
 def _spillage_settings(conn) -> tuple[float, float]:
@@ -65,6 +65,57 @@ def explode_to_components(conn, assembly_id: int, qty: float) -> dict[int, float
     return acc
 
 
+def _apply_margin(need: float, spillage: float, min_margin: float) -> float:
+    """Add the per-component spillage/scrap margin, rounded up to whole parts. Margin = the larger
+    of (spillage % of need) and the minimum-margin qty. Kept in one place so create, regenerate and
+    the divergence check all compute identical required quantities."""
+    if spillage or min_margin:
+        return math.ceil(round(need + max(need * spillage / 100.0, min_margin), 6))
+    return need
+
+
+def _required_map(conn, assembly_id: int, qty: float, spillage: float,
+                  min_margin: float) -> dict[int, float]:
+    """Exploded base-component requirements for a build, with the margin policy applied."""
+    return {pid: _apply_margin(need, spillage, min_margin)
+            for pid, need in explode_to_components(conn, assembly_id, qty).items()}
+
+
+def _write_wo_lines(conn, wo_id: int, required_map: dict[int, float]) -> None:
+    """(Re)write a work order's component lines from {part_id: qty_required}, numbered by part_id."""
+    for i, (pid, required) in enumerate(sorted(required_map.items()), start=1):
+        conn.execute(
+            "INSERT INTO work_order_lines (work_order_id, part_id, qty_required, line_no) "
+            "VALUES (?, ?, ?, ?)",
+            (wo_id, pid, required, i),
+        )
+
+
+def _bom_divergence(conn, wo) -> dict:
+    """Whether the assembly's current BOM differs from what this WO snapshotted, and how.
+
+    Re-explodes the CURRENT assembly BOM at the WO's build qty using the WO's *snapshotted* margin
+    (spillage_percent / min_margin_qty), so only genuine BOM changes — components added, removed, or
+    their exploded quantity changed — count, never a later change to the global spillage setting.
+    Only meaningful while 'allocated'; issued/finished lines are locked to what was consumed.
+    Returns {diverged, added, removed, changed} (the lists hold part ids).
+    """
+    fresh = _required_map(conn, wo["assembly_id"], wo["qty"],
+                          wo["spillage_percent"] or 0.0, wo["min_margin_qty"] or 0.0)
+    stored = {r["part_id"]: r["qty_required"] for r in conn.execute(
+        "SELECT part_id, qty_required FROM work_order_lines WHERE work_order_id = ?", (wo["id"],))}
+    added = [pid for pid in fresh if pid not in stored]
+    removed = [pid for pid in stored if pid not in fresh]
+    changed = [pid for pid in fresh if pid in stored and abs(fresh[pid] - stored[pid]) > 1e-6]
+    return {"diverged": bool(added or removed or changed),
+            "added": added, "removed": removed, "changed": changed}
+
+
+def _diverged(conn, wo) -> bool:
+    """Cheap boolean for lists/calendar: only 'allocated' WOs can diverge (others are locked)."""
+    return wo["status"] == "allocated" and _bom_divergence(conn, wo)["diverged"]
+
+
 # ---- reads ----
 
 def summary(db: Database) -> dict:
@@ -88,8 +139,9 @@ def assemblies(db: Database) -> list[dict]:
 def list_work_orders(db: Database, status: str | None = None, search: str | None = None) -> list[dict]:
     like = f"%{search}%" if search else None
     with db.connect() as conn:
-        return [dict(r) for r in conn.execute(
+        rows = [dict(r) for r in conn.execute(
             """SELECT w.id, w.wo_no, w.qty, w.status, w.build_date, w.planned_start, w.due_date,
+                      w.assembly_id, w.spillage_percent, w.min_margin_qty,
                       p.part_no AS assembly_part_no, p.value AS assembly_value,
                       (SELECT COUNT(*) FROM work_order_lines l WHERE l.work_order_id = w.id) AS line_count
                FROM work_orders w JOIN parts p ON p.id = w.assembly_id
@@ -98,6 +150,9 @@ def list_work_orders(db: Database, status: str | None = None, search: str | None
                ORDER BY w.id DESC""",
             {"status": status, "search": search, "like": like},
         )]
+        for r in rows:  # flag WOs whose assembly BOM has drifted from the snapshot (allocated only)
+            r["bom_diverged"] = _diverged(conn, r)
+    return rows
 
 
 def get_work_order(db: Database, wo_id: int) -> dict | None:
@@ -121,6 +176,9 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
                WHERE wl.work_order_id = ? ORDER BY COALESCE(wl.line_no, 1e9), wl.id""",
             (wo_id,),
         )]
+        # Has the assembly BOM changed since this WO was planned? (Only actionable while allocated.)
+        diff = (_bom_divergence(conn, head) if head["status"] == "allocated"
+                else {"diverged": False, "added": [], "removed": [], "changed": []})
     wo = dict(head)
     short_count = 0
     for d in lines:
@@ -132,6 +190,8 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
             short_count += 1
     wo["lines"] = lines
     wo["short_count"] = short_count
+    wo["bom_diff"] = diff
+    wo["bom_diverged"] = diff["diverged"]
     return wo
 
 
@@ -173,18 +233,7 @@ def create_work_order(db: Database, data: dict) -> int:
         ).lastrowid
         if not data.get("wo_no"):
             conn.execute("UPDATE work_orders SET wo_no = ? WHERE id = ?", (ref_no("WO", wo_id), wo_id))
-        exploded = explode_to_components(conn, data["assembly_id"], qty)
-        for i, (pid, need) in enumerate(sorted(exploded.items()), start=1):
-            # per-component margin = max(percentage of need, minimum qty); round up to whole parts
-            if spillage or min_margin:
-                required = math.ceil(round(need + max(need * spillage / 100.0, min_margin), 6))
-            else:
-                required = need
-            conn.execute(
-                "INSERT INTO work_order_lines (work_order_id, part_id, qty_required, line_no) "
-                "VALUES (?, ?, ?, ?)",
-                (wo_id, pid, required, i),
-            )
+        _write_wo_lines(conn, wo_id, _required_map(conn, data["assembly_id"], qty, spillage, min_margin))
         pb = _critical_buy_by(conn, wo_id, parse_date(planned_start))   # now that lines exist
         if pb:
             conn.execute("UPDATE work_orders SET purchase_by = ? WHERE id = ?", (pb, wo_id))
@@ -325,6 +374,9 @@ def finish_work_order(db: Database, wo_id: int, user: str | None = None) -> None
             "build_date = COALESCE(build_date, date('now')), updated_at = datetime('now') WHERE id = ?",
             (wo_id,),
         )
+        # Work-order-finish trigger: if this assembly is a devmgmt variant, queue its catalog + any
+        # devices built on this WO for pushing (same transaction — no network call in the request).
+        devmgmt_outbox.enqueue_for_finished_work_order(conn, wo_id)
         conn.commit()
 
 
@@ -332,6 +384,35 @@ def flush_work_order(db: Database, wo_id: int, user: str | None = None) -> None:
     """Run a quick build straight through: issue then finish in one go."""
     issue_work_order(db, wo_id, user)
     finish_work_order(db, wo_id, user)
+
+
+def regenerate_bom(db: Database, wo_id: int, user: str | None = None) -> None:
+    """Rebuild an allocated WO's component lines from the assembly's CURRENT BOM.
+
+    For when the BOM was edited (rework, part swaps) after the WO was planned. Re-explodes at the
+    WO's build qty, applying the CURRENT Setup → Production spillage/min-margin and re-snapshotting
+    that policy onto the WO. The schedule (planned dates) is kept; the purchasing deadline is
+    re-derived from the new lines. Allocated-only: once issued, components have been consumed, so
+    the lines are locked to what actually moved.
+    """
+    with db.connect() as conn:
+        wo = conn.execute("SELECT * FROM work_orders WHERE id = ?", (wo_id,)).fetchone()
+        if wo is None:
+            raise ValueError("Work order not found.")
+        if wo["status"] != "allocated":
+            raise ValueError(
+                f"Only an allocated work order's BOM can be regenerated (this one is {wo['status']}).")
+        spillage, min_margin = _spillage_settings(conn)   # refresh to the current policy
+        required_map = _required_map(conn, wo["assembly_id"], wo["qty"], spillage, min_margin)
+        conn.execute("DELETE FROM work_order_lines WHERE work_order_id = ?", (wo_id,))
+        _write_wo_lines(conn, wo_id, required_map)
+        pb = _critical_buy_by(conn, wo_id, parse_date(wo["planned_start"]))
+        conn.execute(
+            "UPDATE work_orders SET spillage_percent = ?, min_margin_qty = ?, "
+            "purchase_by = COALESCE(?, purchase_by), updated_at = datetime('now') WHERE id = ?",
+            (spillage, min_margin, pb, wo_id),
+        )
+        conn.commit()
 
 
 # ---- customer-order fulfilment (build to fulfil) ----

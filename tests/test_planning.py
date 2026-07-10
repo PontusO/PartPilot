@@ -56,6 +56,27 @@ def test_calendar_has_build_bar_and_purchasing_marker(db):
     assert buy_ev["start"] == worepo.get_work_order(db, wo_id)["purchase_by"]
 
 
+def test_diverged_wo_is_marked_on_calendar(db):
+    comp = catrepo.create_part(db, part={"part_no": "DC-1"},
+                               supplier_lines=[{"supplier_name": "X", "unit_price": 1,
+                                                "reel_qty": 1, "is_default": True}])
+    asm = asmrepo.create_assembly(db, {"part_no": "DA-1", "default_build_days": 5})
+    asmrepo.add_bom_line(db, asm, comp, 2, None)
+    wo_id = worepo.create_work_order(db, {"assembly_id": asm, "qty": 1, "due_date": "2026-07-31"})
+
+    wo_ev = next(e for e in repo.calendar_events(db) if e["extendedProps"]["type"] == "wo")
+    assert wo_ev["extendedProps"]["bom_diverged"] is False and wo_ev["color"] == "#8b5cf6"
+
+    # Edit the assembly BOM after planning → the build bar is flagged (amber, ⚠ in the title).
+    extra = catrepo.create_part(db, part={"part_no": "DC-2"},
+                                supplier_lines=[{"supplier_name": "X", "unit_price": 1,
+                                                 "reel_qty": 1, "is_default": True}])
+    asmrepo.add_bom_line(db, asm, extra, 1, None)
+    wo_ev = next(e for e in repo.calendar_events(db) if e["extendedProps"]["type"] == "wo")
+    assert wo_ev["extendedProps"]["bom_diverged"] is True
+    assert wo_ev["color"] == "#d97706" and wo_ev["title"].startswith("⚠ BOM changed")
+
+
 def test_unscheduled_and_cancelled_wos_are_absent(db):
     asm = asmrepo.create_assembly(db, {"part_no": "PA-2"})
     comp = catrepo.create_part(db, part={"part_no": "PC-2"},

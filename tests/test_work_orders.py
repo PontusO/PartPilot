@@ -318,6 +318,59 @@ def test_unlimited_stock_part_never_below_min(db):
     assert catrepo.summary(db)["below_min"] == 0   # excluded from the below-min count
 
 
+def test_bom_divergence_flag_and_regenerate(db):
+    a, b, sub, top = _setup(db)  # exploded @10: COMP-A=60, COMP-B=50
+    wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 10})
+    assert repo.get_work_order(db, wo_id)["bom_diverged"] is False
+
+    # Rework the assembly BOM: add a new component and bump COMP-B's qty_per.
+    c = _comp(db, "COMP-C", 10)
+    asmrepo.add_bom_line(db, top, c, 4, None)                       # +COMP-C 4/build
+    b_line = next(l for l in asmrepo.get_assembly(db, top)["lines"] if l["child_part_no"] == "COMP-B")
+    asmrepo.update_bom_line(db, top, b_line["id"], 6, None)         # COMP-B 5 → 6/build
+
+    wo = repo.get_work_order(db, wo_id)
+    assert wo["bom_diverged"] is True
+    assert len(wo["bom_diff"]["added"]) == 1        # COMP-C
+    assert len(wo["bom_diff"]["changed"]) == 1      # COMP-B
+    assert not wo["bom_diff"]["removed"]
+    # the flag also surfaces in the list
+    assert next(r for r in repo.list_work_orders(db) if r["id"] == wo_id)["bom_diverged"] is True
+
+    repo.regenerate_bom(db, wo_id, "u")
+    wo = repo.get_work_order(db, wo_id)
+    assert wo["bom_diverged"] is False
+    req = {ln["part_no"]: ln["qty_required"] for ln in wo["lines"]}
+    assert req == {"COMP-A": 60, "COMP-B": 60, "COMP-C": 40}       # rebuilt from current BOM
+
+
+def test_regenerate_only_allocated(db):
+    _, _, _, top = _setup(db)
+    wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 1})
+    repo.issue_work_order(db, wo_id, "u")           # components consumed — lines now locked
+    with pytest.raises(ValueError):
+        repo.regenerate_bom(db, wo_id, "u")
+
+
+def test_spillage_setting_change_alone_does_not_flag_divergence(db):
+    a, _, _, top = _setup(db)
+    wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 10})   # no spillage → A=60, B=50
+    # Introduce a global spillage AFTER the WO was created.
+    with db.connect() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('production.spillage_percent', '10')")
+        conn.commit()
+    # A margin-setting change is NOT a BOM change — the flag stays clear.
+    assert repo.get_work_order(db, wo_id)["bom_diverged"] is False
+
+    # But regenerating refreshes to the current 10% margin and re-snapshots it on the WO.
+    repo.regenerate_bom(db, wo_id, "u")
+    wo = repo.get_work_order(db, wo_id)
+    req = {ln["part_no"]: ln["qty_required"] for ln in wo["lines"]}
+    assert req["COMP-A"] == 66 and req["COMP-B"] == 55   # 60/50 + 10%
+    assert wo["spillage_percent"] == 10.0
+
+
 def test_only_assemblies_with_bom_are_buildable(db):
     _setup(db)
     catrepo.create_part(db, part={"part_no": "LONE"},

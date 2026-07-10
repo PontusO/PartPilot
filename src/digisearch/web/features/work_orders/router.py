@@ -18,6 +18,7 @@ _ACTIONS = {
     "issue": repo.issue_work_order,
     "finish": repo.finish_work_order,
     "flush": repo.flush_work_order,
+    "regenerate-bom": repo.regenerate_bom,
 }
 
 

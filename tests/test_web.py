@@ -1427,6 +1427,54 @@ def test_edit_assembly_fields_flow(app):
     assert "EDITED-ASM" in det and "EDITASM" not in det
 
 
+def test_work_order_bom_divergence_and_regenerate(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.work_orders import repo as worepo
+
+    asm, comp = _setup_assembly(app)                 # ASM-100 assembly, RES-1 component
+    db = app.state.database
+    asmrepo.add_bom_line(db, asm, comp, 2, None)     # give the assembly a BOM
+    wo_id = worepo.create_work_order(db, {"assembly_id": asm, "qty": 5})
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+
+    # No divergence yet — no banner on the WO page, no badge in the list.
+    assert "BOM has changed" not in client.get(f"/work-orders/{wo_id}").text
+    assert "BOM changed" not in client.get("/work-orders").text
+
+    # Rework the assembly BOM after the WO was planned.
+    b_line = asmrepo.get_assembly(db, asm)["lines"][0]
+    asmrepo.update_bom_line(db, asm, b_line["id"], 3, None)   # 2 → 3 per build
+
+    det = client.get(f"/work-orders/{wo_id}").text
+    assert "BOM has changed" in det and f"/work-orders/{wo_id}/regenerate-bom" in det
+    assert "BOM changed" in client.get("/work-orders").text   # list badge
+
+    # Regenerate rebuilds the component lines and clears the flag.
+    r = client.post(f"/work-orders/{wo_id}/regenerate-bom", follow_redirects=False)
+    assert r.status_code == 303
+    wo = worepo.get_work_order(db, wo_id)
+    assert wo["bom_diverged"] is False and wo["lines"][0]["qty_required"] == 15   # 3×5
+    assert "BOM has changed" not in client.get(f"/work-orders/{wo_id}").text
+
+
+def test_regenerate_bom_requires_work_order_role(app):
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.work_orders import repo as worepo
+
+    asm, comp = _setup_assembly(app)
+    db = app.state.database
+    asmrepo.add_bom_line(db, asm, comp, 1, None)
+    wo_id = worepo.create_work_order(db, {"assembly_id": asm, "qty": 1})
+
+    app.state.store.create_user("ship_wo", "pw", role="shipping")  # not a work-order role
+    ship = TestClient(app)
+    _login(ship, "ship_wo", "pw")
+    assert ship.post(f"/work-orders/{wo_id}/regenerate-bom",
+                     follow_redirects=False).status_code == 403
+
+
 def test_assembly_csv_import_flow(app, monkeypatch):
     import re
 

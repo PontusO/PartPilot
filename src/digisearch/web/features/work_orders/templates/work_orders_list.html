@@ -47,7 +47,8 @@
           <td><a href="/work-orders/{{ w.id }}">{{ w.wo_no or '#' ~ w.id }}</a></td>
           <td>{{ w.assembly_part_no }}{% if w.assembly_value %} <span class="flag">{{ w.assembly_value }}</span>{% endif %}</td>
           <td class="num">{{ "%g"|format(w.qty) }}</td>
-          <td><span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span></td>
+          <td><span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span>
+            {% if w.bom_diverged %}<span class="badge bad" title="The assembly BOM has changed since this WO was planned — open it to regenerate">⚠ BOM changed</span>{% endif %}</td>
           <td>{{ w.build_date or '' }}</td>
           <td class="num">{{ w.line_count }}</td>
         </tr>

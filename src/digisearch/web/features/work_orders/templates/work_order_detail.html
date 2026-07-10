@@ -19,6 +19,23 @@
 
   {% if error %}<div class="err" style="margin-top:1rem;">{{ error }}</div>{% endif %}
 
+  {% if w.bom_diverged %}
+  <div style="margin-top:1rem; padding:.75rem .95rem; border-radius:9px; display:flex; gap:1rem;
+       align-items:center; flex-wrap:wrap; background:rgba(220,160,60,.12); border:1px solid var(--warn);">
+    <span>⚠ The assembly BOM has changed since this work order was planned
+      ({{ w.bom_diff.added|length }} added, {{ w.bom_diff.removed|length }} removed,
+       {{ w.bom_diff.changed|length }} qty change{{ '' if w.bom_diff.changed|length == 1 else 's' }}).
+      Regenerating rebuilds the component list from the assembly’s current BOM and applies the current
+      spillage setting; the schedule is kept.</span>
+    {% if can_edit %}
+    <form method="post" action="/work-orders/{{ w.id }}/regenerate-bom" style="margin:0"
+          onsubmit="return confirm('Rebuild this work order’s components from the assembly’s current BOM? This replaces the planned component lines.');">
+      <button type="submit">Regenerate BOM</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if can_edit and w.status in ('allocated', 'issued') %}
   <div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem;">
     {% if w.status == 'allocated' %}
