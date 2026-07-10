@@ -51,6 +51,10 @@ class Feature:
     migrations: list[Migration] = field(default_factory=list)
     roles: tuple[str, ...] = ()  # extra roles this feature introduces
     template_dir: Path | None = None
+    # Long-running async runners the app starts at startup and cancels at shutdown. Each is an
+    # ``async def runner(database)`` that loops forever. Declaring them here keeps the loop inside
+    # its feature — the core spawns whatever features declare, without importing feature internals.
+    background_tasks: tuple = ()
 
 
 class FeatureRegistry:

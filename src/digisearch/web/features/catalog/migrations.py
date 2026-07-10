@@ -282,4 +282,15 @@ MIGRATIONS = [
         ALTER TABLE devmgmt_outbox ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    Migration(
+        version=12,
+        name="devmgmt lookup indexes",
+        sql="""
+        -- device_builds grows one row per manufactured unit forever and is scanned by
+        -- work_order_id inside the WO-finish transaction; variants is looked up by assembly_id on
+        -- every assembly detail render (product_for_assembly).
+        CREATE INDEX ix_devicebuilds_wo ON device_builds(work_order_id);
+        CREATE INDEX ix_variants_assembly ON variants(assembly_id);
+        """,
+    ),
 ]

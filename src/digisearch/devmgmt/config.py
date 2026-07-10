@@ -15,6 +15,20 @@ from pydantic import BaseModel
 
 from .auth import AuthStrategy, BearerAuth, MutualTLSAuth, NoAuth
 
+_dotenv_loaded = False
+
+
+def _load_dotenv_once() -> None:
+    """Parse .env into os.environ once per process. ``from_env`` is called on every sync-loop tick
+    and on panel renders; re-reading the file each time is wasted disk I/O — and pointless anyway,
+    since deployment doctrine (CLAUDE.md) is that .env changes require a service restart. Already-
+    set environment variables always win (load_dotenv never overrides), so tests that monkeypatch
+    DEVMGMT_* env vars behave the same."""
+    global _dotenv_loaded
+    if not _dotenv_loaded:
+        load_dotenv()
+        _dotenv_loaded = True
+
 
 class DevmgmtConfig(BaseModel):
     base_url: str
@@ -27,7 +41,7 @@ class DevmgmtConfig(BaseModel):
     @classmethod
     def from_env(cls) -> "DevmgmtConfig | None":
         """Build config from the environment, or None if devmgmt isn't configured (no base URL)."""
-        load_dotenv()
+        _load_dotenv_once()
         base_url = os.getenv("DEVMGMT_BASE_URL", "").strip()
         if not base_url:
             return None

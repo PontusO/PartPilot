@@ -7,13 +7,16 @@ this package (httpx + a small retry/backoff loop). Auth is injected as an ``Auth
 (the chosen mechanism) and Bearer are interchangeable — see ``auth.py``.
 
 Status handling per the contract:
-  200            -> upserted (return parsed JSON, or {} for an empty body)
+  2xx            -> success (return parsed JSON, or {} for an empty body); a DELETE also treats
+                    404 as success (already gone — idempotent)
   400            -> DevmgmtPayloadError (bad payload — not retried)
   401 / 403      -> DevmgmtAuthError (auth/cert problem — not retried)
-  409            -> DevmgmtReferentialError (referential gap, e.g. a device before its variant;
-                    retry after the missing catalog object is pushed)
+  409            -> DevmgmtReferentialError on POST (referential gap, e.g. a device before its
+                    variant; retry after the missing object is pushed); DevmgmtConflictError on
+                    DELETE (guard refused — terminal)
   429 / 5xx      -> retried with exponential backoff, then DevmgmtError
   network error  -> retried, then DevmgmtError
+  anything else  -> DevmgmtError (3xx included: an unfollowed redirect was not delivered)
 """
 
 from __future__ import annotations
@@ -98,30 +101,59 @@ class DevmgmtClient:
         self._delete(f"{VARIANTS_PATH}/{ref}")
 
     def delete_model(self, ref: str) -> None:
-        """DELETE a model (devmgmt cascades its board revisions + variants). Same guards as above."""
+        """DELETE a model (devmgmt cascades its board revisions + variants). Same guards as above.
+        Not reachable from the UI yet — model deletes get surfaced with the models management UI
+        (models are shared across assemblies, so the assembly panel deliberately can't do this)."""
         self._delete(f"{MODELS_PATH}/{ref}")
 
     def delete_device(self, serial: str) -> None:
-        """DELETE a released device. Idempotent; 409 if it isn't released yet."""
+        """DELETE a released device. Idempotent; 409 if it isn't released yet. No caller yet —
+        lands with the device-management (tester intake / release) UI, docs §7."""
         self._delete(f"{DEVICES_PATH}/{serial}")
+
+    # -- lifecycle -----------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the underlying httpx client (connection pool + sockets)."""
+        self._http.close()
+
+    def __enter__(self) -> "DevmgmtClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     # -- transport ---------------------------------------------------------
 
     def _post(self, path: str, body: dict) -> dict:
+        return self._request("POST", path, body=body, conflict_exc=DevmgmtReferentialError)
+
+    def _delete(self, path: str) -> dict:
+        # 404 is success: deleting an already-gone entity is fine (idempotent, docs §7).
+        return self._request("DELETE", path, not_found_ok=True, conflict_exc=DevmgmtConflictError)
+
+    def _request(self, method: str, path: str, *, body: dict | None = None,
+                 not_found_ok: bool = False, conflict_exc: type = DevmgmtError) -> dict:
         url = f"{self.base_url}{path}"
-        headers = {"Accept": "application/json", "Content-Type": "application/json",
-                   **self._auth.headers()}
+        headers = {"Accept": "application/json", **self._auth.headers()}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):
+            final = attempt == self.max_retries - 1
             try:
-                resp = self._http.post(url, json=body, headers=headers)
+                resp = self._http.request(method, url, json=body, headers=headers)
             except httpx.HTTPError as exc:
                 last_exc = exc
-                time.sleep(2**attempt)
+                if not final:                     # no point sleeping before giving up
+                    time.sleep(2**attempt)
                 continue
             if resp.status_code == 429 or resp.status_code >= 500:
-                time.sleep(2**attempt)
+                if not final:
+                    time.sleep(2**attempt)
                 continue
+            if 200 <= resp.status_code < 300 or (not_found_ok and resp.status_code == 404):
+                return _safe_json(resp)
             if resp.status_code == 400:
                 raise DevmgmtPayloadError(
                     f"devmgmt rejected the payload (HTTP 400) for {path}: {_detail(resp)}")
@@ -130,49 +162,20 @@ class DevmgmtClient:
                     f"devmgmt rejected the request (HTTP {resp.status_code}) for {path}. "
                     f"Check the client certificate / token. {_detail(resp)}")
             if resp.status_code == 409:
+                if conflict_exc is DevmgmtConflictError:
+                    raise DevmgmtConflictError(
+                        f"devmgmt refused the delete (HTTP 409) for {path}: {_detail(resp)}")
                 raise DevmgmtReferentialError(
                     f"devmgmt reports a referential gap (HTTP 409) for {path}: {_detail(resp)}. "
                     "Push the referenced model/variant before this object.")
-            if 200 <= resp.status_code < 300:
-                return _safe_json(resp)
-            # Anything else (3xx included — httpx doesn't follow redirects, and an upsert that got
-            # redirected was NOT delivered) is a failure; treating it as success would mark outbox
+            # Anything else (3xx included — httpx doesn't follow redirects, and a redirected
+            # request was NOT delivered) is a failure; treating it as success would mark outbox
             # jobs done and stamp pushed_at while devmgmt never received the data.
             raise DevmgmtError(
-                f"devmgmt request failed: HTTP {resp.status_code} for {path}: {_detail(resp)}")
+                f"devmgmt request failed: HTTP {resp.status_code} for {method} {path}: {_detail(resp)}")
         if last_exc:
             raise DevmgmtError(f"Could not reach devmgmt at {self.base_url}: {last_exc}") from last_exc
-        raise DevmgmtError(f"devmgmt request failed after {self.max_retries} retries: {path}")
-
-    def _delete(self, path: str) -> dict:
-        url = f"{self.base_url}{path}"
-        headers = {"Accept": "application/json", **self._auth.headers()}
-        last_exc: Exception | None = None
-        for attempt in range(self.max_retries):
-            try:
-                resp = self._http.request("DELETE", url, headers=headers)
-            except httpx.HTTPError as exc:
-                last_exc = exc
-                time.sleep(2**attempt)
-                continue
-            if resp.status_code == 429 or resp.status_code >= 500:
-                time.sleep(2**attempt)
-                continue
-            # 404 is success: deleting an already-gone entity is fine (idempotent, docs §7).
-            if resp.status_code == 404 or 200 <= resp.status_code < 300:
-                return _safe_json(resp)
-            if resp.status_code == 409:
-                raise DevmgmtConflictError(
-                    f"devmgmt refused the delete (HTTP 409) for {path}: {_detail(resp)}")
-            if resp.status_code in (401, 403):
-                raise DevmgmtAuthError(
-                    f"devmgmt rejected the request (HTTP {resp.status_code}) for {path}. "
-                    f"Check the client certificate / token. {_detail(resp)}")
-            raise DevmgmtError(
-                f"devmgmt delete failed: HTTP {resp.status_code} for {path}: {_detail(resp)}")
-        if last_exc:
-            raise DevmgmtError(f"Could not reach devmgmt at {self.base_url}: {last_exc}") from last_exc
-        raise DevmgmtError(f"devmgmt delete failed after {self.max_retries} retries: {path}")
+        raise DevmgmtError(f"devmgmt request failed after {self.max_retries} retries: {method} {path}")
 
 
 def _safe_json(resp: httpx.Response) -> dict:

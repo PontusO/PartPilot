@@ -122,14 +122,10 @@ def flush(db: Database, client) -> dict:
     failure (network, 5xx, 409) leaves it pending, backed off exponentially, and is retried
     indefinitely — the outbox's durability promise is that a devmgmt outage of any length only
     delays pushes, never loses them."""
-    # Imported here (not at module top) to avoid an import cycle: devmgmt_repo imports this module
-    # for the enqueue calls, and devmgmt_push imports devmgmt_repo.
-    from . import devmgmt_push, devmgmt_repo
-
     report = {"pushed": 0, "retry": 0, "errored": 0}
     for job in pending_jobs(db):
         try:
-            _push_job(db, client, job, devmgmt_push, devmgmt_repo)
+            _push_job(db, client, job)
         except (DevmgmtPayloadError, DevmgmtConflictError) as exc:  # bad payload / blocked delete —
             _set_status(db, job, "error", str(exc))                # retrying won't help
             report["errored"] += 1
@@ -145,8 +141,12 @@ def flush(db: Database, client) -> dict:
     return report
 
 
-def _push_job(db: Database, client, job: dict, devmgmt_push, devmgmt_repo) -> None:
+def _push_job(db: Database, client, job: dict) -> None:
     """Push one outbox job. Each kind pushes its own dependencies first so it can't 409 on its own."""
+    # Deferred import to avoid a cycle: devmgmt_repo imports this module for the enqueue calls,
+    # and devmgmt_push imports devmgmt_repo.
+    from . import devmgmt_push, devmgmt_repo
+
     kind, ref = job["kind"], job["ref"]
     if kind == "model":
         model = devmgmt_repo.get_model(db, ref)

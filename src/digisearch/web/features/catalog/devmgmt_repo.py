@@ -223,35 +223,28 @@ def create_device(db: Database, *, serial: str, variant_ref: str, board_rev: str
         ).fetchone()[0]
 
 
-def set_variant_retired(db: Database, ref: str, retired: bool) -> bool:
-    """Retire (or un-retire) a variant: set/clear ``retired_at`` and re-queue a push so devmgmt
-    gets the new ``retired`` flag (docs §7 option 1). Returns True if the variant existed."""
+def _set_retired(db: Database, table: str, kind: str, ref: str, retired: bool) -> bool:
+    """Retire (or un-retire) a model/variant: set/clear ``retired_at`` and re-queue a push so
+    devmgmt gets the new ``retired`` flag (docs §7 option 1). Returns True if the row existed.
+    ``table``/``kind`` come only from the two wrappers below — never from user input."""
     with db.connect() as conn:
         cur = conn.execute(
-            "UPDATE variants SET retired_at = "
-            + ("datetime('now')" if retired else "NULL")
-            + ", updated_at = datetime('now') WHERE ref = ?",
-            (ref,),
+            f"UPDATE {table} SET retired_at = CASE WHEN ? THEN datetime('now') END, "
+            "updated_at = datetime('now') WHERE ref = ?",
+            (retired, ref),
         )
         if cur.rowcount:
-            devmgmt_outbox.enqueue(conn, "variant", ref)
+            devmgmt_outbox.enqueue(conn, kind, ref)
         conn.commit()
         return cur.rowcount > 0
+
+
+def set_variant_retired(db: Database, ref: str, retired: bool) -> bool:
+    return _set_retired(db, "variants", "variant", ref, retired)
 
 
 def set_model_retired(db: Database, ref: str, retired: bool) -> bool:
-    """Retire / un-retire a model (docs §7). Returns True if the model existed."""
-    with db.connect() as conn:
-        cur = conn.execute(
-            "UPDATE product_models SET retired_at = "
-            + ("datetime('now')" if retired else "NULL")
-            + ", updated_at = datetime('now') WHERE ref = ?",
-            (ref,),
-        )
-        if cur.rowcount:
-            devmgmt_outbox.enqueue(conn, "model", ref)
-        conn.commit()
-        return cur.rowcount > 0
+    return _set_retired(db, "product_models", "model", ref, retired)
 
 
 def variant_device_count(db: Database, ref: str) -> int:

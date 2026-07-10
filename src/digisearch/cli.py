@@ -48,6 +48,21 @@ def auth_test(
                   "Credentials are valid.")
 
 
+def _open_live_db():
+    """Open the app database (honouring PARTPILOT_DB/PARTPILOT_DATA_DIR) with all feature
+    migrations applied — the same bootstrap the web app performs at startup."""
+    from .web.app import FEATURES
+    from .web.core import FeatureRegistry
+    from .web.core.db import Database
+    from .web.core.paths import db_path
+
+    db = Database(db_path())
+    registry = FeatureRegistry()
+    registry.register(*FEATURES)
+    db.apply_migrations(registry)
+    return db
+
+
 def _make_scratch_db() -> tuple[Path, Path]:
     """Copy the live database into a throwaway temp dir and point the app at it via env vars.
 
@@ -126,18 +141,12 @@ def import_catalog(
         )
         raise typer.Exit(1)
 
-    from .web.app import FEATURES
-    from .web.core import FeatureRegistry
-    from .web.core.db import Database
     from .web.core.paths import db_path
     from .web.features.assemblies.importer import import_boms
     from .web.features.catalog.importer import import_from_minimrp
     from .web.features.contacts.importer import import_contacts
 
-    db = Database(db_path())
-    registry = FeatureRegistry()
-    registry.register(*FEATURES)
-    db.apply_migrations(registry)
+    db = _open_live_db()
 
     console.print(f"Importing catalog from [bold]{src}[/] → {db_path()}")
     stats = import_from_minimrp(db, src)
@@ -202,10 +211,6 @@ def devmgmt_push(
     First-milestone trigger: prove the §5 contract end to end. With --dry-run it needs no devmgmt
     connection at all; otherwise it reads DEVMGMT_* from the environment (see .env.example)."""
     from .devmgmt import DevmgmtClient, DevmgmtConfig, DevmgmtError
-    from .web.app import FEATURES
-    from .web.core import FeatureRegistry
-    from .web.core.db import Database
-    from .web.core.paths import db_path
     from .web.features.catalog import devmgmt_push as push, devmgmt_repo
 
     # Demo data must never land in the live catalog: seeding there would also enqueue outbox jobs
@@ -218,10 +223,7 @@ def devmgmt_push(
             f"[yellow]Scratch mode[/] — demo data goes into a temporary copy of the database at "
             f"[bold]{scratch_db}[/]; the real database is untouched.")
     try:
-        db = Database(db_path())
-        registry = FeatureRegistry()
-        registry.register(*FEATURES)
-        db.apply_migrations(registry)
+        db = _open_live_db()
 
         if seed_demo:
             devmgmt_repo.upsert_model(db, **_DEMO_MODEL)
@@ -256,9 +258,11 @@ def devmgmt_push(
                 "vars) in .env, or use --dry-run to preview the payloads.")
             raise typer.Exit(1)
         try:
-            client = DevmgmtClient(config.base_url, auth=config.build_auth())
-            push.push_device(db, client, target)
-        except (DevmgmtError, RuntimeError) as exc:
+            with DevmgmtClient(config.base_url, auth=config.build_auth()) as client:
+                push.push_device(db, client, target)
+        # OSError covers a missing/unreadable client cert or key: httpx builds the mTLS SSL
+        # context when the client is constructed, raising FileNotFoundError/ssl.SSLError.
+        except (DevmgmtError, RuntimeError, OSError) as exc:
             console.print(f"[red]devmgmt push failed:[/] {exc}")
             raise typer.Exit(1)
         console.print(

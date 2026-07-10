@@ -27,7 +27,6 @@ from .core.deps import Forbidden, LoginRequired, current_user
 from .core.paths import data_dir as default_data_dir, db_path as default_db_path
 from .features.assemblies import feature as assemblies_feature
 from .features.catalog import feature as catalog_feature
-from .features.catalog.devmgmt_sync import devmgmt_sync_loop
 from .features.contacts import feature as contacts_feature
 from .features.customer_orders import feature as customer_orders_feature
 from .features.despatch import feature as despatch_feature
@@ -37,7 +36,6 @@ from .features.purchase_orders import feature as purchase_orders_feature
 from .features.purchasing import feature as purchasing_feature
 from .features.reports import feature as reports_feature
 from .features.setup import feature as setup_feature
-from .features.setup.scheduler import webshop_sync_loop
 from .features.work_orders import feature as work_orders_feature
 
 _CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
@@ -105,15 +103,17 @@ def create_app(
         context_processors=[inject],
     )
 
-    # Background runners: the webshop auto-sync and the devmgmt outbox flush. Both are disabled on
-    # scratch/test instances via PARTPILOT_DISABLE_SCHEDULER so a dev session never touches the live
-    # shop or devmgmt. The devmgmt loop self-skips ticks when devmgmt isn't configured.
+    # Background runners come from the features' descriptors (Feature.background_tasks — currently
+    # the webshop auto-sync and the devmgmt outbox flush). All are disabled on scratch/test
+    # instances via PARTPILOT_DISABLE_SCHEDULER so a dev session never touches the live shop or
+    # devmgmt; each loop additionally self-skips when its integration isn't configured.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         tasks: list[asyncio.Task] = []
         if os.getenv("PARTPILOT_DISABLE_SCHEDULER") != "1":
-            tasks.append(asyncio.create_task(webshop_sync_loop(database)))
-            tasks.append(asyncio.create_task(devmgmt_sync_loop(database)))
+            for feature in registry.features:
+                for runner in feature.background_tasks:
+                    tasks.append(asyncio.create_task(runner(database)))
         try:
             yield
         finally:

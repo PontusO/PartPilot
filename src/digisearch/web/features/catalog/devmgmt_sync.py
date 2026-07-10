@@ -24,16 +24,18 @@ log = logging.getLogger("partpilot.devmgmt_sync")
 POLL_SECONDS = 20  # how often to check the outbox for pending pushes
 
 
-def _flush_once(database: Database) -> str:
-    """One flush pass (blocking). Returns a short status line; never raises for expected states."""
+def _flush_once(database: Database) -> dict | None:
+    """One flush pass (blocking). Returns the flush report, or None when there was nothing to do
+    (devmgmt unconfigured / outbox empty). Never raises for expected states."""
     config = DevmgmtConfig.from_env()
     if config is None:
-        return "skipped: devmgmt not configured"
+        return None
     if not devmgmt_outbox.has_pending(database):
-        return "idle"
-    client = DevmgmtClient(config.base_url, auth=config.build_auth())
-    report = devmgmt_outbox.flush(database, client)
-    return (f"pushed {report['pushed']}, retry {report['retry']}, error {report['errored']}")
+        return None
+    # A fresh client per pass (config/certs may have changed on disk), closed when done — an
+    # unclosed httpx client leaks its connection-pool sockets in this long-running process.
+    with DevmgmtClient(config.base_url, auth=config.build_auth()) as client:
+        return devmgmt_outbox.flush(database, client)
 
 
 async def devmgmt_sync_loop(database: Database, *, poll_seconds: int = POLL_SECONDS) -> None:
@@ -42,9 +44,10 @@ async def devmgmt_sync_loop(database: Database, *, poll_seconds: int = POLL_SECO
     try:
         while True:
             try:
-                status = await run_in_threadpool(_flush_once, database)
-                if status.startswith("pushed"):   # quiet on the idle/not-configured ticks
-                    log.info("devmgmt outbox flush: %s", status)
+                report = await run_in_threadpool(_flush_once, database)
+                if report:   # quiet on the idle/not-configured ticks
+                    log.info("devmgmt outbox flush: pushed %s, retry %s, error %s",
+                             report["pushed"], report["retry"], report["errored"])
             except Exception:  # config/cert/DB error — log and keep looping (never kill the loop)
                 log.exception("devmgmt sync tick error")
             await asyncio.sleep(poll_seconds)
