@@ -50,6 +50,7 @@ def _parse_part(form) -> dict:
         "min_qty": _num(form.get("min_qty")) or 0,
         "notes": (form.get("notes") or "").strip() or None,
         "unlimited_stock": 1 if form.get("unlimited_stock") else 0,
+        "normally_stocked": 1 if form.get("normally_stocked") else 0,
     }
 
 
@@ -128,7 +129,8 @@ def _render_form(request: Request, *, action: str, heading: str, submit_label: s
 # ---- list ----
 
 @router.get("", response_class=HTMLResponse)
-def parts_list(request: Request, q: str | None = None, category: str | None = None, page: int = 1):
+def parts_list(request: Request, q: str | None = None, category: str | None = None,
+               stocked: bool = False, page: int = 1):
     user = require_user(request)
     db = request.app.state.database
     templates = request.app.state.templates
@@ -137,7 +139,8 @@ def parts_list(request: Request, q: str | None = None, category: str | None = No
     search = (q or "").strip() or None
     category = (category or "").strip() or None
     parts, total = repo.list_parts(
-        db, search=search, category=category, limit=_PAGE_SIZE, offset=(page - 1) * _PAGE_SIZE
+        db, search=search, category=category, stocked_only=stocked,
+        limit=_PAGE_SIZE, offset=(page - 1) * _PAGE_SIZE
     )
     return templates.TemplateResponse(
         request,
@@ -145,7 +148,7 @@ def parts_list(request: Request, q: str | None = None, category: str | None = No
         {
             "parts": parts, "total": total, "page": page, "page_size": _PAGE_SIZE,
             "has_prev": page > 1, "has_next": page * _PAGE_SIZE < total,
-            "q": search or "", "category": category or "",
+            "q": search or "", "category": category or "", "stocked": stocked,
             "categories": repo.categories(db), "summary": repo.summary(db),
             "can_add": user.role in CATALOG_WRITE_ROLES,
         },

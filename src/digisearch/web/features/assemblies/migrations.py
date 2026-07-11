@@ -9,6 +9,23 @@ from __future__ import annotations
 
 from ...core import Migration
 
+# One-time seed for the catalog `normally_stocked` flag (column added by catalog migration v13).
+# Marks every part that appears anywhere in the BOM tree of a product whose part_no starts with
+# 90- or 98- (our own products live at those prefixes on different levels). Walks bom_lines
+# recursively; the products themselves (assemblies) are not marked. Lives here — not in catalog —
+# because it reads `bom_lines`, which this feature owns and creates after catalog's migrations run.
+# Kept as a module constant so a test can exercise the exact SQL the migration runs.
+SEED_NORMALLY_STOCKED_SQL = """
+WITH RECURSIVE comps(id) AS (
+    SELECT b.child_id FROM bom_lines b
+      JOIN parts p ON p.id = b.parent_id
+     WHERE p.part_no LIKE '90-%' OR p.part_no LIKE '98-%'
+    UNION
+    SELECT b.child_id FROM bom_lines b JOIN comps c ON b.parent_id = c.id
+)
+UPDATE parts SET normally_stocked = 1 WHERE id IN (SELECT id FROM comps);
+"""
+
 MIGRATIONS = [
     Migration(
         version=1,
@@ -27,5 +44,12 @@ MIGRATIONS = [
         CREATE INDEX ix_bom_parent ON bom_lines(parent_id);
         CREATE INDEX ix_bom_child ON bom_lines(child_id);
         """,
+    ),
+    Migration(
+        version=2,
+        name="seed normally_stocked from 90-/98- products",
+        # Runs once, after catalog v13 has added parts.normally_stocked and after bom_lines exists.
+        # NOTE: products imported later won't auto-seed their parts — those are curated by hand.
+        sql=SEED_NORMALLY_STOCKED_SQL,
     ),
 ]

@@ -6,6 +6,7 @@
   <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
     <h1 style="margin:0;">{{ part.part_no }}
       {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+      {% if part.normally_stocked %}<span class="badge stock">Normally stocked</span>{% endif %}
       {% if part.unlimited %}<span class="badge ok">∞ unlimited stock</span>{% endif %}</h1>
     {% if can_edit %}
     <a href="/catalog/{{ part.id }}/edit" style="background:var(--accent); color:#fff;
@@ -33,6 +34,7 @@
     <tbody>
       <tr><th>Category</th><td>{{ part.category or '' }}</td><th>Manufacturer</th><td>{{ part.mfr_name or '' }}</td></tr>
       <tr><th>MPN</th><td>{{ part.mfr_pno or '' }}</td><th>Revision</th><td>{{ part.rev or '' }}</td></tr>
+      <tr><th>Normally stocked</th><td>{{ 'Yes' if part.normally_stocked else 'No' }}</td><th></th><td></td></tr>
     </tbody>
   </table>
 

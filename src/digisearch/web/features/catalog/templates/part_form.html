@@ -60,6 +60,16 @@
       </div>
       <div class="full" style="margin-top:.3rem;">
         <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+          <input name="normally_stocked" type="checkbox" value="1" style="width:auto;"
+                 {{ 'checked' if values.get('normally_stocked') else '' }}>
+          Normally stocked — we keep this on the shelf
+        </label>
+        <p class="note" style="margin:.25rem 0 0;">A part we deliberately keep in stock (used across
+          our own and customer products), as opposed to one-off customer parts or parts from products
+          no longer made. Independent of the reorder point above.</p>
+      </div>
+      <div class="full" style="margin-top:.3rem;">
+        <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
           <input name="unlimited_stock" type="checkbox" value="1" style="width:auto;"
                  {{ 'checked' if values.get('unlimited_stock') else '' }}>
           Unlimited stock — never runs out

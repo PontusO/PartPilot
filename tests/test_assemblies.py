@@ -157,6 +157,40 @@ def test_subassembly_cost_rolls_up(db):
     assert a["total_cost"] == 8.0
 
 
+# ---- normally_stocked seed (from 90-/98- products) ----
+
+def test_seed_normally_stocked_marks_product_bom_tree(db):
+    from digisearch.web.features.assemblies.migrations import SEED_NORMALLY_STOCKED_SQL
+
+    prod90 = repo.create_assembly(db, {"part_no": "90-00999-1"})   # our product
+    prod98 = repo.create_assembly(db, {"part_no": "98-00888-1"})   # our product (other level)
+    sub = repo.create_assembly(db, {"part_no": "SUB-A"})           # a subassembly under prod90
+    leaf1 = _component(db, "LEAF-1", 1.0)                          # direct child of prod90
+    leaf2 = _component(db, "LEAF-2", 1.0)                          # nested under sub
+    leaf3 = _component(db, "LEAF-3", 1.0)                          # child of prod98
+    orphan = _component(db, "ORPHAN", 1.0)                         # not in any 90-/98- tree
+
+    repo.add_bom_line(db, prod90, sub, 1, "")
+    repo.add_bom_line(db, prod90, leaf1, 2, "")
+    repo.add_bom_line(db, sub, leaf2, 3, "")
+    repo.add_bom_line(db, prod98, leaf3, 1, "")
+
+    with db.connect() as conn:
+        conn.executescript(SEED_NORMALLY_STOCKED_SQL)
+        conn.commit()
+
+    def stocked(pid):
+        with db.connect() as conn:
+            return bool(conn.execute(
+                "SELECT normally_stocked FROM parts WHERE id = ?", (pid,)).fetchone()[0])
+
+    # every descendant of a 90-/98- product (parts AND subassemblies), at any depth
+    assert stocked(sub) and stocked(leaf1) and stocked(leaf2) and stocked(leaf3)
+    # the products themselves are not marked, and unrelated parts stay off
+    assert not stocked(prod90) and not stocked(prod98)
+    assert not stocked(orphan)
+
+
 # ---- xlsx export ----
 
 def test_export_enriches_lines_with_mfr_and_supplier_price(db):

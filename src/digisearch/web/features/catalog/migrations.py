@@ -293,4 +293,14 @@ MIGRATIONS = [
         CREATE INDEX ix_variants_assembly ON variants(assembly_id);
         """,
     ),
+    Migration(
+        version=13,
+        name="normally stocked flag",
+        # A deliberate "we always keep this on the shelf" flag, distinct from min_qty (a reorder
+        # threshold). Curates the evergreen catalog apart from one-off customer / discontinued
+        # parts. This migration only adds the column (catalog owns `parts`); the one-time seed that
+        # marks parts used by our 90-/98- products lives in the assemblies feature (v2), which runs
+        # after this one and after `bom_lines` exists.
+        sql="ALTER TABLE parts ADD COLUMN normally_stocked INTEGER NOT NULL DEFAULT 0;",
+    ),
 ]

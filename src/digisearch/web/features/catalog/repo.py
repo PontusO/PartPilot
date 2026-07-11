@@ -58,16 +58,18 @@ def categories(db: Database) -> list[dict]:
 
 def list_parts(
     db: Database, *, search: str | None = None, category: str | None = None,
-    limit: int = 100, offset: int = 0,
+    stocked_only: bool = False, limit: int = 100, offset: int = 0,
 ) -> tuple[list[dict], int]:
     like = f"%{search}%" if search else None
     where = (
         "WHERE p.kind != 'ASSY' "
         "AND (:search IS NULL OR p.part_no LIKE :like OR p.value LIKE :like "
         "OR p.mfr_pno LIKE :like OR p.description LIKE :like) "
-        "AND (:category IS NULL OR p.category = :category)"
+        "AND (:category IS NULL OR p.category = :category) "
+        "AND (:stocked = 0 OR p.normally_stocked = 1)"
     )
-    params = {"search": search, "like": like, "category": category}
+    params = {"search": search, "like": like, "category": category,
+              "stocked": 1 if stocked_only else 0}
     with db.connect() as conn:
         total = conn.execute(
             f"SELECT COUNT(*) FROM parts p {where}", params
@@ -75,7 +77,7 @@ def list_parts(
         rows = conn.execute(
             f"""SELECT p.id, p.part_no, p.value, p.category, p.kind,
                        p.total_qty, p.total_alloc, p.min_qty, p.unit_cost, p.external_price,
-                       p.unlimited_stock,
+                       p.unlimited_stock, p.normally_stocked,
                        (p.total_qty - p.total_alloc) AS free,
                        s.name AS supplier, ps.supplier_pno AS supplier_pno,
                        ps.price_per_uom AS price_per_uom, ps.qty_per_uom AS qty_per_uom
@@ -89,6 +91,7 @@ def list_parts(
         d = dict(r)
         d["unit_price"] = _unit_price(d["price_per_uom"], d["qty_per_uom"])
         d["unlimited"] = bool(d["unlimited_stock"])
+        d["normally_stocked"] = bool(d["normally_stocked"])
         # An unlimited part never runs out, so it can never be below its reorder point.
         d["below_min"] = (not d["unlimited"]) and d["free"] < (d["min_qty"] or 0)
         parts.append(d)
@@ -143,6 +146,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
     part["suppliers"] = suppliers
     part["stock"] = stock
     part["unlimited"] = bool(part.get("unlimited_stock"))
+    part["normally_stocked"] = bool(part.get("normally_stocked"))
     part["free"] = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
     return part
 
@@ -157,7 +161,11 @@ def summary(db: Database) -> dict:
             "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND unlimited_stock = 0 "
             "AND (total_qty - total_alloc) < min_qty AND min_qty > 0"
         ).fetchone()[0]
-    return {"parts": n_parts, "categories": n_cats, "below_min": n_below}
+        n_stocked = conn.execute(
+            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND normally_stocked = 1"
+        ).fetchone()[0]
+    return {"parts": n_parts, "categories": n_cats, "below_min": n_below,
+            "normally_stocked": n_stocked}
 
 
 # --- writes (add a component) ---
@@ -278,12 +286,13 @@ def create_part(
         part_id = conn.execute(
             """INSERT INTO parts
                (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
-                unit_cost, min_qty, total_qty, notes, unlimited_stock)
-               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked)
+               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, opening_qty, part.get("notes"),
-             1 if part.get("unlimited_stock") else 0),
+             1 if part.get("unlimited_stock") else 0,
+             1 if part.get("normally_stocked") else 0),
         ).lastrowid
 
         for s in supplier_lines:
@@ -323,12 +332,13 @@ def update_part(
         conn.execute(
             """UPDATE parts SET part_no=?, value=?, description=?, category=?, mfr_name=?,
                mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, unlimited_stock=?,
-               updated_at=datetime('now')
+               normally_stocked=?, updated_at=datetime('now')
                WHERE id=?""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, part.get("notes"),
-             1 if part.get("unlimited_stock") else 0, part_id),
+             1 if part.get("unlimited_stock") else 0,
+             1 if part.get("normally_stocked") else 0, part_id),
         )
 
         conn.execute("DELETE FROM part_suppliers WHERE part_id = ?", (part_id,))

@@ -87,10 +87,36 @@ def test_get_part_detail(db):
     assert len(part["stock"]) == 1 and part["stock"][0]["bin"] == "KH1"
 
 
+def test_normally_stocked_persists_and_defaults_off(db):
+    pid = repo.create_part(db, part={"part_no": "NS-1"}, supplier_lines=[])
+    assert repo.get_part(db, pid)["normally_stocked"] is False  # default unchecked
+
+    pid2 = repo.create_part(db, part={"part_no": "NS-2", "normally_stocked": 1}, supplier_lines=[])
+    assert repo.get_part(db, pid2)["normally_stocked"] is True
+
+    repo.update_part(db, pid2, part={"part_no": "NS-2", "normally_stocked": 0}, supplier_lines=[])
+    assert repo.get_part(db, pid2)["normally_stocked"] is False  # toggled back off
+
+
+def test_list_parts_stocked_only_filter(db):
+    repo.create_part(db, part={"part_no": "STK-1", "normally_stocked": 1}, supplier_lines=[])
+    repo.create_part(db, part={"part_no": "CUST-1", "normally_stocked": 0}, supplier_lines=[])
+
+    _, both = repo.list_parts(db)
+    assert both == 2
+
+    stocked, n = repo.list_parts(db, stocked_only=True)
+    assert n == 1 and stocked[0]["part_no"] == "STK-1"
+    assert stocked[0]["normally_stocked"] is True
+
+    assert repo.summary(db)["normally_stocked"] == 1
+
+
 def test_summary(db):
     _import(db)
     s = repo.summary(db)
-    assert s == {"parts": 1, "categories": 1, "below_min": 0}  # ASSY/PRODUCT excluded
+    # ASSY/PRODUCT excluded; nothing seeded as normally_stocked (no BOM tree in this fixture)
+    assert s == {"parts": 1, "categories": 1, "below_min": 0, "normally_stocked": 0}
 
 
 def test_get_missing_part(db):

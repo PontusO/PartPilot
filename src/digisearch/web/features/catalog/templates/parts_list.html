@@ -7,6 +7,7 @@
     <div class="card"><b>{{ summary.parts }}</b><small>parts</small></div>
     <div class="card"><b>{{ summary.categories }}</b><small>categories</small></div>
     <div class="card"><b>{{ summary.below_min }}</b><small>below min</small></div>
+    <div class="card"><b>{{ summary.normally_stocked }}</b><small>normally stocked</small></div>
     {% if can_add %}
     <a href="/catalog/new" style="margin-left:auto; display:flex; align-items:center;
        justify-content:center; background:var(--accent); color:#fff; font-weight:600;
@@ -31,8 +32,14 @@
         {% endfor %}
       </select>
     </div>
+    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; white-space:nowrap;
+                  padding-bottom:.55rem;">
+      <input name="stocked" type="checkbox" value="1" style="width:auto;"
+             {{ 'checked' if stocked else '' }} onchange="this.form.submit()">
+      Normally stocked only
+    </label>
     <button type="submit">Filter</button>
-    {% if q or category %}<a href="/catalog" style="align-self:center;">clear</a>{% endif %}
+    {% if q or category or stocked %}<a href="/catalog" style="align-self:center;">clear</a>{% endif %}
   </form>
 
   <p class="note">{{ total }} part(s){% if q or category %} matching{% endif %}.</p>
@@ -41,7 +48,7 @@
     <table>
       <thead>
         <tr>
-          <th>Part No</th><th>Value</th><th>Category</th><th>Kind</th>
+          <th>Part No</th><th>Value</th><th>Category</th><th>Kind</th><th>Stocked</th>
           <th class="num">Free</th><th class="num">On hand</th><th class="num">Min</th>
           <th>Supplier</th><th>Supplier P/N</th><th class="num">Unit (SEK)</th>
           <th class="num">Webshop (SEK)</th>
@@ -54,6 +61,7 @@
           <td><a href="/catalog/{{ p.id }}/edit" target="_blank" rel="noopener">{{ p.value or '' }}</a></td>
           <td>{{ p.category or '' }}</td>
           <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>
+          <td>{% if p.normally_stocked %}<span class="badge stock">✓</span>{% endif %}</td>
           <td class="num">{% if p.unlimited %}∞{% elif p.below_min %}<span class="badge bad">{{ "%.0f"|format(p.free) }}</span>{% else %}{{ "%.0f"|format(p.free) }}{% endif %}</td>
           <td class="num">{{ '∞' if p.unlimited else "%.0f"|format(p.total_qty) }}</td>
           <td class="num">{{ '' if p.unlimited else "%.0f"|format(p.min_qty) }}</td>
@@ -63,16 +71,16 @@
           <td class="num">{% if p.external_price is not none %}{{ "%.2f"|format(p.external_price) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        {% if not parts %}<tr><td colspan="11" class="note">No parts match.</td></tr>{% endif %}
+        {% if not parts %}<tr><td colspan="12" class="note">No parts match.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>
 
   {% if has_prev or has_next %}
   <div style="margin-top:1rem; display:flex; gap:1rem; align-items:center;">
-    {% if has_prev %}<a href="?q={{ q }}&category={{ category }}&page={{ page - 1 }}">← Prev</a>{% endif %}
+    {% if has_prev %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&page={{ page - 1 }}">← Prev</a>{% endif %}
     <span class="note">Page {{ page }}</span>
-    {% if has_next %}<a href="?q={{ q }}&category={{ category }}&page={{ page + 1 }}">Next →</a>{% endif %}
+    {% if has_next %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&page={{ page + 1 }}">Next →</a>{% endif %}
   </div>
   {% endif %}
 </div>
