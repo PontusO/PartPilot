@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -17,7 +17,7 @@ from digisearch.devmgmt import DevmgmtConfig
 from ...core.deps import require_role, require_user
 from ..catalog import devmgmt_outbox, devmgmt_repo
 from ..purchasing.service import resolve_bom_file
-from . import repo
+from . import export_xlsx, repo
 from .import_bom import apply_import_plan, build_import_plan
 
 router = APIRouter(prefix="/assemblies")
@@ -173,6 +173,23 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
 def assembly_detail(request: Request, part_id: int):
     user = require_user(request)
     return _render_detail(request, part_id, user)
+
+
+@router.get("/{part_id}/export.xlsx")
+def export_assembly_xlsx(request: Request, part_id: int):
+    """Download the whole product BOM as an Excel workbook (for customer cost/volume talks)."""
+    require_user(request)
+    assembly = repo.get_assembly_for_export(request.app.state.database, part_id)
+    if assembly is None:
+        return HTMLResponse("Assembly not found.", status_code=404)
+    data = export_xlsx.workbook_bytes(assembly)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", assembly["part_no"] or f"assembly_{part_id}").strip("_")
+    filename = f"{safe or f'assembly_{part_id}'}_BOM.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/{part_id}/lines/add", response_class=HTMLResponse)

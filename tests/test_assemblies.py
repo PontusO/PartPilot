@@ -157,6 +157,76 @@ def test_subassembly_cost_rolls_up(db):
     assert a["total_cost"] == 8.0
 
 
+# ---- xlsx export ----
+
+def test_export_enriches_lines_with_mfr_and_supplier_price(db):
+    from digisearch.web.features.assemblies import export_xlsx
+
+    asm = repo.create_assembly(db, {"part_no": "EXP-ASM", "value": "Widget", "rev": "B",
+                                    "description": "A test product"})
+    p1 = _component(db, "P1", 0.5)      # per-piece price 0.5 -> price_per_uom/qty_per_uom
+    with db.connect() as conn:
+        conn.execute("UPDATE parts SET mfr_name = 'ACME', mfr_pno = 'ACME-1', "
+                     "description = 'A resistor' WHERE id = ?", (p1,))
+        conn.commit()
+    repo.add_bom_line(db, asm, p1, 3, "R1, R2")
+
+    a = repo.get_assembly_for_export(db, asm)
+    ln = a["lines"][0]
+    assert ln["child_mfr_name"] == "ACME" and ln["child_mfr_pno"] == "ACME-1"
+    assert ln["child_description"] == "A resistor"
+    assert ln["child_supplier_price"] == 0.5
+    assert ln["unit_cost"] == 0.5 and ln["line_cost"] == 1.5
+    assert a["total_cost"] == 1.5
+
+    # The workbook builds and round-trips through openpyxl with the header + total row.
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+    wb = load_workbook(BytesIO(export_xlsx.workbook_bytes(a)))
+    ws = wb["BOM"]
+    assert ws["A1"].value == "EXP-ASM  rev B"
+    header = [c.value for c in ws[5]]
+    assert header[:3] == ["#", "Qty/board", "Part #"]
+    # data row 6, then total row 7
+    row6 = {c.value for c in ws[6]}
+    assert "P1" in row6 and "ACME" in row6 and 1.5 in row6
+    assert ws.cell(row=7, column=len(export_xlsx.COLUMNS)).value == 1.5  # Total = line cost sum
+
+
+def test_export_returns_none_for_missing_assembly(db):
+    assert repo.get_assembly_for_export(db, 99999) is None
+
+
+def test_export_route_downloads_xlsx(tmp_path):
+    from io import BytesIO
+
+    from fastapi.testclient import TestClient
+    from openpyxl import load_workbook
+
+    import digisearch.web.app as web_app
+
+    app = web_app.create_app(db_path=tmp_path / "p.db", data_dir=tmp_path / "data",
+                             secret_key="test-secret")
+    database = app.state.database
+    app.state.store.create_user("buyer1", "pw", role="purchasing")
+
+    asm = repo.create_assembly(database, {"part_no": "RT/E-1", "value": "Router"})
+    repo.add_bom_line(database, asm, _component(database, "CAP-1", 0.02), 4, "C1")
+
+    client = TestClient(app)
+    client.post("/login", data={"username": "buyer1", "password": "pw"}, follow_redirects=False)
+
+    resp = client.get(f"/assemblies/{asm}/export.xlsx")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == \
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    # slashes in the part number are sanitised out of the filename
+    assert 'filename="RT_E-1_BOM.xlsx"' in resp.headers["content-disposition"]
+    wb = load_workbook(BytesIO(resp.content))
+    assert "CAP-1" in {c.value for c in wb["BOM"][6]}
+
+
 # ---- CSV BOM import (reuses purchasing resolution) ----
 
 def _rline(refdes, qty, value, *, chosen=None, status=None, stock_match=None):

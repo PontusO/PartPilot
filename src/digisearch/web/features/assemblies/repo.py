@@ -86,6 +86,45 @@ def get_assembly(db: Database, part_id: int) -> dict | None:
     return assembly
 
 
+def get_assembly_for_export(db: Database, part_id: int) -> dict | None:
+    """Like :func:`get_assembly` but enriched for the customer-facing xlsx export:
+    each line also carries manufacturer, description and the part's best supplier unit
+    price (default supplier if flagged, else the cheapest). Used only by the export route."""
+    with db.connect() as conn:
+        head = conn.execute(
+            "SELECT * FROM parts WHERE id = ? AND kind = 'ASSY'", (part_id,)
+        ).fetchone()
+        if head is None:
+            return None
+        assembly = dict(head)
+        lines = [dict(r) for r in conn.execute(
+            """SELECT b.id, b.qty_per, b.refdes, b.line_no, b.comments,
+                      c.id AS child_id, c.part_no AS child_part_no, c.value AS child_value,
+                      c.description AS child_description, c.kind AS child_kind,
+                      c.category AS child_category, c.mfr_name AS child_mfr_name,
+                      c.mfr_pno AS child_mfr_pno, c.unit_cost AS child_unit_cost,
+                      (SELECT ps.price_per_uom / NULLIF(ps.qty_per_uom, 0)
+                         FROM part_suppliers ps
+                        WHERE ps.part_id = c.id
+                          AND ps.price_per_uom IS NOT NULL
+                        ORDER BY ps.is_default DESC,
+                                 ps.price_per_uom / NULLIF(ps.qty_per_uom, 0) ASC
+                        LIMIT 1) AS child_supplier_price
+               FROM bom_lines b JOIN parts c ON c.id = b.child_id
+               WHERE b.parent_id = ?
+               ORDER BY COALESCE(b.line_no, 1e9), b.id""",
+            (part_id,),
+        )]
+        for ln in lines:
+            unit = (_rolled_unit_cost(conn, ln["child_id"], set())
+                    if ln["child_kind"] == "ASSY" else ln["child_unit_cost"])
+            ln["unit_cost"] = unit
+            ln["line_cost"] = unit * (ln["qty_per"] or 0) if unit is not None else None
+        assembly["lines"] = lines
+        assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
+    return assembly
+
+
 # ---- writes (add / delete BOM lines) ----
 
 def parts_for_picker(db: Database, exclude_id: int) -> list[dict]:
