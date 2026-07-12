@@ -109,27 +109,6 @@ def rolled_sell_price(conn, part_id: int, qty_needed: float, default_markup: flo
     return total
 
 
-def effective_mfg_margin(conn, part_id: int, default_mfg: float) -> float:
-    """The product's manufacturing (profit) margin — its own ``parts.mfg_margin`` if set, else the
-    ``default_mfg`` (app setting)."""
-    row = conn.execute("SELECT mfg_margin FROM parts WHERE id = ?", (part_id,)).fetchone()
-    if row is not None and row["mfg_margin"] is not None:
-        return row["mfg_margin"]
-    return default_mfg
-
-
-def product_sell_price(conn, part_id: int, qty: float, overhead_default: float,
-                       mfg_default: float) -> float | None:
-    """Customer price for a finished product at ``qty``: its LOADED build cost
-    (``rolled_sell_price`` = material × overhead, rolled up the BOM) × the product's MANUFACTURING
-    margin. The margin (profit) is applied once, HERE — never inside ``rolled_sell_price`` — so a
-    sub-assembly consumed internally never compounds it."""
-    loaded = rolled_sell_price(conn, part_id, qty, overhead_default)
-    if loaded is None:
-        return None
-    return loaded * effective_mfg_margin(conn, part_id, mfg_default)
-
-
 def leaf_cost_at(conn, part_id: int, qty: float) -> float | None:
     """Per-piece COST of a single (non-assembly) part at ``qty``: the default supplier's cut cost tier
     at ``qty`` (``price_at(load_cost_tiers(...))``), else the flat ``parts.unit_cost``. No markup —

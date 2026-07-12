@@ -277,8 +277,7 @@ async def save_pricing(request: Request):
     require_role(request, SETUP_ROLES)
     form = await request.form()
     repo.save_pricing(request.app.state.database,
-                      {"default_markup": form.get("default_markup"),
-                       "default_mfg_margin": form.get("default_mfg_margin")})
+                      {"default_markup": form.get("default_markup")})
     return request.app.state.templates.TemplateResponse(
         request, "pricing.html",
         {"pricing": repo.get_pricing(request.app.state.database), "saved": True},

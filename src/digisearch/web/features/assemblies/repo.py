@@ -33,34 +33,20 @@ def list_assemblies(db: Database, search: str | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _rolled_unit_cost(conn, part_id: int, seen: set) -> float | None:
-    """A part's cost: its own ``unit_cost`` for a component, or the summed cost of its
-    children (qty x cost) for an assembly. ``seen`` guards against cyclic BOMs."""
-    if part_id in seen:
-        return 0.0
-    row = conn.execute("SELECT kind, unit_cost FROM parts WHERE id = ?", (part_id,)).fetchone()
-    if row is None:
-        return None
-    if row["kind"] != "ASSY":
-        return row["unit_cost"]
-    sub_seen = seen | {part_id}
-    total = 0.0
-    for ln in conn.execute("SELECT child_id, qty_per FROM bom_lines WHERE parent_id = ?", (part_id,)):
-        total += (_rolled_unit_cost(conn, ln["child_id"], sub_seen) or 0.0) * (ln["qty_per"] or 0)
-    return total
-
-
-def get_assembly(db: Database, part_id: int) -> dict | None:
-    """The assembly part, its direct BOM lines, and where it's used. Each line carries the MATERIAL
-    cost (``unit_cost``/``line_cost``, what we pay suppliers) and the LOADED cost
-    (``loaded_unit``/``loaded_line`` = material × overhead — the true internal build cost). Totals:
-    ``total_cost`` (material), ``loaded_total`` (loaded build cost), and ``quote_total`` (the customer
-    price = loaded build cost × this product's manufacturing margin)."""
+def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
+    """The assembly part, its direct BOM lines, and where it's used, priced for a build of
+    ``build_qty`` boards. Each line carries the MATERIAL cost (``unit_cost``/``line_cost``, what we pay
+    suppliers) and the LOADED cost (``loaded_unit``/``loaded_line`` = material × overhead — the true
+    internal build cost); both are picked at the cost-tier for the quantity the build consumes
+    (``qty_per × build_qty``), so raising the build volume re-prices the existing figures in place.
+    Totals: ``total_cost`` (material) and ``loaded_total`` (loaded build cost = what the customer is
+    charged for the parts). ``build_qty`` is echoed back on the returned dict. (Production cost + profit
+    margin are priced outside PartPilot as a per-product 97- part, so no customer-price layer here.)"""
     from ..catalog import pricing
     from ..setup import repo as setup_repo
 
+    build_qty = max(1, build_qty)
     overhead = setup_repo.get_default_markup(db)          # material -> loaded
-    mfg_default = setup_repo.get_default_mfg_margin(db)   # loaded -> customer quote
     with db.connect() as conn:
         head = conn.execute(
             "SELECT * FROM parts WHERE id = ? AND kind = 'ASSY'", (part_id,)
@@ -68,7 +54,6 @@ def get_assembly(db: Database, part_id: int) -> dict | None:
         if head is None:
             return None
         assembly = dict(head)
-        mfg_margin = pricing.effective_mfg_margin(conn, part_id, mfg_default)
         lines = [dict(r) for r in conn.execute(
             """SELECT b.id, b.qty_per, b.refdes, b.line_no, b.comments,
                       c.id AS child_id, c.part_no AS child_part_no, c.value AS child_value,
@@ -81,18 +66,21 @@ def get_assembly(db: Database, part_id: int) -> dict | None:
         )]
         for ln in lines:
             qty_per = ln["qty_per"] or 0
-            unit = (_rolled_unit_cost(conn, ln["child_id"], set())
-                    if ln["child_kind"] == "ASSY" else ln["child_unit_cost"])
+            # Price the child at the tier for the quantity this build consumes (qty_per × build_qty),
+            # from the same basis as loaded, so material × overhead == loaded and both re-price with
+            # the build volume without drifting when cost tiers are refreshed.
+            need = qty_per * build_qty
+            unit = pricing.rolled_cost_at(conn, ln["child_id"], need)
             ln["unit_cost"] = unit                       # material, per piece
             ln["line_cost"] = unit * qty_per if unit is not None else None
-            loaded_unit = pricing.rolled_sell_price(conn, ln["child_id"], 1, overhead)
+            loaded_unit = pricing.rolled_sell_price(conn, ln["child_id"], need, overhead)
             ln["loaded_unit"] = loaded_unit              # loaded (material × overhead), per piece
             ln["loaded_line"] = loaded_unit * qty_per if loaded_unit is not None else None
         assembly["lines"] = lines
+        assembly["build_qty"] = build_qty
         assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
         assembly["loaded_total"] = sum(ln["loaded_line"] for ln in lines
                                        if ln["loaded_line"] is not None)
-        assembly["quote_total"] = assembly["loaded_total"] * mfg_margin
         assembly["used_in"] = [dict(r) for r in conn.execute(
             """SELECT p.id, p.part_no, p.value, b.qty_per
                FROM bom_lines b JOIN parts p ON p.id = b.parent_id
@@ -105,14 +93,14 @@ def get_assembly(db: Database, part_id: int) -> dict | None:
 
 def get_assembly_for_export(
     db: Database, part_id: int, *, build_qty: int = 1, default_markup: float = 1.30,
-    default_mfg_margin: float = 1.30,
 ) -> dict | None:
     """Like :func:`get_assembly` but enriched for the customer-facing xlsx export: each line also
     carries manufacturer, description, the part's best supplier unit price (default supplier if
-    flagged, else the cheapest), and — priced at ``build_qty`` — the customer SELL price
-    (``sell_unit`` per piece and ``sell_line`` per board = the child's loaded build cost × this
-    product's manufacturing margin). ``sell_total`` is the product's per-board customer price at that
-    volume. Used only by the export route."""
+    flagged, else the cheapest), and — priced at ``build_qty`` — the LOADED cost of the part
+    (``loaded_unit`` per piece and ``loaded_line`` per board = material × overhead). That loaded cost
+    is what the customer is charged for the parts — the manufacturing margin (profit) lives on the
+    build, not on the parts, so it is NOT applied here. ``loaded_total`` is the product's per-board
+    loaded parts cost at that volume. Used only by the export route."""
     from ..catalog import pricing
     with db.connect() as conn:
         head = conn.execute(
@@ -121,9 +109,6 @@ def get_assembly_for_export(
         if head is None:
             return None
         assembly = dict(head)
-        # Manufacturing margin is a property of the PRODUCT (this assembly), applied once to the
-        # loaded build cost to get the customer price.
-        mfg_margin = pricing.effective_mfg_margin(conn, part_id, default_mfg_margin)
         lines = [dict(r) for r in conn.execute(
             """SELECT b.id, b.qty_per, b.refdes, b.line_no, b.comments,
                       c.id AS child_id, c.part_no AS child_part_no, c.value AS child_value,
@@ -143,24 +128,25 @@ def get_assembly_for_export(
             (part_id,),
         )]
         for ln in lines:
-            unit = (_rolled_unit_cost(conn, ln["child_id"], set())
-                    if ln["child_kind"] == "ASSY" else ln["child_unit_cost"])
-            ln["unit_cost"] = unit
-            ln["line_cost"] = unit * (ln["qty_per"] or 0) if unit is not None else None
             qty_per = ln["qty_per"] or 0
-            # Loaded build cost of this child at the TOTAL quantity the build consumes (qty_per x
-            # volume), then × the product's manufacturing margin = the customer sell price.
-            loaded_unit = pricing.rolled_sell_price(
-                conn, ln["child_id"], qty_per * build_qty, default_markup)
-            sell_unit = loaded_unit * mfg_margin if loaded_unit is not None else None
-            ln["sell_unit"] = sell_unit
-            ln["sell_line"] = sell_unit * qty_per if sell_unit is not None else None
+            need = qty_per * build_qty          # total quantity of this child the build consumes
+            # Material at the SAME cost-tier / volume basis as the on-screen BOM (and as the sell
+            # price below), so material → loaded → sell stay proportional across the export.
+            unit = pricing.rolled_cost_at(conn, ln["child_id"], need)
+            ln["unit_cost"] = unit
+            ln["line_cost"] = unit * qty_per if unit is not None else None
+            # Loaded cost of this child at that quantity (material × overhead) — what the customer is
+            # charged for the parts. No manufacturing margin here (profit is on the build, not parts).
+            loaded_unit = pricing.rolled_sell_price(conn, ln["child_id"], need, default_markup)
+            ln["loaded_unit"] = loaded_unit
+            ln["loaded_line"] = loaded_unit * qty_per if loaded_unit is not None else None
         assembly["lines"] = lines
         assembly["build_qty"] = build_qty
         assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
-        # The product's per-board sell total is the sum of its direct lines' sell contributions —
-        # each `sell_line` already rolled up its child's sub-tree, so no second full-BOM walk needed.
-        assembly["sell_total"] = sum(ln["sell_line"] for ln in lines if ln["sell_line"] is not None)
+        # Per-board loaded parts cost = sum of the direct lines' loaded contributions — each
+        # `loaded_line` already rolled up its child's sub-tree, so no second full-BOM walk needed.
+        assembly["loaded_total"] = sum(ln["loaded_line"] for ln in lines
+                                       if ln["loaded_line"] is not None)
     return assembly
 
 
@@ -168,7 +154,7 @@ def get_assembly_for_export(
 
 def _explode_to_leaves(conn, part_id: int, build_qty: float) -> dict:
     """Total quantity of each LEAF component consumed to build ``build_qty`` of ``part_id`` — a leaf
-    used in several places is summed. Cycle-guarded (mirrors ``_rolled_unit_cost``'s traversal)."""
+    used in several places is summed. Cycle-guarded via the visited-path set."""
     needs: dict = {}
 
     def walk(pid, qty, path):
@@ -229,11 +215,11 @@ def refresh_bom_for_estimate(db: Database, part_id: int, build_qty: int) -> dict
 
 
 def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
-                      default_markup: float = 1.30, default_mfg_margin: float = 1.30) -> dict:
-    """Transient build estimate at ``build_qty``, the full cost ladder at that volume:
+                      default_markup: float = 1.30) -> dict:
+    """Transient build estimate at ``build_qty``, the cost ladder at that volume:
       - ``material`` — supplier cost (``rolled_cost_at``, from cost tiers -> unit_cost),
-      - ``loaded``   — material × overhead (``rolled_sell_price``), the true internal build cost,
-      - ``quote``    — loaded × this product's manufacturing margin, the customer price.
+      - ``loaded``   — material × overhead (``rolled_sell_price``), the internal build cost = what the
+        customer is charged for the parts.
     Reads only; never writes ``parts.unit_cost``. Returns totals plus per-line
     ``{bom_line_id: {"material", "loaded"}}``."""
     from ..catalog import pricing
@@ -242,7 +228,6 @@ def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
     per_line: dict = {}
     material_total = loaded_total = 0.0
     with db.connect() as conn:
-        mfg_margin = pricing.effective_mfg_margin(conn, part_id, default_mfg_margin)
         for ln in conn.execute(
             "SELECT id, child_id, qty_per FROM bom_lines WHERE parent_id = ?", (part_id,)):
             qty_per = ln["qty_per"] or 0
@@ -257,8 +242,7 @@ def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
             if loaded_line is not None:
                 loaded_total += loaded_line
     return {"build_qty": build_qty, "material_total": material_total,
-            "loaded_total": loaded_total, "quote_total": loaded_total * mfg_margin,
-            "per_line": per_line}
+            "loaded_total": loaded_total, "per_line": per_line}
 
 
 # ---- writes (add / delete BOM lines) ----
@@ -277,10 +261,9 @@ def create_assembly(db: Database, part: dict) -> int:
     with db.connect() as conn:
         return conn.execute(
             "INSERT INTO parts (part_no, value, description, category, rev, default_build_days, "
-            "mfg_margin, kind) VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSY')",
+            "kind) VALUES (?, ?, ?, ?, ?, ?, 'ASSY')",
             (part["part_no"], part.get("value"), part.get("description"),
-             part.get("category"), part.get("rev"), part.get("default_build_days"),
-             part.get("mfg_margin")),
+             part.get("category"), part.get("rev"), part.get("default_build_days")),
         ).lastrowid
 
 
@@ -289,10 +272,9 @@ def update_assembly(db: Database, part_id: int, part: dict) -> None:
     with db.connect() as conn:
         conn.execute(
             "UPDATE parts SET part_no=?, value=?, description=?, category=?, rev=?, "
-            "default_build_days=?, mfg_margin=?, updated_at=datetime('now') WHERE id=? AND kind='ASSY'",
+            "default_build_days=?, updated_at=datetime('now') WHERE id=? AND kind='ASSY'",
             (part["part_no"], part.get("value"), part.get("description"),
-             part.get("category"), part.get("rev"), part.get("default_build_days"),
-             part.get("mfg_margin"), part_id),
+             part.get("category"), part.get("rev"), part.get("default_build_days"), part_id),
         )
         conn.commit()
 

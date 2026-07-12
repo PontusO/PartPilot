@@ -69,8 +69,6 @@ def _parse_assembly(form) -> dict:
         "category": (form.get("category") or "").strip().upper() or None,
         "description": (form.get("description") or "").strip() or None,
         "default_build_days": _int(form.get("default_build_days")),
-        # Per-product manufacturing margin (> 0), NULL -> Setup default. 0/negative -> None.
-        "mfg_margin": (lambda v: v if (v is not None and v > 0) else None)(_num(form.get("mfg_margin"))),
     }
 
 
@@ -141,15 +139,31 @@ async def update_assembly_route(request: Request, part_id: int):
     return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
 
 
+def _pricing_view(assembly: dict) -> dict:
+    """Flatten an assembly's computed pricing into a plain snapshot (per-line keyed by bom-line id)
+    that survives a later cost-tier refresh — so a pre-refresh copy can be shown next to the live one."""
+    return {
+        "build_qty": assembly["build_qty"],
+        "total_cost": assembly["total_cost"],
+        "loaded_total": assembly["loaded_total"],
+        "lines": {ln["id"]: {"unit_cost": ln["unit_cost"], "loaded_unit": ln["loaded_unit"],
+                             "line_cost": ln["line_cost"], "loaded_line": ln["loaded_line"]}
+                  for ln in assembly["lines"]},
+    }
+
+
 def _render_detail(request: Request, part_id: int, user, error: str | None = None, status: int = 200,
-                   estimate: dict | None = None, notice: str | None = None):
+                   build_qty: int = 1, pricing: dict | None = None, refreshed: dict | None = None,
+                   notice: str | None = None):
     db = request.app.state.database
     templates = request.app.state.templates
-    assembly = repo.get_assembly(db, part_id)
+    assembly = repo.get_assembly(db, part_id, build_qty)
     if assembly is None:
         return templates.TemplateResponse(
             request, "error.html", {"message": "Assembly not found."}, status_code=404
         )
+    if pricing is None:
+        pricing = _pricing_view(assembly)     # normal GET: the current pricing at this volume
     can_edit = user.role in ASSEMBLY_WRITE_ROLES
     # devmgmt publish panel: the product (if any) linked to this assembly + its sync state.
     product = devmgmt_repo.product_for_assembly(db, part_id)
@@ -160,11 +174,14 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
         request,
         "assembly_detail.html",
         {
-            "a": assembly,
+            "a": assembly,                    # structure (lines, used_in, head)
+            "pricing": pricing,               # material/loaded/quote for the main cards + rows
+            # A second, refreshed pricing snapshot — shown as an extra set of cards for comparison.
+            # None on a normal GET; set only after "Refresh prices & estimate".
+            "refreshed": refreshed,
             "can_edit": can_edit,
             "parts": repo.parts_for_picker(db, part_id) if can_edit else [],
             "error": error,
-            "estimate": estimate,     # transient build-cost estimate (None on a normal GET)
             "notice": notice,
             "product": product,
             "sync": sync,
@@ -175,16 +192,19 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
 
 
 @router.get("/{part_id}", response_class=HTMLResponse)
-def assembly_detail(request: Request, part_id: int):
+def assembly_detail(request: Request, part_id: int, build_qty: int | None = None):
+    """Assembly detail. ``?build_qty=N`` re-prices the existing material/loaded/quote figures in place
+    at that build volume, from stored prices — no distributor query (that's the Refresh button)."""
     user = require_user(request)
-    return _render_detail(request, part_id, user)
+    return _render_detail(request, part_id, user, build_qty=max(1, build_qty or 1))
 
 
 @router.post("/{part_id}/estimate", response_class=HTMLResponse)
 async def estimate(request: Request, part_id: int):
     """Refresh distributor cost tiers for the BOM components we'd have to buy at the given build
-    volume (in-stock ones are left alone), then show a transient build-cost estimate. Queries the
-    network off the event loop; does not touch parts.unit_cost."""
+    volume (in-stock ones are left alone), then re-render: the existing cards keep the pre-refresh
+    prices and a second set of cards shows the refreshed prices, so the two can be compared. Queries
+    the network off the event loop; does not touch parts.unit_cost."""
     user = require_role(request, ASSEMBLY_WRITE_ROLES)
     db = request.app.state.database
     if repo.get_assembly(db, part_id) is None:
@@ -192,11 +212,13 @@ async def estimate(request: Request, part_id: int):
             request, "error.html", {"message": "Assembly not found."}, status_code=404)
     form = await request.form()
     build_qty = max(1, _int(form.get("build_qty")) or 1)
-    from ..setup import repo as setup_repo
-    markup = setup_repo.get_default_markup(db)
-    mfg_margin = setup_repo.get_default_mfg_margin(db)
+    # Snapshot the current (pre-refresh) pricing, refresh the cost tiers, then snapshot again. The
+    # existing cards show `before`; the extra cards show `after` (the refreshed quote).
+    before = await run_in_threadpool(repo.get_assembly, db, part_id, build_qty)
+    pricing = _pricing_view(before)
     result = await run_in_threadpool(repo.refresh_bom_for_estimate, db, part_id, build_qty)
-    est = await run_in_threadpool(repo.estimate_bom_cost, db, part_id, build_qty, markup, mfg_margin)
+    after = await run_in_threadpool(repo.get_assembly, db, part_id, build_qty)
+    refreshed = _pricing_view(after)
 
     bits = []
     if result["refreshed"]:
@@ -208,23 +230,22 @@ async def estimate(request: Request, part_id: int):
     if result["errors"]:
         bits.append("Errors — " + "; ".join(result["errors"]))
     notice = " • ".join(bits) or "No distributor components to refresh."
-    return _render_detail(request, part_id, user, estimate=est, notice=notice)
+    return _render_detail(request, part_id, user, build_qty=build_qty, pricing=pricing,
+                          refreshed=refreshed, notice=notice)
 
 
 @router.get("/{part_id}/export.xlsx")
 def export_assembly_xlsx(request: Request, part_id: int, build_qty: int = 1):
     """Download the whole product BOM as an Excel workbook (for customer cost/volume talks).
 
-    ``build_qty`` sets the manufacturing volume that selects each component's SELL price tier."""
+    ``build_qty`` sets the manufacturing volume that selects each component's cost/loaded price tier."""
     require_user(request)
     from ..setup import repo as setup_repo
 
     db = request.app.state.database
     build_qty = max(1, build_qty)
     markup = setup_repo.get_default_markup(db)
-    mfg_margin = setup_repo.get_default_mfg_margin(db)
-    assembly = repo.get_assembly_for_export(db, part_id, build_qty=build_qty, default_markup=markup,
-                                            default_mfg_margin=mfg_margin)
+    assembly = repo.get_assembly_for_export(db, part_id, build_qty=build_qty, default_markup=markup)
     if assembly is None:
         return HTMLResponse("Assembly not found.", status_code=404)
     data = export_xlsx.workbook_bytes(assembly)

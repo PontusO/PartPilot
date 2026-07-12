@@ -148,13 +148,39 @@ def test_assembly_estimate_route(app, monkeypatch):
     client = TestClient(app)
     _login(client, "buyer1", "pw")  # purchasing -> can edit
     r = client.post(f"/assemblies/{asm}/estimate", data={"build_qty": "10"})
-    assert r.status_code == 200 and "est. material @ 10" in r.text and "Refreshed" in r.text
+    # Existing cards keep pre-refresh prices; a separate set of refreshed cards is shown to compare.
+    assert r.status_code == 200 and "material cost @ 10" in r.text and "Refreshed" in r.text
+    assert "refreshed material @ 10" in r.text                             # the extra comparison cards
     assert catrepo.get_part(db, leaf)["unit_cost"] == pytest.approx(0.10)   # unit_cost untouched
 
     ware = TestClient(app)
     _login(ware, "ware1", "pw")     # warehouse -> not an assembly-write role
     assert ware.post(f"/assemblies/{asm}/estimate",
                      data={"build_qty": "1"}).status_code in (302, 303, 403)
+
+
+def test_assembly_detail_build_qty_reprices_from_stored(app):
+    """?build_qty=N re-prices the existing figures at that volume from stored prices — in place, no
+    distributor query and no separate estimate cards."""
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import repo as catrepo
+
+    db = app.state.database
+    leaf = catrepo.create_part(db, part={"part_no": "BQ-L"}, supplier_lines=[{
+        "supplier_name": "X", "unit_price": 1.0, "reel_qty": 1, "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 1.0}, {"break_qty": 100, "unit_price": 0.5}]}])
+    asm = asmrepo.create_assembly(db, {"part_no": "BQ-A"})
+    asmrepo.add_bom_line(db, asm, leaf, 1, "R1")
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    base = client.get(f"/assemblies/{asm}").text            # build 1 -> unlabelled, qty-1 tier (1.00)
+    assert "@ 200" not in base and "material cost (SEK)" in base
+    page = client.get(f"/assemblies/{asm}?build_qty=200").text   # 200 leaves -> the 100 cost tier (0.50)
+    assert "material cost @ 200" in page and "loaded build cost @ 200" in page
+    assert "customer quote" not in page                     # no mfg-margin/quote layer
+    assert 'value="200"' in page                            # build-vol field keeps the entered value
+    assert "refreshed material" not in page                 # re-price only; extra cards are refresh-only
 
 
 def test_setup_pricing_markup_screen(app):
@@ -166,19 +192,16 @@ def test_setup_pricing_markup_screen(app):
 
     page = client.get("/setup/pricing")
     assert page.status_code == 200 and "Default overhead factor" in page.text
-    assert "Default manufacturing margin" in page.text     # the new profit layer
+    assert "manufacturing margin" not in page.text.lower()  # mfg-margin layer removed
     assert 'value="1.3"' in page.text                      # unset -> defaults 1.30
 
-    r = client.post("/setup/pricing",
-                    data={"default_markup": "1.45", "default_mfg_margin": "1.6"})
+    r = client.post("/setup/pricing", data={"default_markup": "1.45"})
     assert r.status_code == 200 and "Saved." in r.text
     assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
-    assert setup_repo.get_default_mfg_margin(app.state.database) == pytest.approx(1.6)
 
-    # 0 / negative would zero prices -> rejected, keeps the current values.
-    client.post("/setup/pricing", data={"default_markup": "0", "default_mfg_margin": "-1"})
+    # 0 / negative would zero prices -> rejected, keeps the current value.
+    client.post("/setup/pricing", data={"default_markup": "0"})
     assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
-    assert setup_repo.get_default_mfg_margin(app.state.database) == pytest.approx(1.6)
 
     # a purchasing user cannot reach setup
     other = TestClient(app)
@@ -725,15 +748,15 @@ def test_customer_orders_flow(app):
     assert r.status_code == 303
     oid = int(r.headers["location"].rsplit("/", 1)[1])
 
-    # add a line — price omitted, defaults to customer price = material 2.0 x overhead 1.30 x mfg 1.30
+    # add a line — price omitted, defaults to the loaded parts price = material 2.0 x overhead 1.30
     client.post(f"/customer-orders/{oid}/lines/add", data={"part_id": part, "qty": "10"},
                 follow_redirects=False)
     page = client.get(f"/customer-orders/{oid}").text
     assert "WIDGET-1" in page and "SO-9" in page
 
     order = corepo.get_order(db, oid)
-    assert order["lines"][0]["unit_price"] == pytest.approx(3.38)
-    assert abs(order["grand_total"] - 42.25) < 1e-9  # 10*3.38 + 25% tax
+    assert order["lines"][0]["unit_price"] == pytest.approx(2.6)
+    assert abs(order["grand_total"] - 32.5) < 1e-9  # 10*2.6 + 25% tax
 
     lid = order["lines"][0]["id"]
     client.post(f"/customer-orders/{oid}/lines/{lid}/update",

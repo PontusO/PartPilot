@@ -26,12 +26,12 @@ COLUMNS = [
     ("Supplier price", "child_supplier_price", True),
     ("Unit cost", "unit_cost", True),
     ("Line cost", "line_cost", True),
-    ("Sell/unit", "sell_unit", True),
-    ("Sell line", "sell_line", True),
+    ("Loaded/unit", "loaded_unit", True),
+    ("Loaded line", "loaded_line", True),
     ("Reference designators", "refdes", False),
 ]
-# The two total-bearing columns (cost and sell) get a totals row at the bottom.
-_TOTAL_COLS = [("line_cost", "total_cost"), ("sell_line", "sell_total")]
+# The two total-bearing columns (material cost and loaded parts charge) get a totals row.
+_TOTAL_COLS = [("line_cost", "total_cost"), ("loaded_line", "loaded_total")]
 
 _HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 _TOTAL_FILL = PatternFill("solid", fgColor="DDEBF7")
@@ -80,7 +80,7 @@ def build_workbook(assembly: dict, currency: str = "SEK") -> Workbook:
             ws.cell(row=r, column=col).number_format = money_fmt
         r += 1
 
-    # --- total row (a total under each of the cost and sell columns) ---
+    # --- total row (a total under each of the material-cost and loaded columns) ---
     col_of = {key: i for i, (_n, key, _m) in enumerate(COLUMNS, start=1)}
     first_total_col = min(col_of[k] for k, _ in _TOTAL_COLS)
     label_cell = ws.cell(row=r, column=first_total_col - 1, value="Total")

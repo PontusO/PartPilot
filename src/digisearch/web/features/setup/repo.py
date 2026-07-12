@@ -120,12 +120,11 @@ def save_orders(db: Database, data: dict) -> None:
 
 # ---- pricing settings ----
 
-# Two multipliers in the costing model:
-#  - default_markup      = OVERHEAD factor: material cost -> internal loaded cost (handling/storage/…).
-#  - default_mfg_margin  = MANUFACTURING margin: loaded build cost -> customer price (profit, applied
-#                          once at the sale). Both must be > 0; 0/negative would zero prices.
+# The one multiplier in the costing model:
+#  - default_markup = OVERHEAD factor: material cost -> internal loaded cost (handling/storage/…).
+# (Production cost + profit margin is priced outside PartPilot, added as a per-product 97- part.)
+# Must be > 0; 0/negative would zero prices.
 DEFAULT_MARKUP = 1.30
-DEFAULT_MFG_MARGIN = 1.30
 
 
 def _get_positive_setting(db: Database, key: str, default: float) -> float:
@@ -158,19 +157,12 @@ def get_default_markup(db: Database) -> float:
     return _get_positive_setting(db, "pricing.default_markup", DEFAULT_MARKUP)
 
 
-def get_default_mfg_margin(db: Database) -> float:
-    """The manufacturing margin (loaded build cost -> customer price), > 0, else DEFAULT_MFG_MARGIN."""
-    return _get_positive_setting(db, "pricing.default_mfg_margin", DEFAULT_MFG_MARGIN)
-
-
 def get_pricing(db: Database) -> dict:
-    return {"default_markup": get_default_markup(db),
-            "default_mfg_margin": get_default_mfg_margin(db)}
+    return {"default_markup": get_default_markup(db)}
 
 
 def save_pricing(db: Database, data: dict) -> None:
     _save_positive_setting(db, "pricing.default_markup", data.get("default_markup"))
-    _save_positive_setting(db, "pricing.default_mfg_margin", data.get("default_mfg_margin"))
 
 
 # ---- webshop (WooCommerce) settings ----

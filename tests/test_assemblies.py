@@ -133,32 +133,15 @@ def _component(db, part_no, unit_price):
     return catrepo.create_part(db, part={"part_no": part_no}, supplier_lines=lines)
 
 
-def test_get_assembly_reports_material_loaded_and_quote(db):
+def test_get_assembly_reports_material_and_loaded(db):
     asm = repo.create_assembly(db, {"part_no": "LQ-ASM"})
     repo.add_bom_line(db, asm, _component(db, "LQ-1", 0.5), 3, "R1")   # material 0.5 x3 = 1.5
     a = repo.get_assembly(db, asm)
     assert a["total_cost"] == pytest.approx(1.5)                        # material
     assert a["loaded_total"] == pytest.approx(1.95)                     # 0.5 x overhead 1.30 x3
-    assert a["quote_total"] == pytest.approx(2.535)                     # loaded 1.95 x mfg 1.30
+    assert "quote_total" not in a                                       # no mfg-margin layer
     ln = a["lines"][0]
     assert ln["loaded_unit"] == pytest.approx(0.65) and ln["loaded_line"] == pytest.approx(1.95)
-
-
-def test_product_sell_price_applies_mfg_margin(db):
-    from digisearch.web.features.catalog import pricing
-
-    leaf = _component(db, "MG-L", 1.0)              # material 1.0
-    asm = repo.create_assembly(db, {"part_no": "MG-A"})
-    repo.add_bom_line(db, asm, leaf, 2, None)       # 2 leaves per board
-    with db.connect() as conn:
-        # loaded = material 1.0 x overhead 1.30 = 1.3, x2 = 2.6; customer = 2.6 x mfg 1.5 = 3.9
-        assert pricing.product_sell_price(conn, asm, 1, 1.30, 1.5) == pytest.approx(3.9)
-        # a per-assembly mfg_margin overrides the default
-        conn.execute("UPDATE parts SET mfg_margin = 2.0 WHERE id = ?", (asm,))
-        conn.commit()
-        assert pricing.product_sell_price(conn, asm, 1, 1.30, 1.5) == pytest.approx(2.6 * 2.0)
-        # rolled_sell_price (the loaded rollup) never includes the mfg margin
-        assert pricing.rolled_sell_price(conn, asm, 1, 1.30) == pytest.approx(2.6)
 
 
 def test_rolled_cost_at_is_volume_aware(db):
@@ -175,12 +158,12 @@ def test_rolled_cost_at_is_volume_aware(db):
         assert pricing.rolled_cost_at(conn, asm, 1) == pytest.approx(0.10 * 5)     # 5 leaves -> tier 1
         assert pricing.rolled_cost_at(conn, asm, 200) == pytest.approx(0.03 * 5)   # 1000 -> tier 1000
 
-    # Full ladder at volume: material (0.03×5), loaded (×overhead 1.30), quote (×mfg 1.30).
-    est = repo.estimate_bom_cost(db, asm, 200)   # defaults overhead 1.30, mfg 1.30
+    # At volume: material (0.03×5) and loaded (×overhead 1.30). No mfg-margin/quote layer.
+    est = repo.estimate_bom_cost(db, asm, 200)   # default overhead 1.30
     assert est["build_qty"] == 200
     assert est["material_total"] == pytest.approx(0.15)
     assert est["loaded_total"] == pytest.approx(0.195)     # 0.15 × 1.30
-    assert est["quote_total"] == pytest.approx(0.2535)     # 0.195 × 1.30
+    assert "quote_total" not in est
     line_id = repo.get_assembly(db, asm)["lines"][0]["id"]
     assert est["per_line"][line_id]["material"] == pytest.approx(0.15)
     assert est["per_line"][line_id]["loaded"] == pytest.approx(0.195)
@@ -306,16 +289,17 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
         conn.commit()
     repo.add_bom_line(db, asm, p1, 3, "R1, R2")
 
-    a = repo.get_assembly_for_export(db, asm, default_markup=1.30, default_mfg_margin=1.30)
+    a = repo.get_assembly_for_export(db, asm, default_markup=1.30)
     ln = a["lines"][0]
     assert ln["child_mfr_name"] == "ACME" and ln["child_mfr_pno"] == "ACME-1"
     assert ln["child_description"] == "A resistor"
     assert ln["child_supplier_price"] == 0.5
     assert ln["unit_cost"] == 0.5 and ln["line_cost"] == 1.5
     assert a["total_cost"] == 1.5
-    # sell = loaded (material 0.5 x overhead 1.30 = 0.65) x mfg margin 1.30 = 0.845; line = x3
-    assert ln["sell_unit"] == pytest.approx(0.845) and ln["sell_line"] == pytest.approx(2.535)
-    assert a["sell_total"] == pytest.approx(2.535) and a["build_qty"] == 1
+    # loaded = material 0.5 x overhead 1.30 = 0.65 (what the customer pays for the part); line = x3.
+    # No manufacturing margin here — profit is on the build, not the parts.
+    assert ln["loaded_unit"] == pytest.approx(0.65) and ln["loaded_line"] == pytest.approx(1.95)
+    assert a["loaded_total"] == pytest.approx(1.95) and a["build_qty"] == 1
 
     # The workbook builds and round-trips through openpyxl with the header + total row.
     from io import BytesIO
@@ -327,18 +311,18 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
     assert ws["A4"].value == "Build volume: 1"
     header = [c.value for c in ws[5]]
     assert header[:3] == ["#", "Qty/board", "Part #"]
-    assert "Sell/unit" in header and "Sell line" in header
+    assert "Loaded/unit" in header and "Loaded line" in header
     # data row 6, then total row 7
     row6 = {c.value for c in ws[6]}
     assert "P1" in row6 and "ACME" in row6 and 1.5 in row6
     col_of = {key: i for i, (_n, key, _m) in enumerate(export_xlsx.COLUMNS, start=1)}
-    assert ws.cell(row=7, column=col_of["line_cost"]).value == 1.5    # Total cost
-    assert ws.cell(row=7, column=col_of["sell_line"]).value == pytest.approx(2.535)  # Total sell
+    assert ws.cell(row=7, column=col_of["line_cost"]).value == 1.5    # Total material cost
+    assert ws.cell(row=7, column=col_of["loaded_line"]).value == pytest.approx(1.95)  # Total loaded
 
 
 def test_export_sell_price_is_volume_aware(db):
-    """A component's loaded cost tier is picked by (qty_per x build volume); the export sell price is
-    that loaded cost × the product manufacturing margin (default 1.30)."""
+    """A component's loaded cost tier is picked by (qty_per x build volume); the export charges that
+    loaded cost (material × overhead) for the parts — no manufacturing margin."""
     from digisearch.web.features.catalog import repo as catrepo
 
     asm = repo.create_assembly(db, {"part_no": "VOL-ASM"})
@@ -347,15 +331,34 @@ def test_export_sell_price_is_volume_aware(db):
                                           {"break_qty": 1000, "unit_price": 1.0}])
     repo.add_bom_line(db, asm, leaf, 5, "R1")   # 5 of the leaf per board
 
-    # Build 1 -> 5 leaves -> loaded 2.0 -> sell 2.0*1.30 = 2.6; line = 2.6*5 = 13.0
+    # Build 1 -> 5 leaves -> loaded 2.0; line = 2.0*5 = 10.0
     a1 = repo.get_assembly_for_export(db, asm, build_qty=1)
-    assert a1["lines"][0]["sell_unit"] == pytest.approx(2.6)
-    assert a1["sell_total"] == pytest.approx(13.0)
+    assert a1["lines"][0]["loaded_unit"] == pytest.approx(2.0)
+    assert a1["loaded_total"] == pytest.approx(10.0)
 
-    # Build 200 -> 1000 leaves -> loaded 1.0 -> sell 1.0*1.30 = 1.3; line = 1.3*5 = 6.5
+    # Build 200 -> 1000 leaves -> loaded 1.0; line = 1.0*5 = 5.0
     a2 = repo.get_assembly_for_export(db, asm, build_qty=200)
-    assert a2["lines"][0]["sell_unit"] == pytest.approx(1.3)
-    assert a2["sell_total"] == pytest.approx(6.5) and a2["build_qty"] == 200
+    assert a2["lines"][0]["loaded_unit"] == pytest.approx(1.0)
+    assert a2["loaded_total"] == pytest.approx(5.0) and a2["build_qty"] == 200
+
+
+def test_export_material_uses_cost_tiers_like_page(db):
+    """Export material is priced from cost tiers at the build volume (same basis as the BOM page),
+    not a flat unit_cost — so it stays proportional to the sell column (overhead × mfg margin)."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    leaf = catrepo.create_part(db, part={"part_no": "EXP-CT"}, supplier_lines=[{
+        "supplier_name": "X", "unit_price": 2.0, "reel_qty": 1, "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 2.0}, {"break_qty": 100, "unit_price": 1.0}]}])
+    asm = repo.create_assembly(db, {"part_no": "EXP-CT-ASM"})
+    repo.add_bom_line(db, asm, leaf, 1, "R1")
+
+    a1 = repo.get_assembly_for_export(db, asm, build_qty=1)     # qty 1 -> the 2.0 cost tier
+    assert a1["lines"][0]["unit_cost"] == pytest.approx(2.0)
+    assert a1["lines"][0]["loaded_unit"] == pytest.approx(2.0 * 1.30)   # material × overhead only
+    a100 = repo.get_assembly_for_export(db, asm, build_qty=100)  # qty 100 -> the 1.0 cost tier
+    assert a100["lines"][0]["unit_cost"] == pytest.approx(1.0)
+    assert a100["lines"][0]["loaded_unit"] == pytest.approx(1.0 * 1.30)
 
 
 def test_export_returns_none_for_missing_assembly(db):

@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ a.part_no }} · PartPilot{% endblock %}
 {% block content %}
+{# refreshed price, coloured green when same/lower than the current value, red on an increase #}
+{% macro refr(cur, ref, fmt, bold=false) %}{% if ref is not none %}<span class="pc {% if bold %}pc-b {% endif %}{{ 'pc-up' if (cur is not none and ref > cur) else 'pc-down' }}">{{ fmt|format(ref) }}</span>{% endif %}{% endmacro %}
 <style>
   .modal { position:fixed; inset:0; background:rgba(8,12,18,.7); display:none;
            align-items:flex-start; justify-content:center; z-index:60; padding:2.5rem 1rem; }
@@ -21,6 +23,27 @@
   .part-row .stk { color:var(--muted); font-size:.8rem; white-space:nowrap; }
   .part-row .pv { color:var(--muted); font-size:.85rem; line-height:1.35; }
   .part-row:hover .stk, .part-row:hover .pv { color:#e6eefb; }
+  /* Uniform action bar: every button/input the same height regardless of a/button/input. */
+  .act-bar { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; margin-top:1rem; }
+  .act-bar form { display:flex; align-items:center; gap:.4rem; margin:0; }
+  .act-btn { display:inline-flex; align-items:center; justify-content:center; height:2.5rem;
+             margin:0; padding:0 1.1rem; background:var(--accent); color:#fff; font-weight:600;
+             border:0; border-radius:9px; text-decoration:none; white-space:nowrap; cursor:pointer;
+             font:inherit; box-sizing:border-box; }
+  .act-btn:hover { filter:brightness(1.08); }
+  input.act-input { height:2.5rem; width:5.5rem; box-sizing:border-box; padding:0 .6rem; margin:0;
+               font:inherit; background:#0d1219; color:var(--fg); border:1px solid var(--line);
+               border-radius:9px; }
+  .card.refreshed { border-color:var(--accent); }        /* extra cards from a price refresh */
+  /* BOM-row prices: colour-coded, same size, loaded in bold (that's the figure that matters).
+     white = cost · grey = loaded cost. Refreshed values are coloured by how they moved vs current:
+     green = same or lower, red = price increase. */
+  .pc { display:block; }
+  .pc-cost   { color:var(--fg); }
+  .pc-loaded { color:var(--muted); font-weight:700; }
+  .pc-b      { font-weight:700; }
+  .pc-down   { color:var(--ok); }       /* refreshed same or lower — good */
+  .pc-up     { color:#e5534b; }         /* refreshed higher — price increase */
 </style>
 
 <div class="panel">
@@ -29,63 +52,46 @@
     {% if a.rev %}<span class="flag" style="font-size:.9rem;">rev {{ a.rev }}</span>{% endif %}</h1>
   <p class="note">{{ a.value or '' }}{% if a.description %} — {{ a.description }}{% endif %}</p>
 
+  {% set volsuffix = ' @ %d'|format(a.build_qty) if a.build_qty > 1 else '' %}
   <div class="cards">
     <div class="card"><b>{{ a.lines|length }}</b><small>BOM lines</small></div>
     <div class="card"><b>{{ a.used_in|length }}</b><small>used in</small></div>
     <div class="card"><b>{{ "%.0f"|format(a.total_qty) }}</b><small>on hand</small></div>
-    <div class="card"><b>{{ "%.2f"|format(a.total_cost) }}</b><small>material cost (SEK)</small></div>
-    <div class="card"><b>{{ "%.2f"|format(a.loaded_total) }}</b><small>loaded build cost (SEK)</small></div>
-    <div class="card"><b>{{ "%.2f"|format(a.quote_total) }}</b><small>customer quote (SEK)</small></div>
-    {% if estimate %}
-    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.material_total) }}</b>
-      <small>est. material @ {{ estimate.build_qty }}</small></div>
-    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.loaded_total) }}</b>
-      <small>est. loaded @ {{ estimate.build_qty }}</small></div>
-    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.quote_total) }}</b>
-      <small>est. quote @ {{ estimate.build_qty }}</small></div>
+    <div class="card"><b>{{ "%.2f"|format(pricing.total_cost) }}</b><small>material cost{{ volsuffix }} (SEK)</small></div>
+    <div class="card"><b>{{ "%.2f"|format(pricing.loaded_total) }}</b><small>loaded build cost{{ volsuffix }} (SEK)</small></div>
+    {% if refreshed %}
+    <div class="card refreshed"><b class="{{ 'pc-up' if refreshed.total_cost > pricing.total_cost else 'pc-down' }}">{{ "%.2f"|format(refreshed.total_cost) }}</b><small>refreshed material{{ volsuffix }} (SEK)</small></div>
+    <div class="card refreshed"><b class="{{ 'pc-up' if refreshed.loaded_total > pricing.loaded_total else 'pc-down' }}">{{ "%.2f"|format(refreshed.loaded_total) }}</b><small>refreshed loaded{{ volsuffix }} (SEK)</small></div>
     {% endif %}
     {% if a.external_price is not none %}
     <div class="card"><b>{{ "%.2f"|format(a.external_price) }}</b><small>webshop price SEK</small></div>
     {% endif %}
-    <form method="get" action="/assemblies/{{ a.id }}/export.xlsx"
-          style="margin:0 0 0 auto; display:flex; align-items:center; gap:0.4rem; white-space:nowrap;">
-      <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
-        Build vol
-        <input type="number" name="build_qty" value="{{ estimate.build_qty if estimate else 1 }}"
-               min="1" step="1"
-               style="width:6rem; padding:0.35rem 0.5rem; border:1px solid var(--border);
-                      border-radius:7px;">
-      </label>
-      <button type="submit" style="display:flex; align-items:center; justify-content:center;
-         background:var(--accent); color:#fff; font-weight:600; border:0; border-radius:9px;
-         padding:0.55rem 1.2rem; text-decoration:none; white-space:nowrap; cursor:pointer;">
-        Export BOM (.xlsx)</button>
+  </div>
+
+  <div class="act-bar">
+    <!-- One form: default GET re-prices the page; Export/Refresh override via formaction and submit
+         the same (live) build_qty. Changing the field re-prices; a button press sets data-skip so the
+         field's change doesn't hijack the button's own submit. -->
+    <form method="get" action="/assemblies/{{ a.id }}">
+      <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">Build vol
+        <input class="act-input" type="number" name="build_qty" id="buildQty"
+               value="{{ a.build_qty }}" min="1" step="1"
+               title="Change to re-price the page at this build volume"
+               oninput="this.dataset.skip='';"
+               onchange="if(this.dataset.skip==='1'){this.dataset.skip='';return;} this.form.submit();"></label>
+      <button type="submit" class="act-btn" formaction="/assemblies/{{ a.id }}/export.xlsx"
+              onmousedown="document.getElementById('buildQty').dataset.skip='1';">Export BOM (.xlsx)</button>
       {% if can_edit %}
-      <button type="submit" formaction="/assemblies/{{ a.id }}/estimate" formmethod="post"
-         title="Re-query distributor prices for components short at this volume, then estimate the build cost"
-         style="display:flex; align-items:center; justify-content:center;
-         background:var(--accent); color:#fff; font-weight:600; border:0; border-radius:9px;
-         padding:0.55rem 1.2rem; white-space:nowrap; cursor:pointer;">
-        ↻ Refresh prices &amp; estimate</button>
+      <button type="submit" class="act-btn" formaction="/assemblies/{{ a.id }}/estimate" formmethod="post"
+              onmousedown="document.getElementById('buildQty').dataset.skip='1';"
+              title="Re-query distributor prices for components short at this volume, then estimate the build cost">↻ Refresh prices &amp; estimate</button>
       {% endif %}
     </form>
     {% if can_edit %}
-    <a href="/assemblies/{{ a.id }}/edit" style="margin:0; display:flex;
-       align-items:center; justify-content:center; background:var(--accent); color:#fff;
-       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none;
-       white-space:nowrap;">Edit</a>
-    <a href="/assemblies/{{ a.id }}/import" style="margin:0; display:flex;
-       align-items:center; justify-content:center; background:var(--accent); color:#fff;
-       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none;
-       white-space:nowrap;">Import BOM (.csv)</a>
-    <button type="button" onclick="openAdd()" style="margin:0; display:flex;
-       align-items:center; justify-content:center; background:var(--accent); color:#fff;
-       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; cursor:pointer;
-       white-space:nowrap;">Add Component to Assy</button>
-    <button type="submit" form="convertForm" style="margin:0; display:flex;
-       align-items:center; justify-content:center; background:var(--accent); color:#fff;
-       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; cursor:pointer;
-       white-space:nowrap;">Convert to component</button>
+    <a href="/assemblies/{{ a.id }}/edit" class="act-btn">Edit</a>
+    <a href="/assemblies/{{ a.id }}/import" class="act-btn">Import BOM (.csv)</a>
+    <button type="button" class="act-btn" onclick="openAdd()">Add Component to Assy</button>
+    <button type="submit" class="act-btn" form="convertForm">Convert to component</button>
     {% endif %}
   </div>
   {% if can_edit %}
@@ -104,10 +110,12 @@
         <tr><th class="num">#</th><th class="num">Qty</th><th>Component</th><th>Value</th>
             <th>Category</th><th class="num">Unit (SEK)</th><th class="num">Line (SEK)</th>
             <th>Reference designators</th>{% if can_edit %}<th></th>{% endif %}</tr>
-        <tr><th colspan="5"></th><th class="num" style="font-weight:400; font-size:.72rem;" colspan="2">material · loaded (material × overhead)</th><th colspan="{{ 2 if can_edit else 1 }}"></th></tr>
+        <tr><th colspan="5"></th><th class="num" style="font-weight:400; font-size:.72rem;" colspan="2"><span class="pc-cost">cost</span> · <span class="pc-loaded">loaded</span>{% if refreshed %} · refreshed <span class="pc-down">same/lower</span> / <span class="pc-up">higher</span>{% endif %}</th><th colspan="{{ 2 if can_edit else 1 }}"></th></tr>
       </thead>
       <tbody>
         {% for ln in a.lines %}
+        {% set p = pricing.lines.get(ln.id) %}
+        {% set r = refreshed.lines.get(ln.id) if refreshed else None %}
         <tr>
           <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
           <td class="num">
@@ -128,16 +136,13 @@
           </td>
           <td>{{ ln.child_value or '' }}</td>
           <td>{{ ln.child_category or '' }}</td>
-          <td class="num">{% if ln.unit_cost is not none %}{{ "%.4f"|format(ln.unit_cost) }}{% endif %}
-            {% if ln.loaded_unit is not none %}<br><span class="note" style="font-size:.72rem;">loaded {{ "%.4f"|format(ln.loaded_unit) }}</span>{% endif %}
+          <td class="num">{% if p and p.unit_cost is not none %}<span class="pc pc-cost">{{ "%.4f"|format(p.unit_cost) }}</span>{% endif %}
+            {% if p and p.loaded_unit is not none %}<span class="pc pc-loaded">{{ "%.4f"|format(p.loaded_unit) }}</span>{% endif %}
+            {% if r %}{{ refr(p.unit_cost if p else none, r.unit_cost, '%.4f') }}{{ refr(p.loaded_unit if p else none, r.loaded_unit, '%.4f', true) }}{% endif %}
           </td>
-          <td class="num">{% if ln.line_cost is not none %}{{ "%.2f"|format(ln.line_cost) }}{% endif %}
-            {% if ln.loaded_line is not none %}<br><span class="note" style="font-size:.72rem;">loaded {{ "%.2f"|format(ln.loaded_line) }}</span>{% endif %}
-            {% if estimate and estimate.per_line.get(ln.id) %}
-              {% set e = estimate.per_line[ln.id] %}
-              {% if e.material is not none %}<br><span class="note" style="font-size:.72rem;">est mat {{ "%.2f"|format(e.material) }}</span>{% endif %}
-              {% if e.loaded is not none %}<br><span class="note" style="font-size:.72rem;">est loaded {{ "%.2f"|format(e.loaded) }}</span>{% endif %}
-            {% endif %}
+          <td class="num">{% if p and p.line_cost is not none %}<span class="pc pc-cost">{{ "%.2f"|format(p.line_cost) }}</span>{% endif %}
+            {% if p and p.loaded_line is not none %}<span class="pc pc-loaded">{{ "%.2f"|format(p.loaded_line) }}</span>{% endif %}
+            {% if r %}{{ refr(p.line_cost if p else none, r.line_cost, '%.2f') }}{{ refr(p.loaded_line if p else none, r.loaded_line, '%.2f', true) }}{% endif %}
           </td>
           <td class="flag">
             <span class="v{{ ln.id }}">{{ ln.refdes or '' }}</span>
@@ -172,11 +177,11 @@
       {% if a.lines %}
       <tfoot>
         <tr>
-          <td colspan="6" class="num" style="font-weight:600;">Total material / loaded{% if estimate %} / est @ {{ estimate.build_qty }}{% endif %}</td>
-          <td class="num" style="font-weight:600;">{{ "%.2f"|format(a.total_cost) }}
-            <br><span class="note" style="font-size:.72rem;">loaded {{ "%.2f"|format(a.loaded_total) }}</span>
-            {% if estimate %}<br><span class="note" style="font-size:.72rem;">est mat {{ "%.2f"|format(estimate.material_total) }}</span>
-            <br><span class="note" style="font-size:.72rem;">est loaded {{ "%.2f"|format(estimate.loaded_total) }}</span>{% endif %}
+          <td colspan="6" class="num" style="font-weight:600;">Total{{ volsuffix }}</td>
+          <td class="num" style="font-weight:600;">
+            <span class="pc pc-cost">{{ "%.2f"|format(pricing.total_cost) }}</span>
+            <span class="pc pc-loaded">{{ "%.2f"|format(pricing.loaded_total) }}</span>
+            {% if refreshed %}{{ refr(pricing.total_cost, refreshed.total_cost, '%.2f') }}{{ refr(pricing.loaded_total, refreshed.loaded_total, '%.2f', true) }}{% endif %}
           </td>
           <td colspan="{{ 2 if can_edit else 1 }}"></td>
         </tr>
