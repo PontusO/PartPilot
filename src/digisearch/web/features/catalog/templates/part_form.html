@@ -18,6 +18,8 @@
   <p class="note"><a href="{{ back_url }}">← Back</a></p>
   <h1>{{ heading }}</h1>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if notice %}<div style="background:rgba(70,180,120,.12); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">{{ notice }}</div>{% endif %}
 
   <form method="post" action="{{ action }}">
     <h2>Part</h2>
@@ -154,11 +156,90 @@
     </div>
     <button type="button" class="ghost" style="margin-top:.6rem" onclick="addRow()">+ Add supplier</button>
 
+    <h2>Customer pricing</h2>
+    <p class="note">Tiered sell price by the quantity of this component a build consumes
+      (qty/board × build volume). With no tiers, the sell price falls back to cost × markup.</p>
+    <div class="formgrid">
+      <div>
+        <label for="markup">Markup (× cost)</label>
+        <input id="markup" name="markup" type="number" step="any" min="0"
+               value="{{ values.get('markup') if values.get('markup') is not none else '' }}"
+               placeholder="blank = Setup default">
+      </div>
+    </div>
+
+    {% set gen_tiers = sell_tier_rows | selectattr('source', 'equalto', 'markup') | list %}
+    {% set manual_tiers = sell_tier_rows | rejectattr('source', 'equalto', 'markup') | list %}
+
+    {% set cost_rows = supplier_rows | selectattr('cost_tiers') | list %}
+    {% if cost_rows %}
+    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Captured supplier cost breaks (read-only)</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Supplier</th><th>Kind</th><th>Break qty</th><th>Unit cost</th></tr></thead>
+        <tbody>
+          {% for s in supplier_rows %}{% for t in s.cost_tiers %}
+            <tr><td>{{ s.supplier_name or '' }}</td><td>{{ t.kind }}</td>
+                <td>{{ t.break_qty }}</td><td>{{ '%.5f'|format(t.unit_price) }}</td></tr>
+          {% endfor %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Sell price tiers</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Break qty</th><th>Unit sell price</th><th></th></tr></thead>
+        <tbody id="selltiers">
+          {% for t in manual_tiers %}
+          <tr>
+            <td><input name="sell_break_qty" type="number" step="any" min="0" value="{{ t.break_qty }}"></td>
+            <td><input name="sell_unit_price" type="number" step="any" min="0" value="{{ t.unit_price }}"></td>
+            <td><button type="button" class="danger" onclick="delSell(this)">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="ghost" style="margin-top:.6rem" onclick="addSell()">+ Add tier</button>
+
+    {% if gen_tiers %}
+    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Generated tiers (cost × markup, read-only)</h3>
+    <p class="note">Regenerate below after cost or markup changes. A manual tier at the same break
+      quantity overrides the generated one.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Break qty</th><th>Unit sell price</th></tr></thead>
+        <tbody>
+          {% for t in gen_tiers %}
+          <tr><td>{{ t.break_qty }}</td><td>{{ '%.5f'|format(t.unit_price) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
     <div style="margin-top:1.4rem; display:flex; gap:.8rem; align-items:center;">
       <button type="submit">{{ submit_label }}</button>
       <button type="button" onclick="window.location.href='{{ back_url }}'">Cancel</button>
     </div>
   </form>
+
+  {% if part_id %}
+  <form method="post" action="/catalog/{{ part_id }}/refresh-cost-tiers"
+        style="margin-top:1rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+    <button type="submit" class="ghost">↻ Refresh cost tiers from distributor</button>
+    <span class="note">Re-queries Digi-Key / Mouser for each supplier offer (matched by supplier
+      part number) and overwrites its captured cost breaks. May take a few seconds.</span>
+  </form>
+  <form method="post" action="/catalog/{{ part_id }}/generate-sell-tiers"
+        style="margin-top:.6rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+    <button type="submit" class="ghost">Generate sell tiers from cost × markup</button>
+    <span class="note">Uses the saved markup and captured cost breaks; manual tiers are kept.
+      Save a changed markup first.</span>
+  </form>
+  {% endif %}
 </div>
 
 <datalist id="dl-categories">
@@ -190,6 +271,16 @@
     const tb = document.getElementById('suprows');
     if (tb.querySelectorAll('tr').length > 1) btn.closest('tr').remove();
   }
+  function addSell() {
+    const tb = document.getElementById('selltiers');
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input name="sell_break_qty" type="number" step="any" min="0"></td>' +
+      '<td><input name="sell_unit_price" type="number" step="any" min="0"></td>' +
+      '<td><button type="button" class="danger" onclick="delSell(this)">Remove</button></td>';
+    tb.appendChild(tr);
+  }
+  function delSell(btn) { btn.closest('tr').remove(); }
 </script>
 
 <!-- iLabs value builder popup -->

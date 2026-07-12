@@ -109,4 +109,15 @@ MIGRATIONS = [
         ALTER TABLE customer_orders ADD COLUMN invoice_address_id  INTEGER REFERENCES contact_addresses(id);
         """,
     ),
+    Migration(
+        version=6,
+        name="order line price override flag",
+        sql="""
+        -- Order lines now default their unit_price from the product's tiered SELL price at the
+        -- ordered quantity (see catalog/pricing.py). Once an operator types a price by hand we must
+        -- stop re-pricing it on a qty change — this flag records that the price was set manually.
+        -- A "reprice" action clears it and recomputes from the current tiers.
+        ALTER TABLE customer_order_lines ADD COLUMN price_overridden INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]

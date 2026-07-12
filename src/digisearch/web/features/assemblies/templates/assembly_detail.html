@@ -37,10 +37,19 @@
     {% if a.external_price is not none %}
     <div class="card"><b>{{ "%.2f"|format(a.external_price) }}</b><small>webshop price SEK</small></div>
     {% endif %}
-    <a href="/assemblies/{{ a.id }}/export.xlsx" style="margin:0 0 0 auto; display:flex;
-       align-items:center; justify-content:center; background:var(--accent); color:#fff;
-       font-weight:600; border:0; border-radius:9px; padding:0 1.2rem; text-decoration:none;
-       white-space:nowrap;">Export BOM (.xlsx)</a>
+    <form method="get" action="/assemblies/{{ a.id }}/export.xlsx"
+          style="margin:0 0 0 auto; display:flex; align-items:center; gap:0.4rem; white-space:nowrap;">
+      <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
+        Build vol
+        <input type="number" name="build_qty" value="1" min="1" step="1"
+               style="width:6rem; padding:0.35rem 0.5rem; border:1px solid var(--border);
+                      border-radius:7px;">
+      </label>
+      <button type="submit" style="display:flex; align-items:center; justify-content:center;
+         background:var(--accent); color:#fff; font-weight:600; border:0; border-radius:9px;
+         padding:0.55rem 1.2rem; text-decoration:none; white-space:nowrap; cursor:pointer;">
+        Export BOM (.xlsx)</button>
+    </form>
     {% if can_edit %}
     <a href="/assemblies/{{ a.id }}/edit" style="margin:0; display:flex;
        align-items:center; justify-content:center; background:var(--accent); color:#fff;

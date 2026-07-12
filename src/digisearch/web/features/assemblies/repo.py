@@ -86,10 +86,15 @@ def get_assembly(db: Database, part_id: int) -> dict | None:
     return assembly
 
 
-def get_assembly_for_export(db: Database, part_id: int) -> dict | None:
-    """Like :func:`get_assembly` but enriched for the customer-facing xlsx export:
-    each line also carries manufacturer, description and the part's best supplier unit
-    price (default supplier if flagged, else the cheapest). Used only by the export route."""
+def get_assembly_for_export(
+    db: Database, part_id: int, *, build_qty: int = 1, default_markup: float = 1.30
+) -> dict | None:
+    """Like :func:`get_assembly` but enriched for the customer-facing xlsx export: each line also
+    carries manufacturer, description, the part's best supplier unit price (default supplier if
+    flagged, else the cheapest), and — priced at ``build_qty`` — the tiered customer SELL price
+    (``sell_unit`` per piece and ``sell_line`` per board). ``sell_total`` is the product's per-board
+    sell price at that volume. Used only by the export route."""
+    from ..catalog import pricing
     with db.connect() as conn:
         head = conn.execute(
             "SELECT * FROM parts WHERE id = ? AND kind = 'ASSY'", (part_id,)
@@ -120,8 +125,18 @@ def get_assembly_for_export(db: Database, part_id: int) -> dict | None:
                     if ln["child_kind"] == "ASSY" else ln["child_unit_cost"])
             ln["unit_cost"] = unit
             ln["line_cost"] = unit * (ln["qty_per"] or 0) if unit is not None else None
+            qty_per = ln["qty_per"] or 0
+            # Sell price of this child at the TOTAL quantity the build consumes (qty_per x volume).
+            sell_unit = pricing.rolled_sell_price(
+                conn, ln["child_id"], qty_per * build_qty, default_markup)
+            ln["sell_unit"] = sell_unit
+            ln["sell_line"] = sell_unit * qty_per if sell_unit is not None else None
         assembly["lines"] = lines
+        assembly["build_qty"] = build_qty
         assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
+        # The product's per-board sell total is the sum of its direct lines' sell contributions —
+        # each `sell_line` already rolled up its child's sub-tree, so no second full-BOM walk needed.
+        assembly["sell_total"] = sum(ln["sell_line"] for ln in lines if ln["sell_line"] is not None)
     return assembly
 
 

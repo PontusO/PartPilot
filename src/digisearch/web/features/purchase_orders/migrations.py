@@ -97,4 +97,15 @@ MIGRATIONS = [
         CREATE INDEX ix_podoc_po ON po_documents(po_id);
         """,
     ),
+    Migration(
+        version=4,
+        name="goods receipt line price",
+        sql="""
+        -- The per-piece price actually paid for this delivery line (copied from the PO line at
+        -- receipt), so each Goods Received Note is a dated record of what stock cost. Receiving also
+        -- overwrites the matching supplier offer's unit price with this value ("last purchase
+        -- price"); see purchase_orders.repo.receive_po.
+        ALTER TABLE goods_receipt_lines ADD COLUMN unit_price REAL;
+        """,
+    ),
 ]

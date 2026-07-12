@@ -95,6 +95,122 @@ def test_contacts_list_create_and_edit(app):
     assert "Acme Inc" in client.get("/contacts").text
 
 
+def test_refresh_cost_tiers_route_and_detail_section(app, monkeypatch):
+    from digisearch.models import Candidate
+    from digisearch.web.features.catalog import cost_refresh
+    from digisearch.web.features.catalog import repo as catrepo
+
+    pid = catrepo.create_part(app.state.database, part={"part_no": "RTX-1"}, supplier_lines=[
+        {"supplier_name": "Digi-Key", "supplier_pno": "RTX-1-ND", "unit_price": 0.1,
+         "reel_qty": 1, "is_default": True}])
+    cand = Candidate(supplier="Digi-Key", mpn="RTX-1", dk_part_number="RTX-1-ND",
+                     price_breaks=[(1, 0.08), (100, 0.04)])
+
+    class FakeDK:
+        def keyword_search(self, kw, limit=5):
+            return [cand]
+
+    monkeypatch.setattr(cost_refresh, "_build_clients", lambda: (FakeDK(), None))
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")  # purchasing -> can edit
+
+    r = client.post(f"/catalog/{pid}/refresh-cost-tiers")
+    assert r.status_code == 200 and "Updated" in r.text and "Digi-Key" in r.text
+
+    tiers = catrepo.get_part(app.state.database, pid)["suppliers"][0]["cost_tiers"]
+    assert sorted((t["break_qty"], t["unit_price"]) for t in tiers) == [(1, 0.08), (100, 0.04)]
+
+    # The read-only cost tiers now render on the part detail (view) page.
+    detail = client.get(f"/catalog/{pid}").text
+    assert "Supplier cost tiers" in detail and "0.08000" in detail
+
+
+def test_setup_pricing_markup_screen(app):
+    from digisearch.web.features.setup import repo as setup_repo
+
+    app.state.store.create_user("boss", "pw", role="admin")
+    client = TestClient(app)
+    _login(client, "boss", "pw")
+
+    page = client.get("/setup/pricing")
+    assert page.status_code == 200 and "Default sell markup" in page.text
+    assert 'value="1.3"' in page.text                      # unset -> default 1.30
+
+    r = client.post("/setup/pricing", data={"default_markup": "1.45"})
+    assert r.status_code == 200 and "Saved." in r.text
+    assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
+
+    # A markup of 0 (or negative) would zero all sell prices -> rejected, keeps the current value.
+    client.post("/setup/pricing", data={"default_markup": "0"})
+    assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
+
+    # a purchasing user cannot reach setup
+    other = TestClient(app)
+    _login(other, "buyer1", "pw")
+    assert other.get("/setup/pricing").status_code in (302, 303, 403)
+
+
+def test_per_part_markup_zero_is_clamped_to_none(app):
+    """A per-part markup of 0 (or negative) would zero the part's sell prices — the form clamps it to
+    None so it falls back to the Setup default."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    r = client.post("/catalog/new", data={"part_no": "MK-0", "markup": "1.5"},
+                    follow_redirects=False)
+    pid = int(r.headers["location"].rsplit("/", 1)[-1])
+    assert catrepo.get_part(app.state.database, pid)["markup"] == 1.5
+
+    client.post(f"/catalog/{pid}/edit", data={"part_no": "MK-0", "markup": "0"},
+                follow_redirects=False)
+    assert catrepo.get_part(app.state.database, pid)["markup"] is None   # 0 -> None, not stored
+
+
+def test_part_form_pricing_roundtrip_and_generate(app):
+    """Create a part with a markup + sell tiers via the form; edit preserves cost tiers; the
+    generate endpoint derives markup tiers from captured cost breaks."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")  # purchasing -> can edit
+
+    r = client.post("/catalog/new", data={
+        "part_no": "PRICED-1", "category": "RESISTOR", "markup": "1.5",
+        "sell_break_qty": ["1", "1000"], "sell_unit_price": ["0.50", "0.30"],
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    pid = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    part = catrepo.get_part(app.state.database, pid)
+    assert part["markup"] == 1.5
+    assert [(t["break_qty"], t["unit_price"], t["source"]) for t in part["sell_tiers"]] == \
+        [(1, 0.50, "manual"), (1000, 0.30, "manual")]
+
+    # Give it a captured cost tier, then generate markup tiers from it.
+    with app.state.database.connect() as conn:
+        ps_id = conn.execute("SELECT id FROM part_suppliers WHERE part_id = ?", (pid,)).fetchone()
+        # no supplier line was submitted; add one to hang a cost tier on
+        ps_id = conn.execute(
+            "INSERT INTO part_suppliers (part_id, supplier_id, price_per_uom, qty_per_uom, is_default)"
+            " VALUES (?, NULL, 0.2, 1, 1)", (pid,)).lastrowid
+        conn.execute("INSERT INTO part_supplier_tiers (part_supplier_id, break_qty, unit_price, kind)"
+                     " VALUES (?, 500, 0.20, 'cut')", (ps_id,))
+        conn.commit()
+
+    g = client.post(f"/catalog/{pid}/generate-sell-tiers", follow_redirects=False)
+    assert g.status_code == 303
+    sell = {t["break_qty"]: t["source"] for t in catrepo.get_part(app.state.database, pid)["sell_tiers"]}
+    assert sell.get(500) == "markup"          # generated at cost 0.20 x markup 1.5 = 0.30
+    assert sell.get(1) == "manual" and sell.get(1000) == "manual"   # manual tiers preserved
+
+    # The edit form renders with the markup and both cost + sell tier tables.
+    form = client.get(f"/catalog/{pid}/edit").text
+    assert 'value="1.5"' in form and "Sell price tiers" in form
+    assert "Captured supplier cost breaks" in form
+
+
 def test_supplier_contact_mirrors_into_catalog_suppliers(app):
     """A supplier added in Contacts must appear in the part-edit / PO supplier dropdown, which
     reads the catalog ``suppliers`` table (not ``contacts``)."""
@@ -292,6 +408,11 @@ def test_purchase_order_suggestions_and_receive(app):
     # receiving raised a Goods Received Note
     assert "/goods-receipts/" in rr.headers["location"]
     assert "GRN-" in client.get("/goods-receipts").text
+    # the GRN detail page shows the price paid and line value (15 x 1.0)
+    grn = client.get(rr.headers["location"]).text
+    assert "Unit price" in grn and "Line value" in grn and "15.00" in grn
+    # and the offer now carries that price as its "last purchase price"
+    assert catrepo.get_part(db, p)["suppliers"][0]["unit_price"] == pytest.approx(1.0)
 
 
 def test_po_export_downloads(app):
@@ -569,15 +690,15 @@ def test_customer_orders_flow(app):
     assert r.status_code == 303
     oid = int(r.headers["location"].rsplit("/", 1)[1])
 
-    # add a line — price omitted, defaults to the part's cost (2.0), qty 10
+    # add a line — price omitted, defaults to the tiered sell price = cost 2.0 x markup 1.30, qty 10
     client.post(f"/customer-orders/{oid}/lines/add", data={"part_id": part, "qty": "10"},
                 follow_redirects=False)
     page = client.get(f"/customer-orders/{oid}").text
     assert "WIDGET-1" in page and "SO-9" in page
 
     order = corepo.get_order(db, oid)
-    assert order["lines"][0]["unit_price"] == 2.0
-    assert abs(order["grand_total"] - 25.0) < 1e-9  # 10*2 + 25% tax
+    assert order["lines"][0]["unit_price"] == pytest.approx(2.6)
+    assert abs(order["grand_total"] - 32.5) < 1e-9  # 10*2.6 + 25% tax
 
     lid = order["lines"][0]["id"]
     client.post(f"/customer-orders/{oid}/lines/{lid}/update",

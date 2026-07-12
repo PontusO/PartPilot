@@ -53,6 +53,9 @@ TOOLS = [
     {"label": "Order settings", "url": "/setup/orders", "icon": "🧾",
      "description": "How customer orders behave — e.g. whether acknowledging an order also "
                     "confirms it."},
+    {"label": "Pricing settings", "url": "/setup/pricing", "icon": "💰",
+     "description": "The default sell markup applied to a part's cost when it has no explicit sell "
+                    "tiers and no per-part markup override."},
     {"label": "Users", "url": "/setup/users", "icon": "👤",
      "description": "Add people, set the group (role) they belong to, reset passwords and "
                     "deactivate accounts that should no longer log in."},
@@ -257,6 +260,26 @@ async def save_orders(request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "orders.html",
         {"orders": repo.get_orders(request.app.state.database), "saved": True},
+    )
+
+
+@router.get("/pricing", response_class=HTMLResponse)
+def pricing_page(request: Request):
+    require_role(request, SETUP_ROLES)
+    return request.app.state.templates.TemplateResponse(
+        request, "pricing.html",
+        {"pricing": repo.get_pricing(request.app.state.database), "saved": False},
+    )
+
+
+@router.post("/pricing", response_class=HTMLResponse)
+async def save_pricing(request: Request):
+    require_role(request, SETUP_ROLES)
+    form = await request.form()
+    repo.save_pricing(request.app.state.database, {"default_markup": form.get("default_markup")})
+    return request.app.state.templates.TemplateResponse(
+        request, "pricing.html",
+        {"pricing": repo.get_pricing(request.app.state.database), "saved": True},
     )
 
 

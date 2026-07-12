@@ -12,17 +12,26 @@
   <h2 style="font-size:1.05rem; margin-top:1.2rem;">Received lines</h2>
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Part</th><th>Value</th><th class="num">Qty received</th></tr></thead>
+      <thead><tr><th>Part</th><th>Value</th><th class="num">Qty received</th>
+          <th class="num">Unit price</th><th class="num">Line value</th></tr></thead>
       <tbody>
         {% for ln in g.lines %}
         <tr>
           <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}—{% endif %}</td>
           <td>{{ ln.value or '' }}</td>
           <td class="num">{{ "%g"|format(ln.qty) }}</td>
+          <td class="num">{% if ln.unit_price is not none %}{{ "%.4f"|format(ln.unit_price) }}{% endif %}</td>
+          <td class="num">{% if ln.line_value is not none %}{{ "%.2f"|format(ln.line_value) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        {% if not g.lines %}<tr><td colspan="3" class="note">No lines.</td></tr>{% endif %}
+        {% if not g.lines %}<tr><td colspan="5" class="note">No lines.</td></tr>{% endif %}
       </tbody>
+      {% if g.total_value %}
+      <tfoot>
+        <tr><td colspan="4" class="num" style="font-weight:600;">Total value</td>
+            <td class="num" style="font-weight:600;">{{ "%.2f"|format(g.total_value) }}</td></tr>
+      </tfoot>
+      {% endif %}
     </table>
   </div>
 </div>

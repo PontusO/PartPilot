@@ -40,11 +40,14 @@ def get_receipt(db: Database, grn_id: int) -> dict | None:
         if head is None:
             return None
         lines = [dict(r) for r in conn.execute(
-            """SELECT l.id, l.qty, l.part_id, pt.part_no, pt.value
+            """SELECT l.id, l.qty, l.unit_price, l.part_id, pt.part_no, pt.value
                FROM goods_receipt_lines l LEFT JOIN parts pt ON pt.id = l.part_id
                WHERE l.grn_id = ? ORDER BY l.id""",
             (grn_id,),
         )]
+    for ln in lines:
+        ln["line_value"] = (ln["qty"] or 0) * (ln["unit_price"] or 0) if ln["unit_price"] is not None else None
     g = dict(head)
     g["lines"] = lines
+    g["total_value"] = sum(ln["line_value"] for ln in lines if ln["line_value"] is not None)
     return g

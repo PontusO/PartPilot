@@ -36,6 +36,10 @@ def _get(lst: list, i: int):
     return lst[i] if i < len(lst) else None
 
 
+def _positive_or_none(v: float | None) -> float | None:
+    return v if (v is not None and v > 0) else None
+
+
 # ---- shared form parsing / rendering (new + edit) ----
 
 def _parse_part(form) -> dict:
@@ -51,7 +55,24 @@ def _parse_part(form) -> dict:
         "notes": (form.get("notes") or "").strip() or None,
         "unlimited_stock": 1 if form.get("unlimited_stock") else 0,
         "normally_stocked": 1 if form.get("normally_stocked") else 0,
+        # A per-part markup must be > 0 (0/negative would zero the part's sell prices); blank/invalid
+        # -> None, which falls back to the Setup default.
+        "markup": _positive_or_none(_num(form.get("markup"))),
     }
+
+
+def _parse_sell_tiers(form) -> list[dict]:
+    """Customer sell tiers from the flat repeating-row editor: parallel break-qty / unit-price
+    lists. Rows missing either field are dropped."""
+    qtys = form.getlist("sell_break_qty")
+    prices = form.getlist("sell_unit_price")
+    tiers = []
+    for i in range(max(len(qtys), len(prices))):
+        bq, up = _num(_get(qtys, i)), _num(_get(prices, i))
+        if bq is None or up is None:
+            continue
+        tiers.append({"break_qty": bq, "unit_price": up})
+    return tiers
 
 
 def _supplier_map(db) -> dict[int, str]:
@@ -106,7 +127,9 @@ def _parse_stock(form) -> dict:
 
 def _render_form(request: Request, *, action: str, heading: str, submit_label: str,
                  stock_heading: str, back_url: str, values: dict, supplier_rows: list[dict],
-                 stock: dict, error: str | None = None):
+                 stock: dict, sell_tier_rows: list[dict] | None = None,
+                 part_id: int | None = None, error: str | None = None,
+                 notice: str | None = None):
     db = request.app.state.database
     templates = request.app.state.templates
     if supplier_rows and not any(r.get("is_default") for r in supplier_rows):
@@ -118,11 +141,34 @@ def _render_form(request: Request, *, action: str, heading: str, submit_label: s
             "action": action, "heading": heading, "submit_label": submit_label,
             "stock_heading": stock_heading, "back_url": back_url,
             "values": values or {}, "supplier_rows": supplier_rows or [{"is_default": True}],
-            "stock": stock or {}, "error": error,
+            "stock": stock or {}, "error": error, "notice": notice,
+            "sell_tier_rows": sell_tier_rows or [], "part_id": part_id,
             "categories": repo.categories(db), "suppliers": repo.suppliers(db),
             "locations": repo.locations(db),
         },
         status_code=400 if error else 200,
+    )
+
+
+def _render_edit_form(request: Request, part: dict, *, notice: str | None = None):
+    """Render the edit form for an already-loaded part (shared by the GET edit page and the
+    post-action re-renders like cost-tier refresh)."""
+    part_id = part["id"]
+    supplier_rows = [
+        {"supplier_id": s["supplier_id"], "supplier_name": s["supplier_name"],
+         "supplier_pno": s["supplier_pno"], "unit_price": s["unit_price"],
+         "reel_qty": s["qty_per_uom"], "moq": s["moq"], "lead_time": s["lead_time"],
+         "is_default": bool(s["is_default"]), "cost_tiers": s.get("cost_tiers") or []}
+        for s in part["suppliers"]
+    ]
+    st = part["stock"][0] if part["stock"] else {}
+    stock = {"qty": st.get("on_hand"), "location_id": st.get("location_id"), "bin": st.get("bin")}
+    return _render_form(
+        request, action=f"/catalog/{part_id}/edit", heading=f"Edit — {part['part_no']}",
+        submit_label="Save changes", stock_heading="Stock on hand",
+        back_url=f"/catalog/{part_id}", values=part,
+        supplier_rows=supplier_rows or [{"is_default": True}], stock=stock,
+        sell_tier_rows=part.get("sell_tiers") or [], part_id=part_id, notice=notice,
     )
 
 
@@ -186,13 +232,14 @@ async def create(request: Request):
     db = request.app.state.database
     form = await request.form()
     part = _parse_part(form)
+    part["sell_tiers"] = _parse_sell_tiers(form)
     lines = _parse_supplier_lines(form, _supplier_map(db))
     if not part["part_no"]:
         return _render_form(
             request, action="/catalog/new", heading="Add component", submit_label="Save component",
             stock_heading="Opening stock", back_url="/catalog", values=dict(form),
             supplier_rows=lines or [{"is_default": True}], stock=_parse_stock(form),
-            error="Part number is required.",
+            sell_tier_rows=part["sell_tiers"], error="Part number is required.",
         )
     part_id = repo.create_part(db, part=part, supplier_lines=lines, opening=_parse_stock(form))
     return RedirectResponse(f"/catalog/{part_id}", status_code=303)
@@ -210,21 +257,7 @@ def edit_form(request: Request, part_id: int):
         return templates.TemplateResponse(
             request, "error.html", {"message": "Part not found."}, status_code=404
         )
-    supplier_rows = [
-        {"supplier_id": s["supplier_id"], "supplier_name": s["supplier_name"],
-         "supplier_pno": s["supplier_pno"], "unit_price": s["unit_price"],
-         "reel_qty": s["qty_per_uom"], "moq": s["moq"], "lead_time": s["lead_time"],
-         "is_default": bool(s["is_default"])}
-        for s in part["suppliers"]
-    ]
-    st = part["stock"][0] if part["stock"] else {}
-    stock = {"qty": st.get("on_hand"), "location_id": st.get("location_id"), "bin": st.get("bin")}
-    return _render_form(
-        request, action=f"/catalog/{part_id}/edit", heading=f"Edit — {part['part_no']}",
-        submit_label="Save changes", stock_heading="Stock on hand",
-        back_url=f"/catalog/{part_id}", values=part,
-        supplier_rows=supplier_rows or [{"is_default": True}], stock=stock,
-    )
+    return _render_edit_form(request, part)
 
 
 @router.post("/{part_id}/edit", response_class=HTMLResponse)
@@ -238,6 +271,7 @@ async def edit(request: Request, part_id: int):
         )
     form = await request.form()
     part = _parse_part(form)
+    sell_tiers = _parse_sell_tiers(form)
     lines = _parse_supplier_lines(form, _supplier_map(db))
     if not part["part_no"]:
         return _render_form(
@@ -245,10 +279,52 @@ async def edit(request: Request, part_id: int):
             submit_label="Save changes", stock_heading="Stock on hand",
             back_url=f"/catalog/{part_id}", values=dict(form),
             supplier_rows=lines or [{"is_default": True}], stock=_parse_stock(form),
-            error="Part number is required.",
+            sell_tier_rows=sell_tiers, part_id=part_id, error="Part number is required.",
         )
     repo.update_part(db, part_id, part=part, supplier_lines=lines, stock=_parse_stock(form))
+    repo.replace_sell_tiers(db, part_id, sell_tiers)
     return RedirectResponse(f"/catalog/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/generate-sell-tiers", response_class=HTMLResponse)
+async def generate_sell_tiers(request: Request, part_id: int):
+    """Generate customer sell tiers from the default supplier's captured cost breaks x markup
+    (per-part markup if set, else the Setup default). Manual tiers are preserved. Uses the *saved*
+    markup — save a changed markup before generating."""
+    require_role(request, CATALOG_WRITE_ROLES)
+    from ..setup import repo as setup_repo
+
+    db = request.app.state.database
+    if repo.get_part(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Part not found."}, status_code=404)
+    repo.generate_sell_tiers_from_cost(db, part_id, setup_repo.get_default_markup(db))
+    return RedirectResponse(f"/catalog/{part_id}/edit", status_code=303)
+
+
+@router.post("/{part_id}/refresh-cost-tiers", response_class=HTMLResponse)
+def refresh_cost_tiers(request: Request, part_id: int):
+    """Re-query Digi-Key/Mouser for each of the part's distributor offers and overwrite their cost
+    tiers with the current price breaks. A sync handler so FastAPI runs the (blocking) HTTP calls in
+    a worker thread. Re-renders the edit form with a per-offer result summary."""
+    require_role(request, CATALOG_WRITE_ROLES)
+    from . import cost_refresh
+
+    db = request.app.state.database
+    if repo.get_part(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Part not found."}, status_code=404)
+    result = cost_refresh.refresh_cost_tiers(db, part_id)
+    parts = []
+    if result["updated"]:
+        parts.append("Updated — " + "; ".join(result["updated"]))
+    if result["skipped"]:
+        parts.append("Skipped — " + "; ".join(result["skipped"]))
+    if result["errors"]:
+        parts.append("Errors — " + "; ".join(result["errors"]))
+    notice = " • ".join(parts) or "No Digi-Key or Mouser offers to refresh."
+    # Reload so the freshly written tiers show, then render with the summary.
+    return _render_edit_form(request, repo.get_part(db, part_id), notice=notice)
 
 
 # ---- detail ----

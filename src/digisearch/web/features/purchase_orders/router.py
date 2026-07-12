@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from ...core.deps import require_role, require_user
 from . import export, repo
@@ -66,7 +67,9 @@ async def suggestions_apply(request: Request):
         qty = _num(form.get(f"qty_{part_id}"))
         if qty and qty > 0:
             selections[part_id] = qty
-    repo.create_pos_from_suggestions(request.app.state.database, selections, user.username)
+    # May query Digi-Key/Mouser to tier-price each line — run off the event loop.
+    await run_in_threadpool(
+        repo.create_pos_from_suggestions, request.app.state.database, selections, user.username)
     return RedirectResponse("/purchase-orders", status_code=303)
 
 
@@ -169,8 +172,10 @@ async def add_line(request: Request, po_id: int):
     if not part_id:
         return _render_detail(request, po_id, user, error="Choose a part to add.", status=400)
     try:
-        repo.add_line(request.app.state.database, po_id, part_id,
-                      _num(form.get("qty")) or 1, _num(form.get("unit_price")))
+        # A distributor-sourced line with no explicit price is tier-priced via a live lookup.
+        await run_in_threadpool(
+            repo.add_line, request.app.state.database, po_id, part_id,
+            _num(form.get("qty")) or 1, _num(form.get("unit_price")))
     except ValueError as exc:
         return _render_detail(request, po_id, user, error=str(exc), status=400)
     return RedirectResponse(f"/purchase-orders/{po_id}", status_code=303)

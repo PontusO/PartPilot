@@ -205,13 +205,16 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
         conn.commit()
     repo.add_bom_line(db, asm, p1, 3, "R1, R2")
 
-    a = repo.get_assembly_for_export(db, asm)
+    a = repo.get_assembly_for_export(db, asm, default_markup=1.30)
     ln = a["lines"][0]
     assert ln["child_mfr_name"] == "ACME" and ln["child_mfr_pno"] == "ACME-1"
     assert ln["child_description"] == "A resistor"
     assert ln["child_supplier_price"] == 0.5
     assert ln["unit_cost"] == 0.5 and ln["line_cost"] == 1.5
     assert a["total_cost"] == 1.5
+    # No sell tiers -> sell = cost x default markup (0.5 * 1.30), line = x qty_per (3)
+    assert ln["sell_unit"] == pytest.approx(0.65) and ln["sell_line"] == pytest.approx(1.95)
+    assert a["sell_total"] == pytest.approx(1.95) and a["build_qty"] == 1
 
     # The workbook builds and round-trips through openpyxl with the header + total row.
     from io import BytesIO
@@ -220,12 +223,37 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
     wb = load_workbook(BytesIO(export_xlsx.workbook_bytes(a)))
     ws = wb["BOM"]
     assert ws["A1"].value == "EXP-ASM  rev B"
+    assert ws["A4"].value == "Build volume: 1"
     header = [c.value for c in ws[5]]
     assert header[:3] == ["#", "Qty/board", "Part #"]
+    assert "Sell/unit" in header and "Sell line" in header
     # data row 6, then total row 7
     row6 = {c.value for c in ws[6]}
     assert "P1" in row6 and "ACME" in row6 and 1.5 in row6
-    assert ws.cell(row=7, column=len(export_xlsx.COLUMNS)).value == 1.5  # Total = line cost sum
+    col_of = {key: i for i, (_n, key, _m) in enumerate(export_xlsx.COLUMNS, start=1)}
+    assert ws.cell(row=7, column=col_of["line_cost"]).value == 1.5    # Total cost
+    assert ws.cell(row=7, column=col_of["sell_line"]).value == pytest.approx(1.95)  # Total sell
+
+
+def test_export_sell_price_is_volume_aware(db):
+    """A component with sell tiers is priced at the tier its (qty_per x build volume) reaches."""
+    from digisearch.web.features.catalog import repo as catrepo
+
+    asm = repo.create_assembly(db, {"part_no": "VOL-ASM"})
+    leaf = _component(db, "LEAF", 1.0)
+    catrepo.replace_sell_tiers(db, leaf, [{"break_qty": 1, "unit_price": 2.0},
+                                          {"break_qty": 1000, "unit_price": 1.0}])
+    repo.add_bom_line(db, asm, leaf, 5, "R1")   # 5 of the leaf per board
+
+    # Build 1 -> 5 leaves -> below the 1000 break -> unit sell 2.0; line = 2.0*5
+    a1 = repo.get_assembly_for_export(db, asm, build_qty=1)
+    assert a1["lines"][0]["sell_unit"] == pytest.approx(2.0)
+    assert a1["sell_total"] == pytest.approx(10.0)
+
+    # Build 200 -> 1000 leaves -> hits the 1000 break -> unit sell 1.0; line = 1.0*5
+    a2 = repo.get_assembly_for_export(db, asm, build_qty=200)
+    assert a2["lines"][0]["sell_unit"] == pytest.approx(1.0)
+    assert a2["sell_total"] == pytest.approx(5.0) and a2["build_qty"] == 200
 
 
 def test_export_returns_none_for_missing_assembly(db):
@@ -361,6 +389,36 @@ def test_apply_import_plan_creates_and_links(db):
     childs = {ln["child_part_no"] for ln in repo.get_assembly(db, asm)["lines"]}
     assert childs == {"EXIST-MPN", "NEW-1", "WEIRD"}  # SKIP-NEW left out
     assert catrepo.find_part_id_by_mpn(db, "NEW-1") is not None  # created in catalog
+
+
+def test_import_captures_supplier_cost_tiers(db):
+    """A resolved new part's Digi-Key price breaks become auto-captured cost tiers on create."""
+    from digisearch.models import Candidate
+    from digisearch.web.features.assemblies import import_bom
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.purchasing.service import ResolvedRun
+
+    cand = Candidate(supplier="Digi-Key", mpn="BRK-1", dk_part_number="BRK-1-ND",
+                     unit_price=0.10, reel_qty=5000,
+                     price_breaks=[(1, 0.10), (100, 0.06), (1000, 0.03)],
+                     reel_price_breaks=[(5000, 0.02)])
+    run = ResolvedRun(
+        resolved=[_rline("R1", 2, "10k", chosen=cand)],
+        build_qty=1, currency="SEK", stock_checked=False, mouser_enabled=False,
+    )
+    asm = repo.create_assembly(db, {"part_no": "ASM-BRK"})
+    plan = import_bom.build_import_plan(db, run)
+    assert plan[0]["cost_tiers"] == [{"break_qty": 1, "unit_price": 0.10},
+                                     {"break_qty": 100, "unit_price": 0.06},
+                                     {"break_qty": 1000, "unit_price": 0.03}]
+    import_bom.apply_import_plan(db, asm, plan, accepted={0})
+
+    pid = catrepo.find_part_id_by_mpn(db, "BRK-1")
+    tiers = catrepo.get_part(db, pid)["suppliers"][0]["cost_tiers"]
+    cut = [(t["break_qty"], t["unit_price"]) for t in tiers if t["kind"] == "cut"]
+    reel = [(t["break_qty"], t["unit_price"]) for t in tiers if t["kind"] == "reel"]
+    assert cut == [(1, 0.10), (100, 0.06), (1000, 0.03)]
+    assert reel == [(5000, 0.02)]
 
 
 def test_convert_to_component_reclassifies_empty_assembly(db):

@@ -61,6 +61,54 @@
     </tbody>
   </table>
 
+  {% set cost_suppliers = part.suppliers | selectattr('cost_tiers') | list %}
+  {% if cost_suppliers %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Supplier cost tiers</h2>
+  <p class="note">Quantity-break costs captured from the distributor (per piece). These feed the
+    sell price when a part has no explicit sell tiers.</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Supplier</th><th>Supplier P/N</th><th>Packaging</th>
+            <th class="num">Break qty</th><th class="num">Unit cost (SEK)</th></tr>
+      </thead>
+      <tbody>
+        {% for s in cost_suppliers %}{% for t in s.cost_tiers %}
+        <tr>
+          <td>{{ s.supplier_name or '' }}</td>
+          <td>{{ s.supplier_pno or '' }}</td>
+          <td>{{ 'Full reel' if t.kind == 'reel' else 'Cut tape' }}</td>
+          <td class="num">{{ "%g"|format(t.break_qty) }}</td>
+          <td class="num">{{ "%.5f"|format(t.unit_price) }}</td>
+        </tr>
+        {% endfor %}{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if part.sell_tiers %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Customer sell tiers</h2>
+  <p class="note">Quantity-break sell prices (per piece). <b>Generated</b> tiers are recomputed from
+    the purchase cost × markup; <b>manual</b> tiers are set by hand and win at their break qty.</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th class="num">Break qty</th><th class="num">Unit price (SEK)</th><th>Source</th></tr>
+      </thead>
+      <tbody>
+        {% for t in part.sell_tiers %}
+        <tr>
+          <td class="num">{{ "%g"|format(t.break_qty) }}</td>
+          <td class="num">{{ "%.4f"|format(t.unit_price) }}</td>
+          <td>{{ 'Manual' if t.source == 'manual' else 'Generated' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock by location</h2>
   <table>
     <thead>

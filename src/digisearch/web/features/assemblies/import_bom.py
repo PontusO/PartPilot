@@ -82,6 +82,9 @@ def build_import_plan(db: Database, run: ResolvedRun) -> list[dict]:
                 category=_category(ln), mfr_name=c.manufacturer, mfr_pno=c.mpn,
                 supplier_name=c.supplier, supplier_pno=c.dk_part_number, unit_cost=c.unit_price,
                 reel_qty=c.reel_qty or 1,
+                # Auto-captured supplier cost breaks (per-piece) -> cost tiers on the created part.
+                cost_tiers=[{"break_qty": bq, "unit_price": p} for bq, p in c.price_breaks],
+                reel_tiers=[{"break_qty": bq, "unit_price": p} for bq, p in c.reel_price_breaks],
                 supplier_label=f"{c.supplier or ''} {c.dk_part_number or ''}".strip(),
             )
         else:
@@ -108,6 +111,8 @@ def _create_part(db: Database, item: dict) -> int:
             "supplier_name": item["supplier_name"], "supplier_pno": item.get("supplier_pno"),
             "unit_price": item.get("unit_cost"), "reel_qty": item.get("reel_qty") or 1,
             "is_default": True,
+            "cost_tiers": item.get("cost_tiers") or [],
+            "reel_tiers": item.get("reel_tiers") or [],
         }]
     return catalog_repo.create_part(db, part=part, supplier_lines=supplier_lines, opening=None)
 

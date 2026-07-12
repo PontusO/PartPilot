@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Pricing settings · PartPilot{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:560px;">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Pricing settings</h1>
+  {% if saved %}<div style="background:rgba(70,180,120,.15); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">Saved.</div>{% endif %}
+
+  <form method="post" action="/setup/pricing">
+    <label for="default_markup">Default sell markup (× cost)</label>
+    <input id="default_markup" name="default_markup" type="number" step="any" min="0"
+           value="{{ '%g'|format(pricing.default_markup) }}" style="max-width:180px;">
+    <p class="note" style="margin-top:.6rem;">Multiplier applied to a part's cost to derive its
+      customer sell price when the part has no explicit sell tiers and no per-part markup override.
+      For example <b>1.30</b> means cost + 30 %. Used by the "Generate sell tiers from cost × markup"
+      button on a part, the assembly BOM sell export, and the automatic price on a customer-order line.
+      A part's own markup (on its edit page) always wins over this default.</p>
+    <div style="margin-top:1rem;"><button type="submit">Save</button></div>
+  </form>
+</div>
+{% endblock %}

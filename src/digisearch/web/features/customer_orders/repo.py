@@ -11,6 +11,8 @@ import re
 
 from ...core import ref_no
 from ...core.db import Database
+from ..catalog import pricing
+from ..setup import repo as setup_repo
 from . import export
 
 STATUSES = ("draft", "confirmed", "shipped", "complete", "cancelled")
@@ -128,6 +130,7 @@ def _with_totals(order: dict, lines: list[dict]) -> dict:
 
 
 def get_order(db: Database, order_id: int) -> dict | None:
+    markup = setup_repo.get_default_markup(db)
     with db.connect() as conn:
         head = conn.execute(
             """SELECT o.*, c.name AS customer_name, c.short_name AS customer_short,
@@ -144,7 +147,7 @@ def get_order(db: Database, order_id: int) -> dict | None:
             return None
         lines = [dict(r) for r in conn.execute(
             """SELECT l.id, l.line_no, l.ordered_qty, l.unit_price, l.discount_percent,
-                      l.shipped_qty, l.notes,
+                      l.shipped_qty, l.notes, l.price_overridden,
                       p.id AS part_id, p.part_no, p.value, p.kind, p.unit_cost,
                       (SELECT COALESCE(SUM(a.qty), 0) FROM allocations a
                        WHERE a.customer_order_line_id = l.id) AS allocated
@@ -153,6 +156,19 @@ def get_order(db: Database, order_id: int) -> dict | None:
                ORDER BY COALESCE(l.line_no, 1e9), l.id""",
             (order_id,),
         )]
+        # The auto (tiered) sell price is only shown for non-overridden lines (as the "auto" price
+        # hint). Skip the (recursive BOM) rollup for overridden lines, and memoise by (part, qty) so
+        # repeated products cost one rollup, not one per line.
+        sell_cache: dict = {}
+        for ln in lines:
+            ln["price_overridden"] = bool(ln["price_overridden"])
+            if ln["price_overridden"] or not ln["part_id"]:
+                ln["sell_price"] = None
+                continue
+            key = (ln["part_id"], ln["ordered_qty"] or 1)
+            if key not in sell_cache:
+                sell_cache[key] = _sell_price_at(conn, ln["part_id"], ln["ordered_qty"] or 1, markup)
+            ln["sell_price"] = sell_cache[key]
         delivery = invoice = None
         if head["delivery_address_id"]:
             r = conn.execute("SELECT * FROM contact_addresses WHERE id = ?",
@@ -229,36 +245,85 @@ def update_order(db: Database, order_id: int, data: dict) -> None:
 
 # ---- order lines ----
 
+def _sell_price_at(conn, part_id: int | None, qty: float, default_markup: float) -> float | None:
+    """The tiered customer SELL price for a product at the ordered quantity (volume-aware BOM
+    rollup for an assembly). None when the part carries no price/cost info."""
+    if not part_id:
+        return None
+    return pricing.rolled_sell_price(conn, part_id, qty or 1, default_markup)
+
+
 def add_line(db: Database, order_id: int, part_id: int | None, qty: float,
              unit_price: float | None, discount: float | None) -> None:
+    markup = setup_repo.get_default_markup(db)
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM customer_orders WHERE id = ?", (order_id,)).fetchone() is None:
             raise ValueError("Order not found.")
+        overridden = 0
         if part_id is not None:
             if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
                 raise ValueError("Selected product was not found.")
-            if unit_price is None:   # default to the computed price (rolled cost for an assembly)
-                unit_price = _all_prices(conn).get(part_id)
+            if unit_price is None:   # default to the tiered sell price at the ordered volume
+                unit_price = _sell_price_at(conn, part_id, qty or 1, markup)
+            else:
+                overridden = 1       # operator typed a price -> don't auto-reprice it later
+        elif unit_price is not None:
+            overridden = 1
         next_no = conn.execute(
             "SELECT COALESCE(MAX(line_no), 0) + 1 FROM customer_order_lines WHERE order_id = ?",
             (order_id,),
         ).fetchone()[0]
         conn.execute(
             "INSERT INTO customer_order_lines "
-            "(order_id, part_id, line_no, ordered_qty, unit_price, discount_percent) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (order_id, part_id, next_no, qty or 1, unit_price, discount),
+            "(order_id, part_id, line_no, ordered_qty, unit_price, discount_percent, price_overridden) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, part_id, next_no, qty or 1, unit_price, discount, overridden),
         )
         conn.commit()
 
 
 def update_line(db: Database, order_id: int, line_id: int, qty: float,
                 unit_price: float | None, discount: float | None) -> None:
+    """Save a line edit. A submitted ``unit_price`` is treated as an explicit override (and pins the
+    price against future re-pricing); a blank price means "auto" and re-prices from the tiers at the
+    new quantity."""
+    markup = setup_repo.get_default_markup(db)
     with db.connect() as conn:
+        row = conn.execute(
+            "SELECT part_id FROM customer_order_lines WHERE id = ? AND order_id = ?",
+            (line_id, order_id),
+        ).fetchone()
+        if row is None:
+            return
+        if unit_price is not None:
+            price, overridden = unit_price, 1
+        else:                              # blank -> auto (re-price at the new qty)
+            price = _sell_price_at(conn, row["part_id"], qty or 1, markup)
+            overridden = 0
         conn.execute(
-            "UPDATE customer_order_lines SET ordered_qty = ?, unit_price = ?, discount_percent = ? "
+            "UPDATE customer_order_lines SET ordered_qty = ?, unit_price = ?, discount_percent = ?, "
+            "price_overridden = ? WHERE id = ? AND order_id = ?",
+            (qty or 0, price, discount, overridden, line_id, order_id),
+        )
+        conn.commit()
+
+
+def reprice_line(db: Database, order_id: int, line_id: int) -> None:
+    """Recompute a line's unit price from the current tiers at its ordered quantity and clear the
+    manual-override flag."""
+    markup = setup_repo.get_default_markup(db)
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT part_id, ordered_qty FROM customer_order_lines WHERE id = ? AND order_id = ?",
+            (line_id, order_id),
+        ).fetchone()
+        if row is None or not row["part_id"]:
+            return
+        price = _sell_price_at(conn, row["part_id"], row["ordered_qty"] or 1, markup)
+        conn.execute(
+            "UPDATE customer_order_lines SET unit_price = ?, price_overridden = 0 "
             "WHERE id = ? AND order_id = ?",
-            (qty or 0, unit_price, discount, line_id, order_id),
+            (price, line_id, order_id),
         )
         conn.commit()
 

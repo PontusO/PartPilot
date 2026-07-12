@@ -303,4 +303,40 @@ MIGRATIONS = [
         # after this one and after `bom_lines` exists.
         sql="ALTER TABLE parts ADD COLUMN normally_stocked INTEGER NOT NULL DEFAULT 0;",
     ),
+    Migration(
+        version=14,
+        name="tiered pricing (cost + sell breaks)",
+        # Quantity-break pricing. Two flavours:
+        #  - part_supplier_tiers: COST breaks per supplier offer, auto-captured from Digi-Key/Mouser
+        #    (kind 'cut' = cut-tape, 'reel' = full-reel). Hang off part_suppliers.id and CASCADE with
+        #    it, so the part-edit save must PRESERVE that id (reconcile, not delete+recreate) or these
+        #    are silently lost.
+        #  - part_price_tiers: customer SELL price per component-quantity break, set by us (source
+        #    'manual') or generated from cost x markup (source 'markup').
+        # parts.markup is an optional per-part multiplier; NULL falls back to the app_settings
+        # `pricing.default_markup`. Single-currency (SEK) in v1 — no FX.
+        sql="""
+        CREATE TABLE part_supplier_tiers (
+            id               INTEGER PRIMARY KEY,
+            part_supplier_id INTEGER NOT NULL REFERENCES part_suppliers(id) ON DELETE CASCADE,
+            break_qty        REAL NOT NULL,
+            unit_price       REAL NOT NULL,          -- per-piece, supplier currency
+            kind             TEXT NOT NULL DEFAULT 'cut',   -- 'cut' | 'reel'
+            UNIQUE (part_supplier_id, kind, break_qty)
+        );
+        CREATE INDEX ix_supplier_tiers_ps ON part_supplier_tiers(part_supplier_id);
+
+        CREATE TABLE part_price_tiers (
+            id         INTEGER PRIMARY KEY,
+            part_id    INTEGER NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
+            break_qty  REAL NOT NULL,
+            unit_price REAL NOT NULL,
+            source     TEXT NOT NULL DEFAULT 'manual',   -- 'manual' | 'markup'
+            UNIQUE (part_id, break_qty)
+        );
+        CREATE INDEX ix_price_tiers_part ON part_price_tiers(part_id);
+
+        ALTER TABLE parts ADD COLUMN markup REAL;
+        """,
+    ),
 ]

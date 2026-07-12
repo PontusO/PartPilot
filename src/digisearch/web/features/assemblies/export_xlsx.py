@@ -26,8 +26,12 @@ COLUMNS = [
     ("Supplier price", "child_supplier_price", True),
     ("Unit cost", "unit_cost", True),
     ("Line cost", "line_cost", True),
+    ("Sell/unit", "sell_unit", True),
+    ("Sell line", "sell_line", True),
     ("Reference designators", "refdes", False),
 ]
+# The two total-bearing columns (cost and sell) get a totals row at the bottom.
+_TOTAL_COLS = [("line_cost", "total_cost"), ("sell_line", "sell_total")]
 
 _HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 _TOTAL_FILL = PatternFill("solid", fgColor="DDEBF7")
@@ -51,6 +55,8 @@ def build_workbook(assembly: dict, currency: str = "SEK") -> Workbook:
     if subtitle:
         ws.cell(row=2, column=1, value=subtitle).font = Font(italic=True)
     ws.cell(row=3, column=1, value=f"BOM lines: {len(assembly['lines'])}").font = Font(bold=True)
+    ws.cell(row=4, column=1,
+            value=f"Build volume: {assembly.get('build_qty', 1)}").font = Font(bold=True)
 
     # --- table header ---
     header_row = 5
@@ -74,14 +80,17 @@ def build_workbook(assembly: dict, currency: str = "SEK") -> Workbook:
             ws.cell(row=r, column=col).number_format = money_fmt
         r += 1
 
-    # --- total row ---
-    line_col = len(COLUMNS)  # "Line cost" is the last money column
-    label_cell = ws.cell(row=r, column=line_col - 1, value="Total")
+    # --- total row (a total under each of the cost and sell columns) ---
+    col_of = {key: i for i, (_n, key, _m) in enumerate(COLUMNS, start=1)}
+    first_total_col = min(col_of[k] for k, _ in _TOTAL_COLS)
+    label_cell = ws.cell(row=r, column=first_total_col - 1, value="Total")
     label_cell.font = Font(bold=True)
     label_cell.alignment = Alignment(horizontal="right")
-    total_cell = ws.cell(row=r, column=line_col, value=round(assembly.get("total_cost") or 0.0, 4))
-    total_cell.font = Font(bold=True)
-    total_cell.number_format = money_fmt
+    for line_key, total_key in _TOTAL_COLS:
+        cell = ws.cell(row=r, column=col_of[line_key],
+                       value=round(assembly.get(total_key) or 0.0, 4))
+        cell.font = Font(bold=True)
+        cell.number_format = money_fmt
     for col in range(1, len(COLUMNS) + 1):
         ws.cell(row=r, column=col).fill = _TOTAL_FILL
 

@@ -164,7 +164,13 @@
           <td>{{ ln.value or '' }}</td>
           {% if can_edit %}
           <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="qty" type="number" step="any" min="0" value="{{ '%g'|format(ln.ordered_qty) }}"></td>
-          <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="unit_price" type="number" step="any" value="{{ ('%g'|format(ln.unit_price)) if ln.unit_price is not none else '' }}"></td>
+          <td class="num" style="white-space:nowrap;">
+            <input class="lineinput" form="lf{{ ln.id }}" name="unit_price" type="number" step="any"
+                   value="{{ ('%g'|format(ln.unit_price)) if (ln.price_overridden and ln.unit_price is not none) else '' }}"
+                   placeholder="{{ ('%.4f'|format(ln.sell_price)) if ln.sell_price is not none else 'auto' }}"
+                   title="Blank = automatic tiered price at this quantity. Type a value to override.">
+            {% if ln.price_overridden %}<span class="badge muted" title="manually set price">override</span>{% endif %}
+          </td>
           <td class="num"><input class="lineinput" form="lf{{ ln.id }}" name="discount" type="number" step="any" style="width:64px" value="{{ ('%g'|format(ln.discount_percent)) if ln.discount_percent is not none else '' }}"></td>
           {% else %}
           <td class="num">{{ "%g"|format(ln.ordered_qty) }}</td>
@@ -176,6 +182,7 @@
           {% if can_edit %}
           <td class="num" style="white-space:nowrap;">
             <button form="lf{{ ln.id }}" type="submit" class="ghost" style="margin:0" title="Save line">Save</button>
+            {% if ln.part_id %}<button form="lr{{ ln.id }}" type="submit" class="ghost" style="margin:0" title="Recompute the tiered price at this quantity">Reprice</button>{% endif %}
             <button form="ld{{ ln.id }}" type="submit" class="danger" title="Remove line">Remove</button>
           </td>
           {% endif %}
@@ -255,6 +262,7 @@
 {# Per-line update/delete forms, referenced by the inputs/buttons above via the `form` attribute. #}
 {% for ln in o.lines %}
 <form id="lf{{ ln.id }}" method="post" action="/customer-orders/{{ o.id }}/lines/{{ ln.id }}/update"></form>
+<form id="lr{{ ln.id }}" method="post" action="/customer-orders/{{ o.id }}/lines/{{ ln.id }}/reprice"></form>
 <form id="ld{{ ln.id }}" method="post" action="/customer-orders/{{ o.id }}/lines/{{ ln.id }}/delete"
       onsubmit="return confirm('Remove this line?');"></form>
 {% endfor %}
@@ -281,7 +289,7 @@
         </div>
         <div style="width:120px;">
           <label for="unit_price">Unit price</label>
-          <input id="unit_price" name="unit_price" type="number" step="any">
+          <input id="unit_price" name="unit_price" type="number" step="any" placeholder="auto (tiered)">
         </div>
         <div style="width:80px;">
           <label for="discount">Disc %</label>
@@ -289,7 +297,7 @@
         </div>
         <button type="submit" id="addBtn" disabled>Add to order</button>
       </div>
-      <label for="partsearch" style="margin-top:.5rem;">Find a product, then click it to select — its price fills in automatically</label>
+      <label for="partsearch" style="margin-top:.5rem;">Find a product, then click it to select — leave the price blank for the automatic tiered price at the ordered quantity</label>
       <input id="partsearch" type="text" autocomplete="off" placeholder="Filter by part no or value…"
              oninput="filterParts()">
       <div class="part-list" style="min-height:40vh; max-height:60vh;">
@@ -300,7 +308,7 @@
                 data-s="{{ (p.part_no ~ ' ' ~ (p.value or '') ~ ' ' ~ p.kind) | lower }}">
           <span class="pn-line">
             <span class="pn">{{ p.part_no }}{% if p.kind == 'ASSY' %} <span class="badge stock">ASSY</span>{% endif %}</span>
-            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock{% if p.price is not none %} · {{ 'build cost' if p.kind == 'ASSY' else 'price' }} {{ "%.4f"|format(p.price) }}{% endif %}</span>
+            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock{% if p.price is not none %} · {{ 'build cost' if p.kind == 'ASSY' else 'cost' }} from {{ "%.4f"|format(p.price) }}{% endif %}</span>
           </span>
           {% if p.value %}<span class="pv">{{ p.value }}</span>{% endif %}
         </button>
@@ -326,7 +334,7 @@
     document.getElementById('sel_part_id').value = el.dataset.id;
     document.getElementById('sel_part_label').value =
       el.dataset.pn + (el.dataset.assy ? '  (assembly)' : '');
-    document.getElementById('unit_price').value = el.dataset.price;  // calculated price filled in
+    document.getElementById('unit_price').value = '';  // leave blank -> automatic tiered sell price
     document.getElementById('addBtn').disabled = false;
     document.querySelectorAll('#addModal .part-row').forEach(b => b.classList.remove('sel'));
     el.classList.add('sel');

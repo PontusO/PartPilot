@@ -10,13 +10,14 @@ from digisearch.web.features.contacts import feature as contacts_feature
 from digisearch.web.features.contacts import repo as conrepo
 from digisearch.web.features.customer_orders import feature as co_feature
 from digisearch.web.features.customer_orders import repo
+from digisearch.web.features.setup import feature as setup_feature
 
 
 @pytest.fixture
 def db(tmp_path):
     database = Database(tmp_path / "co.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature, assemblies_feature, contacts_feature, co_feature)
+    reg.register(catalog_feature, assemblies_feature, contacts_feature, co_feature, setup_feature)
     database.apply_migrations(reg)
     return database
 
@@ -71,19 +72,50 @@ def test_default_status_is_draft(db):
 def test_lines_default_price_and_totals(db):
     cust, part = _seed(db)
     oid = repo.create_order(db, {"customer_id": cust, "tax_rate": 25})
-    repo.add_line(db, oid, part, qty=10, unit_price=None, discount=None)  # price -> part cost 2.0
+    # No sell tiers -> default price = cost 2.0 x the default markup (1.30) = 2.6
+    repo.add_line(db, oid, part, qty=10, unit_price=None, discount=None)
     ln = repo.get_order(db, oid)["lines"][0]
-    assert ln["unit_price"] == 2.0 and ln["line_total"] == 20.0
-    assert abs(repo.get_order(db, oid)["grand_total"] - 25.0) < 1e-9  # 20 + 25% tax
+    assert ln["unit_price"] == pytest.approx(2.6) and ln["line_total"] == pytest.approx(26.0)
+    assert ln["price_overridden"] is False
+    assert repo.get_order(db, oid)["grand_total"] == pytest.approx(32.5)  # 26 + 25% tax
 
     repo.update_line(db, oid, ln["id"], qty=10, unit_price=5.0, discount=10)  # net 4.5 -> 45
     o = repo.get_order(db, oid)
+    assert o["lines"][0]["price_overridden"] is True     # explicit price pins the line
     assert abs(o["lines"][0]["net_price"] - 4.5) < 1e-9
     assert abs(o["lines"][0]["line_total"] - 45.0) < 1e-9
     assert abs(o["grand_total"] - 56.25) < 1e-9  # 45 + 25% tax
 
     repo.delete_line(db, oid, ln["id"])
     assert repo.get_order(db, oid)["lines"] == []
+
+
+def test_order_line_override_and_reprice(db):
+    cust, part = _seed(db)   # cost 2.0
+    catrepo.replace_sell_tiers(db, part, [{"break_qty": 1, "unit_price": 5.0},
+                                          {"break_qty": 100, "unit_price": 3.0}])
+    oid = repo.create_order(db, {"customer_id": cust})
+
+    # Auto line at qty 10 -> below the 100 break -> sell 5.0
+    repo.add_line(db, oid, part, qty=10, unit_price=None, discount=None)
+    ln = repo.get_order(db, oid)["lines"][0]
+    assert ln["unit_price"] == pytest.approx(5.0) and ln["price_overridden"] is False
+
+    # A blank-price update at qty 100 re-prices an un-overridden line to the 100 tier (3.0)
+    repo.update_line(db, oid, ln["id"], qty=100, unit_price=None, discount=None)
+    ln = repo.get_order(db, oid)["lines"][0]
+    assert ln["unit_price"] == pytest.approx(3.0) and ln["price_overridden"] is False
+
+    # An explicit price overrides and survives a later qty-only change
+    repo.update_line(db, oid, ln["id"], qty=100, unit_price=9.99, discount=None)
+    repo.update_line(db, oid, ln["id"], qty=500, unit_price=9.99, discount=None)
+    ln = repo.get_order(db, oid)["lines"][0]
+    assert ln["unit_price"] == pytest.approx(9.99) and ln["price_overridden"] is True
+
+    # Reprice recomputes from the tiers at the ordered qty (500 -> 3.0) and clears the override
+    repo.reprice_line(db, oid, ln["id"])
+    ln = repo.get_order(db, oid)["lines"][0]
+    assert ln["unit_price"] == pytest.approx(3.0) and ln["price_overridden"] is False
 
 
 def test_order_discount_delivery_and_backlog(db):
@@ -109,15 +141,16 @@ def test_list_filter_and_search(db):
     assert repo.summary(db) == {"total": 2, "open": 1, "backlog": 0}
 
 
-def test_assembly_line_defaults_to_rolled_cost(db):
+def test_assembly_line_defaults_to_rolled_sell_price(db):
     cust, comp = _seed(db)  # WIDGET-1 component, cost 2.0
     asm = asmrepo.create_assembly(db, {"part_no": "ASSY-1"})  # ASSY unit_cost is NULL
     asmrepo.add_bom_line(db, asm, comp, 3, None)              # 3x the component -> rolled cost 6.0
     oid = repo.create_order(db, {"customer_id": cust})
     repo.add_line(db, oid, asm, qty=2, unit_price=None, discount=None)
     ln = repo.get_order(db, oid)["lines"][0]
-    assert ln["unit_price"] == 6.0      # rolled BOM cost, not the (null) ASSY unit_cost
-    assert ln["line_total"] == 12.0
+    # rolled BOM sell: each leaf priced at cost 2.0 x markup 1.30 = 2.6, x3 per board = 7.8
+    assert ln["unit_price"] == pytest.approx(7.8)
+    assert ln["line_total"] == pytest.approx(15.6)
 
 
 def test_picker_prices_component_and_assembly(db):

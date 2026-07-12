@@ -6,6 +6,7 @@ import re
 from urllib.parse import quote
 
 from ...core.db import Database
+from . import pricing
 
 # Distributor part-search URLs, keyed by a normalized supplier-name substring. miniMRP
 # doesn't store product URLs, so we link to a keyword search on the supplier part number.
@@ -137,6 +138,16 @@ def get_part(db: Database, part_id: int) -> dict | None:
         for s in suppliers:
             s["unit_price"] = _unit_price(s["price_per_uom"], s["qty_per_uom"])
             s["part_url"] = distributor_url(s["supplier_name"], s["supplier_pno"])
+            s["cost_tiers"] = [dict(t) for t in conn.execute(
+                "SELECT break_qty, unit_price, kind FROM part_supplier_tiers "
+                "WHERE part_supplier_id = ? ORDER BY kind, break_qty",
+                (s["id"],),
+            )]
+        sell_tiers = [dict(t) for t in conn.execute(
+            "SELECT break_qty, unit_price, source FROM part_price_tiers "
+            "WHERE part_id = ? ORDER BY break_qty",
+            (part_id,),
+        )]
         stock = [dict(r) for r in conn.execute(
             """SELECT pk.*, l.name AS location_name
                FROM part_stock pk LEFT JOIN stock_locations l ON l.id = pk.location_id
@@ -144,6 +155,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
             (part_id,),
         )]
     part["suppliers"] = suppliers
+    part["sell_tiers"] = sell_tiers
     part["stock"] = stock
     part["unlimited"] = bool(part.get("unlimited_stock"))
     part["normally_stocked"] = bool(part.get("normally_stocked"))
@@ -265,6 +277,22 @@ def _location_id(conn, location_id: int | None) -> int:
     return conn.execute("INSERT INTO stock_locations (name) VALUES ('Main')").lastrowid
 
 
+def _insert_cost_tiers(conn, part_supplier_id: int, line: dict) -> None:
+    """Write auto-captured supplier COST breaks for a ``part_suppliers`` row. ``line`` may carry
+    ``cost_tiers`` (cut-tape) and/or ``reel_tiers`` (full-reel), each a list of
+    ``{"break_qty", "unit_price"}`` per-piece prices."""
+    for kind, key in (("cut", "cost_tiers"), ("reel", "reel_tiers")):
+        for t in line.get(key) or []:
+            bq, up = t.get("break_qty"), t.get("unit_price")
+            if bq is None or up is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO part_supplier_tiers "
+                "(part_supplier_id, break_qty, unit_price, kind) VALUES (?, ?, ?, ?)",
+                (part_supplier_id, bq, up, kind),
+            )
+
+
 def create_part(
     db: Database, *, part: dict, supplier_lines: list[dict], opening: dict | None = None
 ) -> int:
@@ -286,26 +314,36 @@ def create_part(
         part_id = conn.execute(
             """INSERT INTO parts
                (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
-                unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked)
-               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked, markup)
+               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, opening_qty, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
-             1 if part.get("normally_stocked") else 0),
+             1 if part.get("normally_stocked") else 0, part.get("markup")),
         ).lastrowid
 
         for s in supplier_lines:
             qpu = s.get("reel_qty") or 1
             unit = s.get("unit_price")
             price_per_uom = unit * qpu if unit is not None else None
-            conn.execute(
+            ps_id = conn.execute(
                 """INSERT INTO part_suppliers
                    (part_id, supplier_id, supplier_pno, price_per_uom, qty_per_uom, moq,
                     lead_time, is_default)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (part_id, _get_or_create_supplier(conn, s["supplier_name"]), s.get("supplier_pno"),
                  price_per_uom, qpu, s.get("moq"), s.get("lead_time"), 1 if s.get("is_default") else 0),
+            ).lastrowid
+            _insert_cost_tiers(conn, ps_id, s)
+
+        for t in part.get("sell_tiers") or []:
+            if t.get("break_qty") is None or t.get("unit_price") is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO part_price_tiers "
+                "(part_id, break_qty, unit_price, source) VALUES (?, ?, ?, 'manual')",
+                (part_id, t["break_qty"], t["unit_price"]),
             )
 
         if opening_qty:
@@ -321,9 +359,11 @@ def create_part(
 def update_part(
     db: Database, part_id: int, *, part: dict, supplier_lines: list[dict], stock: dict | None = None
 ) -> None:
-    """Update an existing component. Supplier lines are fully redefined by the form
-    (wiped and re-created); the primary stock row's on-hand/bin/location is updated and
-    the part's total_qty rolled up from all stock rows."""
+    """Update an existing component. Supplier lines are *reconciled* against the form — an offer
+    matched by (supplier, supplier P/N) is updated in place so its ``id`` survives, which keeps the
+    auto-captured cost tiers hanging off it (they CASCADE on delete); new offers are inserted and
+    removed ones deleted. The primary stock row's on-hand/bin/location is updated and the part's
+    total_qty rolled up from all stock rows."""
     default_unit = next(
         (s["unit_price"] for s in supplier_lines if s.get("is_default")),
         supplier_lines[0]["unit_price"] if supplier_lines else None,
@@ -332,28 +372,59 @@ def update_part(
         conn.execute(
             """UPDATE parts SET part_no=?, value=?, description=?, category=?, mfr_name=?,
                mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, unlimited_stock=?,
-               normally_stocked=?, updated_at=datetime('now')
+               normally_stocked=?, markup=?, updated_at=datetime('now')
                WHERE id=?""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
-             1 if part.get("normally_stocked") else 0, part_id),
+             1 if part.get("normally_stocked") else 0, part.get("markup"), part_id),
         )
 
-        conn.execute("DELETE FROM part_suppliers WHERE part_id = ?", (part_id,))
+        # Reconcile supplier offers by (supplier_id, supplier_pno) so matched rows keep their id
+        # (and their cascaded cost tiers) instead of being deleted and re-created.
+        existing = {}
+        for r in conn.execute(
+            "SELECT id, supplier_id, supplier_pno FROM part_suppliers WHERE part_id = ?", (part_id,)
+        ):
+            existing.setdefault((r["supplier_id"], (r["supplier_pno"] or "")), []).append(r["id"])
+        kept: set[int] = set()
         for s in supplier_lines:
             qpu = s.get("reel_qty") or 1
             unit = s.get("unit_price")
             price_per_uom = unit * qpu if unit is not None else None
-            conn.execute(
-                """INSERT INTO part_suppliers
-                   (part_id, supplier_id, supplier_pno, price_per_uom, qty_per_uom, moq,
-                    lead_time, is_default)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (part_id, _get_or_create_supplier(conn, s["supplier_name"]), s.get("supplier_pno"),
-                 price_per_uom, qpu, s.get("moq"), s.get("lead_time"), 1 if s.get("is_default") else 0),
-            )
+            supplier_id = _get_or_create_supplier(conn, s["supplier_name"])
+            pno = s.get("supplier_pno")
+            bucket = existing.get((supplier_id, (pno or "")))
+            row_id = None
+            while bucket:                       # consume a not-yet-reused matching offer
+                candidate = bucket.pop(0)
+                if candidate not in kept:
+                    row_id = candidate
+                    break
+            if row_id is not None:
+                conn.execute(
+                    "UPDATE part_suppliers SET price_per_uom=?, qty_per_uom=?, moq=?, "
+                    "lead_time=?, is_default=? WHERE id=?",
+                    (price_per_uom, qpu, s.get("moq"), s.get("lead_time"),
+                     1 if s.get("is_default") else 0, row_id),
+                )
+                kept.add(row_id)
+            else:
+                row_id = conn.execute(
+                    """INSERT INTO part_suppliers
+                       (part_id, supplier_id, supplier_pno, price_per_uom, qty_per_uom, moq,
+                        lead_time, is_default)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (part_id, supplier_id, pno, price_per_uom, qpu, s.get("moq"),
+                     s.get("lead_time"), 1 if s.get("is_default") else 0),
+                ).lastrowid
+                kept.add(row_id)
+            _insert_cost_tiers(conn, row_id, s)   # no-op unless the line carries captured tiers
+
+        stale = [rid for ids in existing.values() for rid in ids if rid not in kept]
+        for rid in stale:                         # dropped offers -> remove (cost tiers CASCADE)
+            conn.execute("DELETE FROM part_suppliers WHERE id = ?", (rid,))
 
         qty = (stock or {}).get("qty")
         row = conn.execute(
@@ -377,3 +448,136 @@ def update_part(
             (part_id, part_id),
         )
         conn.commit()
+
+
+def set_offer_unit_price(conn, part_supplier_id: int, unit_price: float) -> None:
+    """Set a supplier offer's price to a per-piece ``unit_price`` (stored per-UOM:
+    price_per_uom = unit_price x qty_per_uom). Runs in the caller's transaction (no commit). This is
+    the single definition of "write the current/last price onto an offer", used by goods receipt and
+    by tier-aware PO pricing."""
+    conn.execute("UPDATE part_suppliers SET price_per_uom = ? * qty_per_uom WHERE id = ?",
+                 (unit_price, part_supplier_id))
+
+
+def set_offer_unit_price_db(db: Database, part_supplier_id: int, unit_price: float) -> None:
+    """``set_offer_unit_price`` in its own transaction (for callers without an open connection)."""
+    with db.connect() as conn:
+        set_offer_unit_price(conn, part_supplier_id, unit_price)
+        conn.commit()
+
+
+def replace_cost_tiers(db: Database, part_supplier_id: int,
+                       cut_tiers: list[dict], reel_tiers: list[dict]) -> None:
+    """Wholesale-replace a supplier offer's captured cost breaks (cut + reel). Used by the
+    "refresh from distributor" action, which re-queries Digi-Key/Mouser for the current ladder."""
+    with db.connect() as conn:
+        conn.execute("DELETE FROM part_supplier_tiers WHERE part_supplier_id = ?", (part_supplier_id,))
+        for kind, tiers in (("cut", cut_tiers), ("reel", reel_tiers)):
+            for t in tiers or []:
+                bq, up = t.get("break_qty"), t.get("unit_price")
+                if bq is None or up is None:
+                    continue
+                conn.execute(
+                    "INSERT OR REPLACE INTO part_supplier_tiers "
+                    "(part_supplier_id, break_qty, unit_price, kind) VALUES (?, ?, ?, ?)",
+                    (part_supplier_id, bq, up, kind),
+                )
+        conn.commit()
+
+
+# --- sell-price tiers ---
+
+def replace_sell_tiers(db: Database, part_id: int, tiers: list[dict]) -> None:
+    """Replace the *manual* customer sell tiers for a part with ``tiers`` (each
+    ``{"break_qty", "unit_price"}``). Generated (source='markup') tiers are left untouched; a manual
+    tier at the same break qty as a generated one supersedes it (manual wins)."""
+    with db.connect() as conn:
+        conn.execute("DELETE FROM part_price_tiers WHERE part_id = ? AND source = 'manual'", (part_id,))
+        for t in tiers:
+            bq, up = t.get("break_qty"), t.get("unit_price")
+            if bq is None or up is None:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO part_price_tiers "
+                "(part_id, break_qty, unit_price, source) VALUES (?, ?, ?, 'manual')",
+                (part_id, bq, up),
+            )
+        conn.commit()
+
+
+def generate_sell_tiers_from_cost(db: Database, part_id: int, default_markup: float) -> int:
+    """(Re)generate source='markup' sell tiers from the default supplier's cut-tape cost breaks,
+    each priced at cost x effective markup (the part's own ``markup`` if set, else ``default_markup``).
+    Existing manual tiers at the same break qty win and are preserved. Returns the number written."""
+    with db.connect() as conn:
+        prow = conn.execute("SELECT markup FROM parts WHERE id = ?", (part_id,)).fetchone()
+        markup = prow["markup"] if prow is not None and prow["markup"] is not None else default_markup
+        ps = conn.execute(
+            "SELECT id FROM part_suppliers WHERE part_id = ? ORDER BY is_default DESC, id LIMIT 1",
+            (part_id,),
+        ).fetchone()
+        conn.execute("DELETE FROM part_price_tiers WHERE part_id = ? AND source = 'markup'", (part_id,))
+        written = 0
+        if ps is not None:
+            breaks = conn.execute(
+                "SELECT break_qty, unit_price FROM part_supplier_tiers "
+                "WHERE part_supplier_id = ? AND kind = 'cut' ORDER BY break_qty",
+                (ps["id"],),
+            ).fetchall()
+            for b in breaks:
+                # INSERT OR IGNORE: a manual tier already at this break qty wins.
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO part_price_tiers "
+                    "(part_id, break_qty, unit_price, source) VALUES (?, ?, ?, 'markup')",
+                    (part_id, b["break_qty"], b["unit_price"] * markup),
+                )
+                written += cur.rowcount
+        conn.commit()
+    return written
+
+
+def recalc_sell_tiers_from_purchase(db: Database, part_id: int, anchor_qty: float,
+                                    anchor_price: float | None, default_markup: float) -> int:
+    """Recompute the generated sell tiers from a purchase, anchored to the price we're paying.
+
+    Sell breaks mirror the default supplier's cut-tape cost tiers; each tier is the cost curve
+    *rebased* to the ordered price and marked up::
+
+        sell[i] = anchor_price x (cost[i] / cost[bought_tier]) x markup
+
+    where ``cost[bought_tier]`` is the cost at the tier the ordered qty falls into. When the ordered
+    price equals that tier's list cost (the automatic case) this is just ``cost[i] x markup``; a
+    negotiated price shifts the whole ladder while keeping the distributor's discount shape. ``markup``
+    is the part's own ``markup`` if set, else ``default_markup``. Existing manual (source='manual')
+    tiers are preserved and win at their break qty. No-op (returns 0) when the part has no default
+    offer, no cost tiers, or the anchor can't be established. Returns the number of tiers written."""
+    if anchor_price is None:
+        return 0
+    with db.connect() as conn:
+        prow = conn.execute("SELECT markup FROM parts WHERE id = ?", (part_id,)).fetchone()
+        markup = prow["markup"] if prow is not None and prow["markup"] is not None else default_markup
+        ps = conn.execute(
+            "SELECT id FROM part_suppliers WHERE part_id = ? ORDER BY is_default DESC, id LIMIT 1",
+            (part_id,),
+        ).fetchone()
+        if ps is None:
+            return 0
+        pairs = [(r["break_qty"], r["unit_price"]) for r in conn.execute(
+            "SELECT break_qty, unit_price FROM part_supplier_tiers "
+            "WHERE part_supplier_id = ? AND kind = 'cut' ORDER BY break_qty", (ps["id"],))]
+        cost_anchor = pricing.price_at(pairs, anchor_qty)
+        if not pairs or not cost_anchor:      # nothing to rebase against
+            return 0
+        conn.execute("DELETE FROM part_price_tiers WHERE part_id = ? AND source = 'markup'", (part_id,))
+        written = 0
+        for break_qty, cost in pairs:
+            sell = anchor_price * (cost / cost_anchor) * markup
+            # INSERT OR IGNORE: a manual tier already at this break qty wins.
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO part_price_tiers "
+                "(part_id, break_qty, unit_price, source) VALUES (?, ?, ?, 'markup')",
+                (part_id, break_qty, sell),
+            )
+            written += cur.rowcount
+        conn.commit()
+    return written

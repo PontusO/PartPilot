@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from ...core import ref_no
 from ...core.db import Database
-from ..catalog import stock
+from ..catalog import cost_refresh, pricing, stock
+from ..catalog import repo as catrepo
+from ..setup import repo as setup_repo
 from . import export
 
 STATUSES = ("draft", "ordered", "received", "cancelled")
@@ -24,11 +26,58 @@ def _unit_price(price_per_uom, qty_per_uom):
 def _default_supplier(conn, part_id):
     """The part's preferred supplier offer (default flag, else lowest id)."""
     return conn.execute(
-        """SELECT ps.supplier_pno, ps.price_per_uom, ps.qty_per_uom, ps.moq,
-                  s.id AS supplier_id, s.name AS supplier_name
+        """SELECT ps.id AS part_supplier_id, ps.supplier_pno, ps.price_per_uom, ps.qty_per_uom,
+                  ps.moq, s.id AS supplier_id, s.name AS supplier_name
            FROM part_suppliers ps LEFT JOIN suppliers s ON s.id = ps.supplier_id
            WHERE ps.part_id = ? ORDER BY ps.is_default DESC, ps.id LIMIT 1""",
         (part_id,),
+    ).fetchone()
+
+
+def _stored_tier_price(conn, part_supplier_id, qty):
+    """The cut-tape cost tier for ``qty`` from the offer's *stored* tiers, or None if it has none."""
+    if not part_supplier_id:
+        return None
+    tiers = pricing.load_cost_tiers(conn, part_supplier_id, "cut")
+    return pricing.price_at(tiers, qty) if tiers else None
+
+
+def _priced_line(db: Database, clients, sup, qty) -> float | None:
+    """Unit price for buying ``qty`` from offer ``sup`` (a ``_default_supplier`` row). If the offer is
+    a configured distributor, re-query it: overwrite its cost tiers from the live price breaks, set the
+    offer's flat unit price to the tier at ``qty``, and return that. Otherwise (or on any lookup
+    failure) price from the offer's stored cost tiers at ``qty``, falling back to its flat unit price.
+    Network + tier writes here run OUTSIDE any PO-insert transaction."""
+    ps_id = sup["part_supplier_id"]
+    breaks = cost_refresh.fetch_offer_breaks(clients, sup["supplier_name"], sup["supplier_pno"])
+    # Only trust a live response that carries a cut-tape ladder — pricing and the sell-tier rollup are
+    # cut-based. A reel-only reply must NOT wipe the offer's existing cut cost tiers, so fall through
+    # to stored/flat pricing in that case.
+    if breaks is not None and ps_id and breaks[0]:
+        cut, reel = breaks
+        catrepo.replace_cost_tiers(db, ps_id, cut, reel)
+        price = pricing.price_at([(t["break_qty"], t["unit_price"]) for t in cut], qty)
+        if price is not None:
+            catrepo.set_offer_unit_price_db(db, ps_id, price)   # update the offer's current price
+            return price
+    with db.connect() as conn:
+        stored = _stored_tier_price(conn, ps_id, qty)
+    if stored is not None:
+        return stored
+    return _unit_price(sup["price_per_uom"], sup["qty_per_uom"])
+
+
+def _offer_for_receipt(conn, part_id, supplier_id, supplier_pno):
+    """The ``part_suppliers`` offer a receipt should update: this supplier's offer, preferring an
+    exact supplier-P/N match, then the default/lowest-id offer. None if the part has no offer from
+    this supplier (e.g. it was bought elsewhere) — in which case the receipt writes no price back."""
+    if not supplier_id:
+        return None
+    return conn.execute(
+        """SELECT id, qty_per_uom FROM part_suppliers
+           WHERE part_id = ? AND supplier_id = ?
+           ORDER BY (CASE WHEN supplier_pno IS ? THEN 0 ELSE 1 END), is_default DESC, id LIMIT 1""",
+        (part_id, supplier_id, supplier_pno),
     ).fetchone()
 
 
@@ -136,6 +185,14 @@ def shortage_suggestions(db: Database) -> list[dict]:
             if short <= 0:
                 continue
             sup = _default_supplier(conn, part_id)
+            # Preview the price at the suggested qty using the offer's stored cost tiers (no network);
+            # PO generation re-prices live. Falls back to the flat unit price.
+            if sup:
+                price = _stored_tier_price(conn, sup["part_supplier_id"], short)
+                if price is None:
+                    price = _unit_price(sup["price_per_uom"], sup["qty_per_uom"])
+            else:
+                price = None
             out.append({
                 "part_id": part_id, "part_no": part["part_no"], "value": part["value"],
                 "required": required, "free": free, "on_order": incoming, "short": short,
@@ -143,7 +200,7 @@ def shortage_suggestions(db: Database) -> list[dict]:
                 "supplier_id": sup["supplier_id"] if sup else None,
                 "supplier_name": sup["supplier_name"] if sup else None,
                 "supplier_pno": sup["supplier_pno"] if sup else None,
-                "unit_price": _unit_price(sup["price_per_uom"], sup["qty_per_uom"]) if sup else None,
+                "unit_price": price,
             })
     out.sort(key=lambda r: (r["supplier_name"] or "~", r["part_no"]))
     return out
@@ -163,19 +220,29 @@ def shortage_suggestions_grouped(db: Database) -> list[dict]:
 
 def create_pos_from_suggestions(db: Database, selections: dict[int, float], user=None) -> list[int]:
     """Create one draft PO per supplier from selected {part_id: qty}. Parts with no supplier
-    are skipped (can't be auto-ordered). Returns the new PO ids."""
+    are skipped (can't be auto-ordered). Returns the new PO ids.
+
+    Each line is priced tier-aware at its buy quantity — for distributor offers this re-queries the
+    supplier and refreshes the cost tiers (see :func:`_priced_line`). That network + tier-write step
+    runs first (outside the PO-insert transaction) so no HTTP happens while holding a write lock."""
+    # Phase 1: resolve offers and price each line (may hit the network + write cost tiers).
+    clients = cost_refresh.build_clients()
+    markup = setup_repo.get_default_markup(db)
+    by_supplier: dict[int, list] = {}
+    for part_id, qty in selections.items():
+        if not qty or qty <= 0:
+            continue
+        with db.connect() as conn:
+            sup = _default_supplier(conn, part_id)
+        if sup is None or sup["supplier_id"] is None:
+            continue
+        price = _priced_line(db, clients, sup, qty)
+        by_supplier.setdefault(sup["supplier_id"], []).append(
+            (part_id, qty, sup["supplier_pno"], price))
+
+    # Phase 2: insert the POs/lines in one transaction (no network here).
     created = []
     with db.connect() as conn:
-        by_supplier: dict[int, list] = {}
-        for part_id, qty in selections.items():
-            if not qty or qty <= 0:
-                continue
-            sup = _default_supplier(conn, part_id)
-            if sup is None or sup["supplier_id"] is None:
-                continue
-            by_supplier.setdefault(sup["supplier_id"], []).append(
-                (part_id, qty, sup["supplier_pno"], _unit_price(sup["price_per_uom"], sup["qty_per_uom"])))
-
         for supplier_id, lines in by_supplier.items():
             po_id = conn.execute(
                 "INSERT INTO purchase_orders (supplier_id, status, order_date) VALUES (?, 'draft', date('now'))",
@@ -190,6 +257,11 @@ def create_pos_from_suggestions(db: Database, selections: dict[int, float], user
                 )
             created.append(po_id)
         conn.commit()
+
+    # Phase 3: re-anchor sell tiers to the ordered price — only now that the POs actually exist.
+    for lines in by_supplier.values():
+        for part_id, qty, _pno, price in lines:
+            catrepo.recalc_sell_tiers_from_purchase(db, part_id, qty, price, markup)
     return created
 
 
@@ -211,18 +283,20 @@ def create_po(db: Database, data: dict) -> int:
 
 def add_line(db: Database, po_id: int, part_id: int | None, qty: float,
              unit_price: float | None) -> None:
+    # Validate + resolve the offer in a read pass, then price (a distributor offer with no explicit
+    # price re-queries the supplier), then insert — so no HTTP runs inside the write transaction.
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM purchase_orders WHERE id = ?", (po_id,)).fetchone() is None:
             raise ValueError("Purchase order not found.")
-        supplier_pno = None
+        sup = None
         if part_id is not None:
             if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
                 raise ValueError("Selected part was not found.")
             sup = _default_supplier(conn, part_id)
-            if sup:
-                supplier_pno = sup["supplier_pno"]
-                if unit_price is None:
-                    unit_price = _unit_price(sup["price_per_uom"], sup["qty_per_uom"])
+    supplier_pno = sup["supplier_pno"] if sup else None
+    if unit_price is None and sup is not None:
+        unit_price = _priced_line(db, cost_refresh.build_clients(), sup, qty or 1)
+    with db.connect() as conn:
         next_no = conn.execute(
             "SELECT COALESCE(MAX(line_no), 0) + 1 FROM purchase_order_lines WHERE po_id = ?", (po_id,)
         ).fetchone()[0]
@@ -232,6 +306,10 @@ def add_line(db: Database, po_id: int, part_id: int | None, qty: float,
             (po_id, part_id, supplier_pno, qty or 1, unit_price, next_no),
         )
         conn.commit()
+    # Re-anchor the part's sell tiers to this line's price — only after the line is actually added.
+    if part_id is not None and unit_price is not None:
+        catrepo.recalc_sell_tiers_from_purchase(
+            db, part_id, qty or 1, unit_price, setup_repo.get_default_markup(db))
 
 
 def update_line(db: Database, po_id: int, line_id: int, qty: float,
@@ -245,7 +323,12 @@ def update_line(db: Database, po_id: int, line_id: int, qty: float,
             raise ValueError("Lines can only be changed on a draft PO (before it's placed).")
         conn.execute("UPDATE purchase_order_lines SET qty = ?, unit_price = ? WHERE id = ? AND po_id = ?",
                      (qty or 0, unit_price, line_id, po_id))
+        row = conn.execute("SELECT part_id FROM purchase_order_lines WHERE id = ?", (line_id,)).fetchone()
         conn.commit()
+    # Editing the ordered price/qty re-anchors the part's sell tiers.
+    if row is not None and row["part_id"] is not None and unit_price is not None:
+        catrepo.recalc_sell_tiers_from_purchase(
+            db, row["part_id"], qty or 1, unit_price, setup_repo.get_default_markup(db))
 
 
 def delete_line(db: Database, po_id: int, line_id: int) -> None:
@@ -362,10 +445,19 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
                 conn.execute("UPDATE purchase_order_lines SET qty_received = qty_received + ? WHERE id = ?",
                              (qty, ln["id"]))
                 conn.execute(
-                    "INSERT INTO goods_receipt_lines (grn_id, po_line_id, part_id, qty) "
-                    "VALUES (?, ?, ?, ?)",
-                    (grn_id, ln["id"], ln["part_id"], qty),
+                    "INSERT INTO goods_receipt_lines (grn_id, po_line_id, part_id, qty, unit_price) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (grn_id, ln["id"], ln["part_id"], qty, ln["unit_price"]),
                 )
+                # Record the price paid as the supplier offer's "last purchase price". Stored per-UOM
+                # (price_per_uom = per-piece x qty_per_uom) to match the catalog convention, so the
+                # displayed per-piece unit price becomes exactly what was paid. parts.unit_cost is
+                # deliberately left untouched (downstream BOM/WO/CO costs stay put).
+                if ln["unit_price"] is not None:
+                    offer = _offer_for_receipt(conn, ln["part_id"], po["supplier_id"],
+                                               ln["supplier_pno"])
+                    if offer is not None:
+                        catrepo.set_offer_unit_price(conn, offer["id"], ln["unit_price"])
         remaining = conn.execute(
             "SELECT COALESCE(SUM(qty - qty_received), 0) FROM purchase_order_lines WHERE po_id = ?",
             (po_id,),

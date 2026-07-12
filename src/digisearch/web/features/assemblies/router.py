@@ -176,10 +176,17 @@ def assembly_detail(request: Request, part_id: int):
 
 
 @router.get("/{part_id}/export.xlsx")
-def export_assembly_xlsx(request: Request, part_id: int):
-    """Download the whole product BOM as an Excel workbook (for customer cost/volume talks)."""
+def export_assembly_xlsx(request: Request, part_id: int, build_qty: int = 1):
+    """Download the whole product BOM as an Excel workbook (for customer cost/volume talks).
+
+    ``build_qty`` sets the manufacturing volume that selects each component's SELL price tier."""
     require_user(request)
-    assembly = repo.get_assembly_for_export(request.app.state.database, part_id)
+    from ..setup import repo as setup_repo
+
+    db = request.app.state.database
+    build_qty = max(1, build_qty)
+    markup = setup_repo.get_default_markup(db)
+    assembly = repo.get_assembly_for_export(db, part_id, build_qty=build_qty, default_markup=markup)
     if assembly is None:
         return HTMLResponse("Assembly not found.", status_code=404)
     data = export_xlsx.workbook_bytes(assembly)

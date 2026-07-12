@@ -3,7 +3,7 @@ import pytest
 from digisearch.web.core import FeatureRegistry
 from digisearch.web.core.db import Database
 from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import importer, repo, stock
+from digisearch.web.features.catalog import importer, pricing, repo, stock
 
 
 @pytest.fixture
@@ -235,6 +235,240 @@ def test_post_movement_creates_stock_row_when_none(db):
     stock.adjust_stock(db, pid, delta=10, mtype=stock.RECEIVE)
     p = repo.get_part(db, pid)
     assert p["total_qty"] == 10 and len(p["stock"]) == 1
+
+
+@pytest.mark.parametrize("qty,expected", [
+    (1, 0.10),      # below the first break -> smallest-break price
+    (100, 0.10),    # exactly the first break
+    (500, 0.10),    # between breaks -> highest break <= qty (still the 100 tier)
+    (1000, 0.05),   # exactly the second break
+    (5000, 0.05),   # above the largest break -> largest-break price
+])
+def test_price_at_selects_highest_break(qty, expected):
+    tiers = [(100, 0.10), (1000, 0.05)]
+    assert abs(pricing.price_at(tiers, qty) - expected) < 1e-9
+
+
+def test_price_at_between_three_tiers():
+    tiers = [(100, 0.10), (1000, 0.05), (10000, 0.02)]
+    assert pricing.price_at(tiers, 500) == 0.10
+    assert pricing.price_at(tiers, 1500) == 0.05
+    assert pricing.price_at(tiers, 50000) == 0.02
+
+
+def test_price_at_empty_is_none():
+    assert pricing.price_at([], 100) is None
+
+
+def _part_with_cost_tiers(db, part_no="TIERED"):
+    """A part whose default supplier carries auto-captured cut-tape cost tiers."""
+    return repo.create_part(
+        db,
+        part={"part_no": part_no, "category": "RESISTOR"},
+        supplier_lines=[{
+            "supplier_name": "Digikey", "supplier_pno": "DK-T1", "unit_price": 0.10,
+            "reel_qty": 1, "is_default": True,
+            "cost_tiers": [{"break_qty": 1, "unit_price": 0.10},
+                           {"break_qty": 100, "unit_price": 0.06},
+                           {"break_qty": 1000, "unit_price": 0.03}],
+        }],
+    )
+
+
+def test_create_part_captures_cost_tiers(db):
+    pid = _part_with_cost_tiers(db)
+    part = repo.get_part(db, pid)
+    tiers = part["suppliers"][0]["cost_tiers"]
+    assert [(t["break_qty"], t["unit_price"]) for t in tiers] == [(1, 0.10), (100, 0.06), (1000, 0.03)]
+    assert all(t["kind"] == "cut" for t in tiers)
+
+
+def test_update_part_preserves_cost_tiers_on_edit(db):
+    """An ordinary edit (change price, keep the same supplier+P/N) must NOT drop cost tiers."""
+    pid = _part_with_cost_tiers(db)
+    ps_id_before = repo.get_part(db, pid)["suppliers"][0]["id"]
+    # Edit: same supplier + P/N, different unit price, no cost_tiers submitted (form is read-only).
+    repo.update_part(
+        db, pid,
+        part={"part_no": "TIERED"},
+        supplier_lines=[{"supplier_name": "Digikey", "supplier_pno": "DK-T1", "unit_price": 0.12,
+                         "reel_qty": 1, "is_default": True}],
+    )
+    part = repo.get_part(db, pid)
+    assert part["suppliers"][0]["id"] == ps_id_before        # row id survived (reconciled in place)
+    assert len(part["suppliers"][0]["cost_tiers"]) == 3       # tiers preserved
+
+
+def test_update_part_drops_removed_suppliers_tiers(db):
+    """Removing a supplier offer removes its cost tiers (CASCADE)."""
+    pid = _part_with_cost_tiers(db)
+    repo.update_part(
+        db, pid,
+        part={"part_no": "TIERED"},
+        supplier_lines=[{"supplier_name": "Farnell", "supplier_pno": "FN-1", "unit_price": 0.2,
+                         "reel_qty": 1, "is_default": True}],
+    )
+    part = repo.get_part(db, pid)
+    assert {s["supplier_name"] for s in part["suppliers"]} == {"Farnell"}
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM part_supplier_tiers").fetchone()[0] == 0
+
+
+def test_sell_tier_crud(db):
+    pid = repo.create_part(db, part={"part_no": "SELL-1"}, supplier_lines=[])
+    repo.replace_sell_tiers(db, pid, [{"break_qty": 1, "unit_price": 1.0},
+                                      {"break_qty": 100, "unit_price": 0.8}])
+    sell = repo.get_part(db, pid)["sell_tiers"]
+    assert [(t["break_qty"], t["unit_price"], t["source"]) for t in sell] == \
+        [(1, 1.0, "manual"), (100, 0.8, "manual")]
+    # replace wipes the old manual rows
+    repo.replace_sell_tiers(db, pid, [{"break_qty": 50, "unit_price": 0.9}])
+    sell = repo.get_part(db, pid)["sell_tiers"]
+    assert [(t["break_qty"], t["source"]) for t in sell] == [(50, "manual")]
+
+
+def test_generate_sell_tiers_from_cost_uses_markup(db):
+    pid = _part_with_cost_tiers(db)             # cut tiers 0.10 / 0.06 / 0.03
+    written = repo.generate_sell_tiers_from_cost(db, pid, default_markup=2.0)
+    assert written == 3
+    sell = {t["break_qty"]: t["unit_price"] for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell == pytest.approx({1: 0.20, 100: 0.12, 1000: 0.06})
+
+    # A per-part markup override beats the default.
+    repo.update_part(db, pid, part={"part_no": "TIERED", "markup": 3.0},
+                     supplier_lines=[{"supplier_name": "Digikey", "supplier_pno": "DK-T1",
+                                      "unit_price": 0.10, "reel_qty": 1, "is_default": True}])
+    repo.generate_sell_tiers_from_cost(db, pid, default_markup=2.0)
+    sell = {t["break_qty"]: t["unit_price"] for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell == pytest.approx({1: 0.30, 100: 0.18, 1000: 0.09})
+
+
+def test_generate_sell_tiers_preserves_manual(db):
+    pid = _part_with_cost_tiers(db)
+    repo.replace_sell_tiers(db, pid, [{"break_qty": 100, "unit_price": 0.50}])  # manual at 100
+    repo.generate_sell_tiers_from_cost(db, pid, default_markup=2.0)
+    sell = {t["break_qty"]: (t["unit_price"], t["source"]) for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell[100] == (0.50, "manual")     # manual wins at the shared break qty
+    assert sell[1][1] == "markup" and sell[1000][1] == "markup"
+
+
+def test_recalc_sell_tiers_rebased_from_purchase(db):
+    pid = repo.create_part(db, part={"part_no": "RB-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "RB-1-ND", "unit_price": 2.0, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 2.00}, {"break_qty": 100, "unit_price": 1.50},
+                       {"break_qty": 1000, "unit_price": 1.00}, {"break_qty": 5000, "unit_price": 0.80}]}])
+    # Negotiated 0.90 at the 1000 tier -> the whole ladder rebases by 0.90/1.00, x markup 1.30.
+    n = repo.recalc_sell_tiers_from_purchase(db, pid, anchor_qty=1000, anchor_price=0.90,
+                                             default_markup=1.30)
+    assert n == 4
+    sell = {t["break_qty"]: t["unit_price"] for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell == pytest.approx({1: 2.34, 100: 1.755, 1000: 1.17, 5000: 0.936})
+
+    # Anchored at list (1.00) collapses to plain cost x markup.
+    repo.recalc_sell_tiers_from_purchase(db, pid, 1000, 1.00, 1.30)
+    sell = {t["break_qty"]: t["unit_price"] for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell == pytest.approx({1: 2.60, 100: 1.95, 1000: 1.30, 5000: 1.04})
+
+
+def test_recalc_sell_tiers_preserves_manual(db):
+    pid = repo.create_part(db, part={"part_no": "RB-2"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "RB-2-ND", "unit_price": 2.0, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 2.00}, {"break_qty": 100, "unit_price": 1.50},
+                       {"break_qty": 1000, "unit_price": 1.00}]}])
+    repo.replace_sell_tiers(db, pid, [{"break_qty": 100, "unit_price": 1.90}])   # manual at 100
+    repo.recalc_sell_tiers_from_purchase(db, pid, 1000, 1.00, 1.30)
+    sell = {t["break_qty"]: (t["unit_price"], t["source"]) for t in repo.get_part(db, pid)["sell_tiers"]}
+    assert sell[100] == (1.90, "manual")           # manual preserved, wins at its break
+    assert sell[1][1] == "markup" and sell[1000][1] == "markup"
+
+
+def test_recalc_sell_tiers_no_cost_tiers_is_noop(db):
+    pid = repo.create_part(db, part={"part_no": "RB-3"}, supplier_lines=[{
+        "supplier_name": "Local", "supplier_pno": "L", "unit_price": 2.0, "reel_qty": 1,
+        "is_default": True}])
+    assert repo.recalc_sell_tiers_from_purchase(db, pid, 1000, 0.9, 1.30) == 0
+    assert repo.get_part(db, pid)["sell_tiers"] == []
+
+
+def test_leaf_and_rolled_sell_price(db):
+    """rolled_sell_price is volume-aware over a 2-level BOM (needs the assemblies feature)."""
+    from digisearch.web.features.assemblies import feature as asm_feature
+
+    database = db
+    # Rebuild with assemblies registered so bom_lines exists.
+    reg = FeatureRegistry()
+    reg.register(catalog_feature)
+    reg.register(asm_feature)
+    database.apply_migrations(reg)
+
+    leaf = _part_with_cost_tiers(database, part_no="LEAF")   # cut 0.10/0.06/0.03, no sell tiers
+    # leaf priced by cost x markup: at qty 1 -> 0.10*2, at qty 1000 -> 0.03*2
+    with database.connect() as conn:
+        assert pricing.leaf_sell_unit(conn, leaf, 1, 2.0) == pytest.approx(0.20)
+        assert pricing.leaf_sell_unit(conn, leaf, 1000, 2.0) == pytest.approx(0.06)
+
+    # Build an assembly using 5 of the leaf per unit.
+    asy = repo.create_part(database, part={"part_no": "ASY-1"}, supplier_lines=[])
+    with database.connect() as conn:
+        conn.execute("UPDATE parts SET kind = 'ASSY' WHERE id = ?", (asy,))
+        conn.execute("INSERT INTO bom_lines (parent_id, child_id, qty_per) VALUES (?, ?, ?)",
+                     (asy, leaf, 5))
+        conn.commit()
+        # Build 200 units -> 1000 leaves total -> leaf at the 1000 tier (0.03*2=0.06); x5 per unit.
+        assert pricing.rolled_sell_price(conn, asy, 200, 2.0) == pytest.approx(0.06 * 5)
+        # Build 1 unit -> 5 leaves -> leaf at the 1 tier (0.10*2=0.20); x5.
+        assert pricing.rolled_sell_price(conn, asy, 1, 2.0) == pytest.approx(0.20 * 5)
+
+
+def test_refresh_cost_tiers_from_distributor(db, monkeypatch):
+    from digisearch.models import Candidate
+    from digisearch.web.features.catalog import cost_refresh
+
+    pid = repo.create_part(db, part={"part_no": "RF-1"}, supplier_lines=[
+        {"supplier_name": "Digi-Key", "supplier_pno": "DK-XYZ-ND", "unit_price": 0.1,
+         "reel_qty": 1, "is_default": True,
+         "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}]},   # a stale tier to be replaced
+        {"supplier_name": "Local Shop", "supplier_pno": "LS-1", "unit_price": 0.2,
+         "reel_qty": 1, "is_default": False},
+    ])
+    cand = Candidate(supplier="Digi-Key", mpn="XYZ", dk_part_number="DK-XYZ-ND",
+                     price_breaks=[(1, 0.09), (100, 0.05), (1000, 0.02)],
+                     reel_price_breaks=[(5000, 0.01)])
+
+    class FakeDK:
+        def keyword_search(self, kw, limit=5):
+            assert kw == "DK-XYZ-ND"       # looked up by the offer's supplier P/N
+            return [cand]
+
+    monkeypatch.setattr(cost_refresh, "_build_clients", lambda: (FakeDK(), None))
+    result = cost_refresh.refresh_cost_tiers(db, pid)
+
+    assert len(result["updated"]) == 1 and "Digi-Key" in result["updated"][0]
+    assert any("Local Shop" in s for s in result["skipped"])   # not a distributor -> skipped
+
+    part = repo.get_part(db, pid)
+    dk = next(s for s in part["suppliers"] if s["supplier_name"] == "Digi-Key")
+    cut = sorted((t["break_qty"], t["unit_price"]) for t in dk["cost_tiers"] if t["kind"] == "cut")
+    reel = [(t["break_qty"], t["unit_price"]) for t in dk["cost_tiers"] if t["kind"] == "reel"]
+    assert cut == [(1, 0.09), (100, 0.05), (1000, 0.02)]   # stale (1, 0.10) fully replaced
+    assert reel == [(5000, 0.01)]
+    # the non-distributor offer was left untouched (no tiers)
+    ls = next(s for s in part["suppliers"] if s["supplier_name"] == "Local Shop")
+    assert ls["cost_tiers"] == []
+
+
+def test_refresh_cost_tiers_reports_unconfigured(db, monkeypatch):
+    from digisearch.web.features.catalog import cost_refresh
+
+    pid = repo.create_part(db, part={"part_no": "RF-2"}, supplier_lines=[
+        {"supplier_name": "Mouser", "supplier_pno": "81-ABC", "unit_price": 0.1,
+         "reel_qty": 1, "is_default": True}])
+    monkeypatch.setattr(cost_refresh, "_build_clients", lambda: (None, None))  # neither configured
+    result = cost_refresh.refresh_cost_tiers(db, pid)
+    assert result["updated"] == []
+    assert any("not configured" in e for e in result["errors"])
 
 
 def test_create_part_reuses_existing_supplier_by_name(db):

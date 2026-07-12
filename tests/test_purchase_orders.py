@@ -118,6 +118,216 @@ def test_receive_creates_goods_receipt(db):
     assert g["po_no"] == f"PO-{po_id:05d}" and g["lines"][0]["qty"] == 30
 
 
+def _acme_id(db):
+    return next(s["id"] for s in repo.suppliers(db) if s["name"] == "Acme Supplies")
+
+
+def test_po_line_priced_from_stored_cost_tier(db):
+    """A non-distributor offer with stored cost tiers prices the PO line at the tier for the buy qty
+    (no network)."""
+    p = catrepo.create_part(db, part={"part_no": "T-1"}, supplier_lines=[{
+        "supplier_name": "Acme Supplies", "supplier_pno": "A-1", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 1000, "unit_price": 0.03}],
+    }])
+    po_id = repo.create_pos_from_suggestions(db, {p: 1000}, "u")[0]
+    line = repo.get_po(db, po_id)["lines"][0]
+    assert line["qty"] == 1000 and line["unit_price"] == pytest.approx(0.03)   # tier at 1000
+
+
+def test_po_generation_refreshes_tiers_and_prices_live(db, monkeypatch):
+    """A distributor offer is re-queried at PO generation: cost tiers refreshed, line priced from the
+    tier at the buy qty, and the offer's flat price updated."""
+    p = catrepo.create_part(db, part={"part_no": "DK-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "DK-1-ND", "unit_price": 0.5, "reel_qty": 1,
+        "is_default": True}])
+
+    def fake_fetch(clients, name, pno):
+        assert pno == "DK-1-ND"
+        return ([{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 100, "unit_price": 0.06},
+                 {"break_qty": 1000, "unit_price": 0.03}], [])
+
+    monkeypatch.setattr(repo.cost_refresh, "fetch_offer_breaks", fake_fetch)
+    po_id = repo.create_pos_from_suggestions(db, {p: 500}, "u")[0]
+    assert repo.get_po(db, po_id)["lines"][0]["unit_price"] == pytest.approx(0.06)  # 500 -> 100-break
+
+    part = catrepo.get_part(db, p)
+    cut = sorted((t["break_qty"], t["unit_price"]) for t in part["suppliers"][0]["cost_tiers"]
+                 if t["kind"] == "cut")
+    assert cut == [(1, 0.10), (100, 0.06), (1000, 0.03)]         # cost tiers refreshed from distributor
+    assert part["suppliers"][0]["unit_price"] == pytest.approx(0.06)   # flat price updated to the tier
+
+
+def test_reel_only_response_preserves_cut_tiers(db, monkeypatch):
+    """A distributor reply with only reel breaks (no cut ladder) must not wipe the offer's stored
+    cut cost tiers, and the line prices from the surviving cut tiers."""
+    p = catrepo.create_part(db, part={"part_no": "RO-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "RO-1-ND", "unit_price": 0.5, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 1000, "unit_price": 0.03}]}])
+    # cut = [] (reel-only) -> _priced_line must fall through, not overwrite
+    monkeypatch.setattr(repo.cost_refresh, "fetch_offer_breaks",
+                        lambda *a: ([], [{"break_qty": 5000, "unit_price": 0.02}]))
+    po_id = repo.create_pos_from_suggestions(db, {p: 1000}, "u")[0]
+    assert repo.get_po(db, po_id)["lines"][0]["unit_price"] == pytest.approx(0.03)  # stored cut tier
+
+    cut = sorted((t["break_qty"], t["unit_price"]) for t in catrepo.get_part(db, p)["suppliers"][0]["cost_tiers"]
+                 if t["kind"] == "cut")
+    assert cut == [(1, 0.10), (1000, 0.03)]     # original cut tiers intact (not wiped by reel-only)
+
+
+def test_po_generation_falls_back_when_lookup_fails(db, monkeypatch):
+    """If the distributor can't be queried, pricing falls back to the flat unit price (no tiers)."""
+    p = catrepo.create_part(db, part={"part_no": "DK-2"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "DK-2-ND", "unit_price": 0.5, "reel_qty": 1,
+        "is_default": True}])
+    monkeypatch.setattr(repo.cost_refresh, "fetch_offer_breaks", lambda *a: None)
+    po_id = repo.create_pos_from_suggestions(db, {p: 1000}, "u")[0]
+    assert repo.get_po(db, po_id)["lines"][0]["unit_price"] == pytest.approx(0.5)   # flat fallback
+
+
+def test_add_line_explicit_price_vs_tiered(db):
+    p = catrepo.create_part(db, part={"part_no": "AL-1"}, supplier_lines=[{
+        "supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 1000, "unit_price": 0.03}]}])
+    po = repo.create_po(db, {"supplier_id": _acme_id(db)})
+    repo.add_line(db, po, p, 1000, None)     # no price -> stored tier at 1000
+    repo.add_line(db, po, p, 1000, 0.99)     # explicit -> verbatim
+    lines = repo.get_po(db, po)["lines"]
+    assert lines[0]["unit_price"] == pytest.approx(0.03)
+    assert lines[1]["unit_price"] == pytest.approx(0.99)
+
+
+def test_shortage_suggestion_previews_tier_price(db):
+    p = catrepo.create_part(db, part={"part_no": "SP-1"}, supplier_lines=[{
+        "supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 50, "unit_price": 0.04}]}],
+        opening={"qty": 0})
+    asm = asmrepo.create_assembly(db, {"part_no": "SPA"})
+    asmrepo.add_bom_line(db, asm, p, 1, None)
+    worepo.create_work_order(db, {"assembly_id": asm, "qty": 100})   # short 100
+    s = repo.shortage_suggestions(db)[0]
+    assert s["short"] == 100 and s["unit_price"] == pytest.approx(0.04)   # stored tier at 100
+
+
+def test_po_generation_recalcs_sell_tiers(db):
+    """Generating a PO re-anchors the part's sell tiers to the ordered (list) price x markup."""
+    p = catrepo.create_part(db, part={"part_no": "GS-1"}, supplier_lines=[{
+        "supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 2.0, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 2.00}, {"break_qty": 1000, "unit_price": 1.00}]}])
+    repo.create_pos_from_suggestions(db, {p: 1000}, "u")     # anchor = stored tier at 1000 = 1.00
+    sell = {t["break_qty"]: t["unit_price"] for t in catrepo.get_part(db, p)["sell_tiers"]}
+    assert sell == pytest.approx({1: 2.60, 1000: 1.30})      # list x default markup 1.30
+
+
+def test_negotiated_line_price_rebases_sell_tiers(db):
+    p = catrepo.create_part(db, part={"part_no": "GS-2"}, supplier_lines=[{
+        "supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 2.0, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 2.00}, {"break_qty": 1000, "unit_price": 1.00}]}])
+    po = repo.create_po(db, {"supplier_id": _acme_id(db)})
+    repo.add_line(db, po, p, 1000, 0.90)                     # negotiated 0.90 for the 1000 tier
+    sell = {t["break_qty"]: t["unit_price"] for t in catrepo.get_part(db, p)["sell_tiers"]}
+    assert sell == pytest.approx({1: 2.34, 1000: 1.17})     # 0.90 x (cost/1.00) x 1.30
+
+    line_id = repo.get_po(db, po)["lines"][0]["id"]
+    repo.update_line(db, po, line_id, 1000, 0.80)            # re-negotiate -> re-anchor
+    sell = {t["break_qty"]: t["unit_price"] for t in catrepo.get_part(db, p)["sell_tiers"]}
+    assert sell == pytest.approx({1: 2.08, 1000: 1.04})     # 0.80 x (cost/1.00) x 1.30
+
+
+def test_receive_records_last_purchase_price(db):
+    """Receiving overwrites the matched supplier offer's unit price with the price paid, records it
+    on the GRN line, and leaves parts.unit_cost untouched."""
+    p, asm, wo = _setup_shortage(db)          # R-1 default supplier Acme @ 0.5/pc, unit_cost 0.5
+    po_id = repo.create_pos_from_suggestions(db, {p: 30}, "u")[0]
+    line_id = repo.get_po(db, po_id)["lines"][0]["id"]
+    repo.update_line(db, po_id, line_id, 30, 0.30)   # negotiated a lower price on the draft
+    repo.mark_ordered(db, po_id)
+    grn_id = repo.receive_po(db, po_id, {line_id: 30}, "u")
+
+    part = catrepo.get_part(db, p)
+    acme = next(s for s in part["suppliers"] if s["supplier_name"] == "Acme Supplies")
+    assert acme["unit_price"] == pytest.approx(0.30)   # offer price = last purchase price
+    assert part["unit_cost"] == pytest.approx(0.5)     # unit_cost deliberately unchanged
+
+    from digisearch.web.features.goods_receipts import repo as grnrepo
+    g = grnrepo.get_receipt(db, grn_id)
+    assert g["lines"][0]["unit_price"] == pytest.approx(0.30)   # per-receipt history
+    assert g["lines"][0]["line_value"] == pytest.approx(9.0)    # 30 * 0.30
+    assert g["total_value"] == pytest.approx(9.0)
+
+
+def test_second_purchase_overwrites_offer_but_keeps_history(db):
+    p, asm, wo = _setup_shortage(db)
+    po1 = repo.create_pos_from_suggestions(db, {p: 30}, "u")[0]
+    l1 = repo.get_po(db, po1)["lines"][0]["id"]
+    repo.update_line(db, po1, l1, 30, 0.30)
+    repo.mark_ordered(db, po1)
+    grn1 = repo.receive_po(db, po1, {l1: 30}, "u")
+
+    po2 = repo.create_po(db, {"supplier_id": _acme_id(db)})
+    repo.add_line(db, po2, p, 10, 0.20)              # a later, cheaper buy
+    repo.mark_ordered(db, po2)
+    l2 = repo.get_po(db, po2)["lines"][0]["id"]
+    repo.receive_po(db, po2, {l2: 10}, "u")
+
+    acme = next(s for s in catrepo.get_part(db, p)["suppliers"]
+                if s["supplier_name"] == "Acme Supplies")
+    assert acme["unit_price"] == pytest.approx(0.20)   # latest purchase wins
+
+    from digisearch.web.features.goods_receipts import repo as grnrepo
+    assert grnrepo.get_receipt(db, grn1)["lines"][0]["unit_price"] == pytest.approx(0.30)  # history intact
+
+
+def test_receive_no_offer_for_supplier_skips_price(db):
+    """A part bought from a supplier that isn't one of its offers: stock + GRN line recorded, but no
+    offer price is written (and none fabricated)."""
+    p = catrepo.create_part(
+        db, part={"part_no": "NB-1"},
+        supplier_lines=[{"supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 0.5,
+                         "reel_qty": 1, "is_default": True}], opening={"qty": 0})
+    beta_id = catrepo.upsert_supplier(db, name="Beta Ltd")
+    po = repo.create_po(db, {"supplier_id": beta_id})
+    repo.add_line(db, po, p, 5, 0.90)
+    repo.mark_ordered(db, po)
+    line_id = repo.get_po(db, po)["lines"][0]["id"]
+    grn_id = repo.receive_po(db, po, {line_id: 5}, "u")
+
+    part = catrepo.get_part(db, p)
+    assert len(part["suppliers"]) == 1                        # no Beta offer was fabricated
+    assert part["suppliers"][0]["unit_price"] == pytest.approx(0.5)   # Acme offer untouched
+    assert part["total_qty"] == 5                            # stock still moved
+    from digisearch.web.features.goods_receipts import repo as grnrepo
+    assert grnrepo.get_receipt(db, grn_id)["lines"][0]["unit_price"] == pytest.approx(0.90)
+
+
+def test_receive_updates_only_the_receiving_offer(db):
+    """With two offers, receiving against the non-default one updates only that offer; the default
+    offer (and thus parts.unit_cost) is untouched."""
+    p = catrepo.create_part(
+        db, part={"part_no": "TWO-1"}, supplier_lines=[
+            {"supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 0.5,
+             "reel_qty": 1, "is_default": True},
+            {"supplier_name": "Beta Ltd", "supplier_pno": "B", "unit_price": 0.4,
+             "reel_qty": 1, "is_default": False}], opening={"qty": 0})
+    beta_id = next(s["id"] for s in repo.suppliers(db) if s["name"] == "Beta Ltd")
+    po = repo.create_po(db, {"supplier_id": beta_id})
+    repo.add_line(db, po, p, 10, 0.35)
+    repo.mark_ordered(db, po)
+    line_id = repo.get_po(db, po)["lines"][0]["id"]
+    repo.receive_po(db, po, {line_id: 10}, "u")
+
+    part = catrepo.get_part(db, p)
+    by = {s["supplier_name"]: s for s in part["suppliers"]}
+    assert by["Beta Ltd"]["unit_price"] == pytest.approx(0.35)   # the receiving offer updated
+    assert by["Acme Supplies"]["unit_price"] == pytest.approx(0.5)  # default offer untouched
+    assert part["unit_cost"] == pytest.approx(0.5)              # unit_cost (from default) untouched
+
+
 def test_manual_po_create_and_lines(db):
     p = catrepo.create_part(db, part={"part_no": "M-1"},
                             supplier_lines=[{"supplier_name": "Sup", "unit_price": 2.0,

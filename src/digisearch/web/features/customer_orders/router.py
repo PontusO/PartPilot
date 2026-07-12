@@ -188,6 +188,13 @@ async def update_line(request: Request, order_id: int, line_id: int):
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
 
 
+@router.post("/{order_id}/lines/{line_id}/reprice")
+def reprice_line(request: Request, order_id: int, line_id: int):
+    require_role(request, CUSTOMER_ORDER_WRITE_ROLES)
+    repo.reprice_line(request.app.state.database, order_id, line_id)
+    return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
+
+
 @router.post("/{order_id}/lines/{line_id}/delete")
 def delete_line(request: Request, order_id: int, line_id: int):
     require_role(request, CUSTOMER_ORDER_WRITE_ROLES)

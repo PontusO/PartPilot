@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from ...core.db import Database
 
 # Company profile fields (stored as app_settings keys "company.<field>").
@@ -114,6 +116,43 @@ def get_orders(db: Database) -> dict:
 
 def save_orders(db: Database, data: dict) -> None:
     set_setting(db, "orders.ack_confirms", "1" if data.get("ack_confirms") else "0")
+
+
+# ---- pricing settings ----
+
+# Default sell markup applied to a part's cost when it has no explicit sell tiers and no per-part
+# markup override. 1.30 = cost + 30 %. Stored as a bare float string under pricing.default_markup.
+DEFAULT_MARKUP = 1.30
+
+
+def get_default_markup(db: Database) -> float:
+    """The configured default sell markup (> 0), or DEFAULT_MARKUP if unset/invalid. A markup of 0
+    (or negative) is rejected — it would silently zero every generated sell price. Tolerates the
+    setup feature (and its ``app_settings`` table) not being installed — pricing helpers in other
+    features call this and must not hard-fail when Setup isn't part of a given app."""
+    try:
+        raw = get_setting(db, "pricing.default_markup")
+    except sqlite3.OperationalError:
+        return DEFAULT_MARKUP
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MARKUP
+    return value if value > 0 else DEFAULT_MARKUP
+
+
+def get_pricing(db: Database) -> dict:
+    return {"default_markup": get_default_markup(db)}
+
+
+def save_pricing(db: Database, data: dict) -> None:
+    raw = (str(data.get("default_markup") or "")).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return  # ignore an unparseable submission, keep the current value
+    if value > 0:      # 0 / negative would zero all sell prices — reject, keep the current value
+        set_setting(db, "pricing.default_markup", repr(value))
 
 
 # ---- webshop (WooCommerce) settings ----

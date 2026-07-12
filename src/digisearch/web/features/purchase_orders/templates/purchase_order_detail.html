@@ -215,10 +215,11 @@
         <div style="width:90px;"><label for="qty">Qty</label>
           <input id="qty" name="qty" type="number" step="any" min="1" value="1" class="rinput" style="width:90px"></div>
         <div style="width:120px;"><label for="unit_price">Unit price</label>
-          <input id="unit_price" name="unit_price" type="number" step="any" class="rinput" style="width:120px"></div>
+          <input id="unit_price" name="unit_price" type="number" step="any" class="rinput"
+                 style="width:120px" placeholder="auto (tier)"></div>
         <button type="submit" id="addBtn" disabled>Add</button>
       </div>
-      <label for="partsearch" style="margin-top:.5rem;">Find a part, then click it to select</label>
+      <label for="partsearch" style="margin-top:.5rem;">Find a part, then click it to select — leave the price blank for the tier price at the ordered quantity (a distributor part is re-priced live)</label>
       <input id="partsearch" type="text" autocomplete="off" placeholder="Filter by part no or value…"
              oninput="filterParts()"
              style="width:100%; padding:.5rem .65rem; background:#0d1219; color:var(--fg);
@@ -253,7 +254,7 @@
   function selectPart(el) {
     document.getElementById('sel_part_id').value = el.dataset.id;
     document.getElementById('sel_part_label').value = el.dataset.pn;
-    document.getElementById('unit_price').value = el.dataset.price;
+    document.getElementById('unit_price').value = '';  // blank -> tier price at qty (live for a distributor)
     document.getElementById('addBtn').disabled = false;
     document.querySelectorAll('#addModal .part-row').forEach(b => b.classList.remove('sel'));
     el.classList.add('sel');
