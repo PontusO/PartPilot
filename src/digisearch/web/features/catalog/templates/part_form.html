@@ -156,12 +156,14 @@
     </div>
     <button type="button" class="ghost" style="margin-top:.6rem" onclick="addRow()">+ Add supplier</button>
 
-    <h2>Customer pricing</h2>
-    <p class="note">Tiered sell price by the quantity of this component a build consumes
-      (qty/board × build volume). With no tiers, the sell price falls back to cost × markup.</p>
+    <h2>Internal loaded cost</h2>
+    <p class="note">Components are never sold — this is the <b>loaded internal cost</b> (material ×
+      overhead: handling, storage, warehousing) by the quantity a build consumes (qty/board × volume).
+      With no tiers it falls back to material cost × overhead factor. Profit is added later, on the
+      finished product.</p>
     <div class="formgrid">
       <div>
-        <label for="markup">Markup (× cost)</label>
+        <label for="markup">Overhead factor (× material)</label>
         <input id="markup" name="markup" type="number" step="any" min="0"
                value="{{ values.get('markup') if values.get('markup') is not none else '' }}"
                placeholder="blank = Setup default">
@@ -187,7 +189,7 @@
     </div>
     {% endif %}
 
-    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Sell price tiers</h3>
+    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Loaded cost tiers</h3>
     <div style="overflow-x:auto;">
       <table>
         <thead><tr><th>Break qty</th><th>Unit sell price</th><th></th></tr></thead>
@@ -205,7 +207,7 @@
     <button type="button" class="ghost" style="margin-top:.6rem" onclick="addSell()">+ Add tier</button>
 
     {% if gen_tiers %}
-    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Generated tiers (cost × markup, read-only)</h3>
+    <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Generated loaded cost (material × overhead, read-only)</h3>
     <p class="note">Regenerate below after cost or markup changes. A manual tier at the same break
       quantity overrides the generated one.</p>
     <div style="overflow-x:auto;">
@@ -235,9 +237,9 @@
   </form>
   <form method="post" action="/catalog/{{ part_id }}/generate-sell-tiers"
         style="margin-top:.6rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
-    <button type="submit" class="ghost">Generate sell tiers from cost × markup</button>
-    <span class="note">Uses the saved markup and captured cost breaks; manual tiers are kept.
-      Save a changed markup first.</span>
+    <button type="submit" class="ghost">Generate loaded cost from material × overhead</button>
+    <span class="note">Uses the saved overhead factor and captured material cost breaks; manual tiers
+      are kept. Save a changed overhead factor first.</span>
   </form>
   {% endif %}
 </div>

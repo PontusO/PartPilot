@@ -8,14 +8,22 @@
        border-radius:9px; padding:.6rem .9rem; margin-bottom:1rem;">Saved.</div>{% endif %}
 
   <form method="post" action="/setup/pricing">
-    <label for="default_markup">Default sell markup (× cost)</label>
+    <label for="default_markup">Default overhead factor (material → loaded cost)</label>
     <input id="default_markup" name="default_markup" type="number" step="any" min="0"
            value="{{ '%g'|format(pricing.default_markup) }}" style="max-width:180px;">
-    <p class="note" style="margin-top:.6rem;">Multiplier applied to a part's cost to derive its
-      customer sell price when the part has no explicit sell tiers and no per-part markup override.
-      For example <b>1.30</b> means cost + 30 %. Used by the "Generate sell tiers from cost × markup"
-      button on a part, the assembly BOM sell export, and the automatic price on a customer-order line.
-      A part's own markup (on its edit page) always wins over this default.</p>
+    <p class="note" style="margin-top:.6rem;">Multiplier that turns a component's <b>material</b> cost
+      (what we pay the supplier) into its <b>loaded</b> internal cost — covering handling, storage,
+      warehousing, procurement, etc. e.g. <b>1.30</b> = material + 30 %. This is <i>not</i> profit;
+      components are never sold, only consumed to build assemblies. A part's own overhead factor (on
+      its edit page) wins over this default.</p>
+
+    <label for="default_mfg_margin" style="display:block; margin-top:1.2rem;">Default manufacturing margin (loaded build cost → customer price)</label>
+    <input id="default_mfg_margin" name="default_mfg_margin" type="number" step="any" min="0"
+           value="{{ '%g'|format(pricing.default_mfg_margin) }}" style="max-width:180px;">
+    <p class="note" style="margin-top:.6rem;">Our <b>profit</b> margin, applied once at the sale: a
+      finished product's customer price = its loaded build cost × this margin. e.g. <b>1.30</b> = a
+      30 % manufacturing margin. An assembly's own manufacturing margin (on its edit page) wins over
+      this default. Flows through to customer orders, despatch and invoices.</p>
     <div style="margin-top:1rem;"><button type="submit">Save</button></div>
   </form>
 </div>

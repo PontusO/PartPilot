@@ -89,14 +89,16 @@ def fetch_offer_breaks(clients, supplier_name: str | None, supplier_pno: str | N
     return cut, reel
 
 
-def refresh_cost_tiers(db: Database, part_id: int) -> dict:
+def refresh_cost_tiers(db: Database, part_id: int, clients=None) -> dict:
     """Refresh cost tiers for every Digi-Key/Mouser offer on the part. Returns
-    ``{"updated": [...], "skipped": [...], "errors": [...]}`` of human-readable lines."""
+    ``{"updated": [...], "skipped": [...], "errors": [...]}`` of human-readable lines. Pass a prebuilt
+    ``clients`` tuple (from :func:`build_clients`) to refresh many parts without rebuilding the
+    Digi-Key/Mouser clients each call."""
     part = repo.get_part(db, part_id)
     if part is None:
         return {"updated": [], "skipped": [], "errors": ["Part not found."]}
 
-    dk, mo = _build_clients()
+    dk, mo = clients if clients is not None else _build_clients()
     updated: list[str] = []
     skipped: list[str] = []
     errors: list[str] = []

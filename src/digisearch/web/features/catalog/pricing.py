@@ -107,3 +107,60 @@ def rolled_sell_price(conn, part_id: int, qty_needed: float, default_markup: flo
                                        default_markup, seen | {part_id})
         total += (child_unit or 0.0) * qty_per
     return total
+
+
+def effective_mfg_margin(conn, part_id: int, default_mfg: float) -> float:
+    """The product's manufacturing (profit) margin — its own ``parts.mfg_margin`` if set, else the
+    ``default_mfg`` (app setting)."""
+    row = conn.execute("SELECT mfg_margin FROM parts WHERE id = ?", (part_id,)).fetchone()
+    if row is not None and row["mfg_margin"] is not None:
+        return row["mfg_margin"]
+    return default_mfg
+
+
+def product_sell_price(conn, part_id: int, qty: float, overhead_default: float,
+                       mfg_default: float) -> float | None:
+    """Customer price for a finished product at ``qty``: its LOADED build cost
+    (``rolled_sell_price`` = material × overhead, rolled up the BOM) × the product's MANUFACTURING
+    margin. The margin (profit) is applied once, HERE — never inside ``rolled_sell_price`` — so a
+    sub-assembly consumed internally never compounds it."""
+    loaded = rolled_sell_price(conn, part_id, qty, overhead_default)
+    if loaded is None:
+        return None
+    return loaded * effective_mfg_margin(conn, part_id, mfg_default)
+
+
+def leaf_cost_at(conn, part_id: int, qty: float) -> float | None:
+    """Per-piece COST of a single (non-assembly) part at ``qty``: the default supplier's cut cost tier
+    at ``qty`` (``price_at(load_cost_tiers(...))``), else the flat ``parts.unit_cost``. No markup —
+    this is the cost basis, used for a build-cost estimate (cf. ``leaf_sell_unit``)."""
+    ps_id = _default_supplier_id(conn, part_id)
+    cost = price_at(load_cost_tiers(conn, ps_id), qty) if ps_id is not None else None
+    if cost is None:
+        row = conn.execute("SELECT unit_cost FROM parts WHERE id = ?", (part_id,)).fetchone()
+        cost = row["unit_cost"] if row is not None else None
+    return cost
+
+
+def rolled_cost_at(conn, part_id: int, qty_needed: float,
+                   seen: frozenset = frozenset()) -> float | None:
+    """Per-unit COST of ``part_id`` when ``qty_needed`` are being built — the cost analogue of
+    ``rolled_sell_price``. Leaf → ``leaf_cost_at``; assembly → Σ children
+    ``rolled_cost_at(child, qty_needed * qty_per) * qty_per`` (each child's cost tier chosen by the
+    total quantity the build consumes). Cycle-guarded."""
+    row = conn.execute("SELECT kind FROM parts WHERE id = ?", (part_id,)).fetchone()
+    if row is None:
+        return None
+    if row["kind"] != "ASSY":
+        return leaf_cost_at(conn, part_id, qty_needed)
+    if part_id in seen:            # cyclic BOM guard
+        return 0.0
+    children = conn.execute(
+        "SELECT child_id, qty_per FROM bom_lines WHERE parent_id = ?", (part_id,)
+    ).fetchall()
+    total = 0.0
+    for c in children:
+        qty_per = c["qty_per"] or 0
+        child_unit = rolled_cost_at(conn, c["child_id"], qty_needed * qty_per, seen | {part_id})
+        total += (child_unit or 0.0) * qty_per
+    return total

@@ -88,9 +88,10 @@
   {% endif %}
 
   {% if part.sell_tiers %}
-  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Customer sell tiers</h2>
-  <p class="note">Quantity-break sell prices (per piece). <b>Generated</b> tiers are recomputed from
-    the purchase cost × markup; <b>manual</b> tiers are set by hand and win at their break qty.</p>
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Loaded cost tiers (internal)</h2>
+  <p class="note">Quantity-break <b>loaded</b> cost per piece (material × overhead — not a sales
+    price; components aren't sold). <b>Generated</b> tiers are recomputed from material cost ×
+    overhead; <b>manual</b> tiers are set by hand and win at their break qty.</p>
   <div style="overflow-x:auto;">
     <table>
       <thead>

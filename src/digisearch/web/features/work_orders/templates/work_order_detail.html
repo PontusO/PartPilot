@@ -14,6 +14,10 @@
     <div class="card"><b>{{ "%g"|format(w.qty) }}</b><small>to build</small></div>
     <div class="card"><b>{{ w.lines|length }}</b><small>components</small></div>
     <div class="card"><b>{{ w.short_count }}</b><small>short</small></div>
+    {% if w.loaded_build_cost %}
+    <div class="card"><b>{{ "%.2f"|format(w.loaded_build_cost) }}</b>
+      <small>loaded build cost (SEK)</small></div>
+    {% endif %}
     <div class="card"><b>{{ w.build_date or '—' }}</b><small>build date</small></div>
   </div>
 
@@ -110,7 +114,8 @@
     <table>
       <thead>
         <tr><th class="num">#</th><th>Component</th><th>Value</th><th class="num">Required</th>
-            <th class="num">Issued</th><th class="num">Available</th><th class="num">Short</th></tr>
+            <th class="num">Issued</th><th class="num">Available</th><th class="num">Short</th>
+            <th class="num">Loaded (SEK)</th></tr>
       </thead>
       <tbody>
         {% for ln in w.lines %}
@@ -123,10 +128,17 @@
           <td class="num">{{ "%g"|format(ln.qty_issued) }}</td>
           <td class="num">{{ '∞' if ln.unlimited else "%g"|format(ln.available) }}</td>
           <td class="num">{% if ln.short > 0 %}<span class="badge bad">{{ "%g"|format(ln.short) }}</span>{% endif %}</td>
+          <td class="num">{% if ln.loaded_line is not none %}{{ "%.2f"|format(ln.loaded_line) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        {% if not w.lines %}<tr><td colspan="7" class="note">This assembly has no BOM — nothing to issue.</td></tr>{% endif %}
+        {% if not w.lines %}<tr><td colspan="8" class="note">This assembly has no BOM — nothing to issue.</td></tr>{% endif %}
       </tbody>
+      {% if w.loaded_build_cost %}
+      <tfoot>
+        <tr><td colspan="7" class="num" style="font-weight:600;">Loaded build cost</td>
+            <td class="num" style="font-weight:600;">{{ "%.2f"|format(w.loaded_build_cost) }}</td></tr>
+      </tfoot>
+      {% endif %}
     </table>
   </div>
 </div>

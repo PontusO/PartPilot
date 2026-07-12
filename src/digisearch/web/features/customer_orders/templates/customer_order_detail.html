@@ -308,7 +308,7 @@
                 data-s="{{ (p.part_no ~ ' ' ~ (p.value or '') ~ ' ' ~ p.kind) | lower }}">
           <span class="pn-line">
             <span class="pn">{{ p.part_no }}{% if p.kind == 'ASSY' %} <span class="badge stock">ASSY</span>{% endif %}</span>
-            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock{% if p.price is not none %} · {{ 'build cost' if p.kind == 'ASSY' else 'cost' }} from {{ "%.4f"|format(p.price) }}{% endif %}</span>
+            <span class="stk">{{ "%.0f"|format(p.total_qty or 0) }} in stock{% if p.price is not none %} · price from {{ "%.4f"|format(p.price) }}{% endif %}</span>
           </span>
           {% if p.value %}<span class="pv">{{ p.value }}</span>{% endif %}
         </button>

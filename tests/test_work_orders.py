@@ -43,6 +43,16 @@ def _setup(db):
     return a, b, sub, top
 
 
+def test_work_order_loaded_build_cost(db):
+    a, b, sub, top = _setup(db)   # components A,B at material cost 1.0
+    wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 10}))
+    # A=60, B=50 exploded; loaded = material 1.0 × overhead 1.30 = 1.3 each → 78 + 65 = 143
+    assert wo["loaded_build_cost"] == pytest.approx(143.0)
+    by = {ln["part_no"]: ln for ln in wo["lines"]}
+    assert by["COMP-A"]["loaded_line"] == pytest.approx(78.0)
+    assert by["COMP-B"]["loaded_line"] == pytest.approx(65.0)
+
+
 def test_explode_multilevel(db):
     a, b, sub, top = _setup(db)
     with db.connect() as conn:

@@ -156,6 +156,10 @@ def list_work_orders(db: Database, status: str | None = None, search: str | None
 
 
 def get_work_order(db: Database, wo_id: int) -> dict | None:
+    from ..catalog import pricing
+    from ..setup import repo as setup_repo
+
+    overhead = setup_repo.get_default_markup(db)   # material -> loaded (internal) cost
     with db.connect() as conn:
         head = conn.execute(
             """SELECT w.*, p.part_no AS assembly_part_no, p.value AS assembly_value,
@@ -181,15 +185,24 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
                 else {"diverged": False, "added": [], "removed": [], "changed": []})
     wo = dict(head)
     short_count = 0
-    for d in lines:
-        d["unlimited"] = bool(d["unlimited_stock"])
-        # Unlimited parts (e.g. SMT Assembly) never run out, so they're always available, never short.
-        d["available"] = (d["total_qty"] or 0) - (d["total_alloc"] or 0)
-        d["short"] = 0.0 if d["unlimited"] else max(0.0, (d["qty_required"] or 0) - d["available"])
-        if d["short"] > 0:
-            short_count += 1
+    loaded_build_cost = 0.0
+    with db.connect() as conn:                       # loaded (internal) cost per exploded component
+        for d in lines:
+            d["unlimited"] = bool(d["unlimited_stock"])
+            # Unlimited parts (e.g. SMT Assembly) never run out — always available, never short.
+            d["available"] = (d["total_qty"] or 0) - (d["total_alloc"] or 0)
+            d["short"] = 0.0 if d["unlimited"] else max(0.0, (d["qty_required"] or 0) - d["available"])
+            if d["short"] > 0:
+                short_count += 1
+            # Loaded cost = material × overhead (WO lines are already exploded to base components).
+            lu = pricing.leaf_sell_unit(conn, d["part_id"], d["qty_required"] or 0, overhead)
+            d["loaded_unit"] = lu
+            d["loaded_line"] = lu * (d["qty_required"] or 0) if lu is not None else None
+            if d["loaded_line"] is not None:
+                loaded_build_cost += d["loaded_line"]
     wo["lines"] = lines
     wo["short_count"] = short_count
+    wo["loaded_build_cost"] = loaded_build_cost
     wo["bom_diff"] = diff
     wo["bom_diverged"] = diff["diverged"]
     return wo

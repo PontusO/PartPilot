@@ -126,6 +126,37 @@ def test_refresh_cost_tiers_route_and_detail_section(app, monkeypatch):
     assert "Supplier cost tiers" in detail and "0.08000" in detail
 
 
+def test_assembly_estimate_route(app, monkeypatch):
+    from digisearch.models import Candidate
+    from digisearch.web.features.assemblies import repo as asmrepo
+    from digisearch.web.features.catalog import cost_refresh
+    from digisearch.web.features.catalog import repo as catrepo
+
+    db = app.state.database
+    leaf = catrepo.create_part(db, part={"part_no": "EST-L"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "EST-L-ND", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True, "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}]}], opening={"qty": 0})
+    asm = asmrepo.create_assembly(db, {"part_no": "EST-ASM"})
+    asmrepo.add_bom_line(db, asm, leaf, 2, "R1")
+
+    class FakeDK:
+        def keyword_search(self, kw, limit=5):
+            return [Candidate(supplier="Digi-Key", mpn=kw, dk_part_number=kw, price_breaks=[(1, 0.05)])]
+
+    monkeypatch.setattr(cost_refresh, "build_clients", lambda: (FakeDK(), None))
+
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")  # purchasing -> can edit
+    r = client.post(f"/assemblies/{asm}/estimate", data={"build_qty": "10"})
+    assert r.status_code == 200 and "est. material @ 10" in r.text and "Refreshed" in r.text
+    assert catrepo.get_part(db, leaf)["unit_cost"] == pytest.approx(0.10)   # unit_cost untouched
+
+    ware = TestClient(app)
+    _login(ware, "ware1", "pw")     # warehouse -> not an assembly-write role
+    assert ware.post(f"/assemblies/{asm}/estimate",
+                     data={"build_qty": "1"}).status_code in (302, 303, 403)
+
+
 def test_setup_pricing_markup_screen(app):
     from digisearch.web.features.setup import repo as setup_repo
 
@@ -134,16 +165,20 @@ def test_setup_pricing_markup_screen(app):
     _login(client, "boss", "pw")
 
     page = client.get("/setup/pricing")
-    assert page.status_code == 200 and "Default sell markup" in page.text
-    assert 'value="1.3"' in page.text                      # unset -> default 1.30
+    assert page.status_code == 200 and "Default overhead factor" in page.text
+    assert "Default manufacturing margin" in page.text     # the new profit layer
+    assert 'value="1.3"' in page.text                      # unset -> defaults 1.30
 
-    r = client.post("/setup/pricing", data={"default_markup": "1.45"})
+    r = client.post("/setup/pricing",
+                    data={"default_markup": "1.45", "default_mfg_margin": "1.6"})
     assert r.status_code == 200 and "Saved." in r.text
     assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
+    assert setup_repo.get_default_mfg_margin(app.state.database) == pytest.approx(1.6)
 
-    # A markup of 0 (or negative) would zero all sell prices -> rejected, keeps the current value.
-    client.post("/setup/pricing", data={"default_markup": "0"})
+    # 0 / negative would zero prices -> rejected, keeps the current values.
+    client.post("/setup/pricing", data={"default_markup": "0", "default_mfg_margin": "-1"})
     assert setup_repo.get_default_markup(app.state.database) == pytest.approx(1.45)
+    assert setup_repo.get_default_mfg_margin(app.state.database) == pytest.approx(1.6)
 
     # a purchasing user cannot reach setup
     other = TestClient(app)
@@ -205,9 +240,9 @@ def test_part_form_pricing_roundtrip_and_generate(app):
     assert sell.get(500) == "markup"          # generated at cost 0.20 x markup 1.5 = 0.30
     assert sell.get(1) == "manual" and sell.get(1000) == "manual"   # manual tiers preserved
 
-    # The edit form renders with the markup and both cost + sell tier tables.
+    # The edit form renders with the overhead factor and both cost + loaded-cost tier tables.
     form = client.get(f"/catalog/{pid}/edit").text
-    assert 'value="1.5"' in form and "Sell price tiers" in form
+    assert 'value="1.5"' in form and "Loaded cost tiers" in form
     assert "Captured supplier cost breaks" in form
 
 
@@ -690,15 +725,15 @@ def test_customer_orders_flow(app):
     assert r.status_code == 303
     oid = int(r.headers["location"].rsplit("/", 1)[1])
 
-    # add a line — price omitted, defaults to the tiered sell price = cost 2.0 x markup 1.30, qty 10
+    # add a line — price omitted, defaults to customer price = material 2.0 x overhead 1.30 x mfg 1.30
     client.post(f"/customer-orders/{oid}/lines/add", data={"part_id": part, "qty": "10"},
                 follow_redirects=False)
     page = client.get(f"/customer-orders/{oid}").text
     assert "WIDGET-1" in page and "SO-9" in page
 
     order = corepo.get_order(db, oid)
-    assert order["lines"][0]["unit_price"] == pytest.approx(2.6)
-    assert abs(order["grand_total"] - 32.5) < 1e-9  # 10*2.6 + 25% tax
+    assert order["lines"][0]["unit_price"] == pytest.approx(3.38)
+    assert abs(order["grand_total"] - 42.25) < 1e-9  # 10*3.38 + 25% tax
 
     lid = order["lines"][0]["id"]
     client.post(f"/customer-orders/{oid}/lines/{lid}/update",
@@ -1429,7 +1464,7 @@ def test_assembly_bom_add_and_delete(app):
     assert r.status_code == 303
     det = client.get(f"/assemblies/{asm}").text
     assert "RES-1" in det and "R1, R2" in det
-    assert "total cost" in det and "Unit (SEK)" in det   # cost summary + per-line columns
+    assert "material cost" in det and "loaded build cost" in det and "Unit (SEK)" in det
 
     # delete it
     m = re.search(rf"/assemblies/{asm}/lines/(\d+)/delete", det)

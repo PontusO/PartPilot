@@ -339,4 +339,14 @@ MIGRATIONS = [
         ALTER TABLE parts ADD COLUMN markup REAL;
         """,
     ),
+    Migration(
+        version=15,
+        name="manufacturing margin",
+        # Profit lives on the finished PRODUCT sold to a customer, not on components (components are
+        # never sold — they're consumed to build assemblies). `parts.markup` is the internal OVERHEAD
+        # factor (material -> loaded cost); this `mfg_margin` is the MANUFACTURING profit margin
+        # applied once at the customer-facing boundary (loaded build cost -> customer price). Set on an
+        # assembly; NULL falls back to the app setting `pricing.default_mfg_margin`.
+        sql="ALTER TABLE parts ADD COLUMN mfg_margin REAL;",
+    ),
 ]

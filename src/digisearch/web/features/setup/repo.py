@@ -120,39 +120,57 @@ def save_orders(db: Database, data: dict) -> None:
 
 # ---- pricing settings ----
 
-# Default sell markup applied to a part's cost when it has no explicit sell tiers and no per-part
-# markup override. 1.30 = cost + 30 %. Stored as a bare float string under pricing.default_markup.
+# Two multipliers in the costing model:
+#  - default_markup      = OVERHEAD factor: material cost -> internal loaded cost (handling/storage/…).
+#  - default_mfg_margin  = MANUFACTURING margin: loaded build cost -> customer price (profit, applied
+#                          once at the sale). Both must be > 0; 0/negative would zero prices.
 DEFAULT_MARKUP = 1.30
+DEFAULT_MFG_MARGIN = 1.30
 
 
-def get_default_markup(db: Database) -> float:
-    """The configured default sell markup (> 0), or DEFAULT_MARKUP if unset/invalid. A markup of 0
-    (or negative) is rejected — it would silently zero every generated sell price. Tolerates the
-    setup feature (and its ``app_settings`` table) not being installed — pricing helpers in other
-    features call this and must not hard-fail when Setup isn't part of a given app."""
+def _get_positive_setting(db: Database, key: str, default: float) -> float:
+    """A stored float setting that must be > 0, else ``default``. Tolerates the setup feature (and its
+    ``app_settings`` table) not being installed — pricing helpers in other features call this and must
+    not hard-fail when Setup isn't part of a given app."""
     try:
-        raw = get_setting(db, "pricing.default_markup")
+        raw = get_setting(db, key)
     except sqlite3.OperationalError:
-        return DEFAULT_MARKUP
+        return default
     try:
         value = float(raw)
     except (TypeError, ValueError):
-        return DEFAULT_MARKUP
-    return value if value > 0 else DEFAULT_MARKUP
+        return default
+    return value if value > 0 else default
+
+
+def _save_positive_setting(db: Database, key: str, raw) -> None:
+    """Store a > 0 float setting; ignore blank/unparseable/≤0 (keep the current value)."""
+    try:
+        value = float((str(raw or "")).strip())
+    except ValueError:
+        return
+    if value > 0:
+        set_setting(db, key, repr(value))
+
+
+def get_default_markup(db: Database) -> float:
+    """The overhead factor (material -> loaded cost), > 0, else DEFAULT_MARKUP."""
+    return _get_positive_setting(db, "pricing.default_markup", DEFAULT_MARKUP)
+
+
+def get_default_mfg_margin(db: Database) -> float:
+    """The manufacturing margin (loaded build cost -> customer price), > 0, else DEFAULT_MFG_MARGIN."""
+    return _get_positive_setting(db, "pricing.default_mfg_margin", DEFAULT_MFG_MARGIN)
 
 
 def get_pricing(db: Database) -> dict:
-    return {"default_markup": get_default_markup(db)}
+    return {"default_markup": get_default_markup(db),
+            "default_mfg_margin": get_default_mfg_margin(db)}
 
 
 def save_pricing(db: Database, data: dict) -> None:
-    raw = (str(data.get("default_markup") or "")).strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        return  # ignore an unparseable submission, keep the current value
-    if value > 0:      # 0 / negative would zero all sell prices — reject, keep the current value
-        set_setting(db, "pricing.default_markup", repr(value))
+    _save_positive_setting(db, "pricing.default_markup", data.get("default_markup"))
+    _save_positive_setting(db, "pricing.default_mfg_margin", data.get("default_mfg_margin"))
 
 
 # ---- webshop (WooCommerce) settings ----

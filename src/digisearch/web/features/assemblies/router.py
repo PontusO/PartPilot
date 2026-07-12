@@ -69,6 +69,8 @@ def _parse_assembly(form) -> dict:
         "category": (form.get("category") or "").strip().upper() or None,
         "description": (form.get("description") or "").strip() or None,
         "default_build_days": _int(form.get("default_build_days")),
+        # Per-product manufacturing margin (> 0), NULL -> Setup default. 0/negative -> None.
+        "mfg_margin": (lambda v: v if (v is not None and v > 0) else None)(_num(form.get("mfg_margin"))),
     }
 
 
@@ -139,7 +141,8 @@ async def update_assembly_route(request: Request, part_id: int):
     return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
 
 
-def _render_detail(request: Request, part_id: int, user, error: str | None = None, status: int = 200):
+def _render_detail(request: Request, part_id: int, user, error: str | None = None, status: int = 200,
+                   estimate: dict | None = None, notice: str | None = None):
     db = request.app.state.database
     templates = request.app.state.templates
     assembly = repo.get_assembly(db, part_id)
@@ -161,6 +164,8 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             "can_edit": can_edit,
             "parts": repo.parts_for_picker(db, part_id) if can_edit else [],
             "error": error,
+            "estimate": estimate,     # transient build-cost estimate (None on a normal GET)
+            "notice": notice,
             "product": product,
             "sync": sync,
             "devmgmt_configured": DevmgmtConfig.from_env() is not None,
@@ -175,6 +180,37 @@ def assembly_detail(request: Request, part_id: int):
     return _render_detail(request, part_id, user)
 
 
+@router.post("/{part_id}/estimate", response_class=HTMLResponse)
+async def estimate(request: Request, part_id: int):
+    """Refresh distributor cost tiers for the BOM components we'd have to buy at the given build
+    volume (in-stock ones are left alone), then show a transient build-cost estimate. Queries the
+    network off the event loop; does not touch parts.unit_cost."""
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    if repo.get_assembly(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Assembly not found."}, status_code=404)
+    form = await request.form()
+    build_qty = max(1, _int(form.get("build_qty")) or 1)
+    from ..setup import repo as setup_repo
+    markup = setup_repo.get_default_markup(db)
+    mfg_margin = setup_repo.get_default_mfg_margin(db)
+    result = await run_in_threadpool(repo.refresh_bom_for_estimate, db, part_id, build_qty)
+    est = await run_in_threadpool(repo.estimate_bom_cost, db, part_id, build_qty, markup, mfg_margin)
+
+    bits = []
+    if result["refreshed"]:
+        bits.append("Refreshed — " + "; ".join(result["refreshed"]))
+    if result["in_stock"]:
+        bits.append("In stock, kept — " + "; ".join(result["in_stock"]))
+    if result["skipped"]:
+        bits.append("Skipped — " + "; ".join(result["skipped"]))
+    if result["errors"]:
+        bits.append("Errors — " + "; ".join(result["errors"]))
+    notice = " • ".join(bits) or "No distributor components to refresh."
+    return _render_detail(request, part_id, user, estimate=est, notice=notice)
+
+
 @router.get("/{part_id}/export.xlsx")
 def export_assembly_xlsx(request: Request, part_id: int, build_qty: int = 1):
     """Download the whole product BOM as an Excel workbook (for customer cost/volume talks).
@@ -186,7 +222,9 @@ def export_assembly_xlsx(request: Request, part_id: int, build_qty: int = 1):
     db = request.app.state.database
     build_qty = max(1, build_qty)
     markup = setup_repo.get_default_markup(db)
-    assembly = repo.get_assembly_for_export(db, part_id, build_qty=build_qty, default_markup=markup)
+    mfg_margin = setup_repo.get_default_mfg_margin(db)
+    assembly = repo.get_assembly_for_export(db, part_id, build_qty=build_qty, default_markup=markup,
+                                            default_mfg_margin=mfg_margin)
     if assembly is None:
         return HTMLResponse("Assembly not found.", status_code=404)
     data = export_xlsx.workbook_bytes(assembly)

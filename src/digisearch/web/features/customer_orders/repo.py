@@ -95,14 +95,50 @@ def _all_prices(conn) -> dict[int, float | None]:
     return {pid: price(pid, frozenset()) for pid in parts}
 
 
+def _all_customer_prices(conn, overhead: float, mfg_default: float) -> dict[int, float | None]:
+    """part_id -> the CUSTOMER price at qty 1 (loaded build cost × manufacturing margin). The loaded
+    rollup is memoised in one pass like ``_all_prices`` (leaf loaded via ``pricing.leaf_sell_unit`` =
+    material × overhead / loaded tier); the product's own ``mfg_margin`` wins over the default. This
+    is what an order line for the product will actually default to."""
+    parts = {r["id"]: (r["kind"], r["mfg_margin"])
+             for r in conn.execute("SELECT id, kind, mfg_margin FROM parts")}
+    children: dict[int, list] = {}
+    for r in conn.execute("SELECT parent_id, child_id, qty_per FROM bom_lines"):
+        children.setdefault(r["parent_id"], []).append((r["child_id"], r["qty_per"]))
+    memo: dict[int, float | None] = {}
+
+    def loaded(pid: int, seen: frozenset) -> float | None:
+        info = parts.get(pid)
+        if info is None:
+            return None
+        if info[0] != "ASSY":
+            return pricing.leaf_sell_unit(conn, pid, 1, overhead)
+        if pid in memo:
+            return memo[pid]
+        if pid in seen:          # cyclic BOM guard
+            return 0.0
+        total = sum((loaded(cid, seen | {pid}) or 0.0) * (qty or 0)
+                    for cid, qty in children.get(pid, []))
+        memo[pid] = total
+        return total
+
+    out: dict[int, float | None] = {}
+    for pid, (_kind, mfg) in parts.items():
+        l = loaded(pid, frozenset())
+        out[pid] = None if l is None else l * (mfg if mfg is not None else mfg_default)
+    return out
+
+
 def parts_for_picker(db: Database) -> list[dict]:
-    """Every part/assembly that can be sold, each with its computed ``price``
-    (component cost, or assembly build cost) to pre-fill the order line."""
+    """Every part/assembly that can be sold, each with its computed ``price`` — the customer sell
+    price at qty 1 (loaded build cost × manufacturing margin), i.e. what the order line will default
+    to — used as the pick hint."""
+    overhead, mfg = _pricing_defaults(db)
     with db.connect() as conn:
         rows = [dict(r) for r in conn.execute(
             "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts ORDER BY part_no"
         )]
-        prices = _all_prices(conn)
+        prices = _all_customer_prices(conn, overhead, mfg)
     for r in rows:
         r["price"] = prices.get(r["id"])
     return rows
@@ -130,7 +166,7 @@ def _with_totals(order: dict, lines: list[dict]) -> dict:
 
 
 def get_order(db: Database, order_id: int) -> dict | None:
-    markup = setup_repo.get_default_markup(db)
+    overhead, mfg = _pricing_defaults(db)
     with db.connect() as conn:
         head = conn.execute(
             """SELECT o.*, c.name AS customer_name, c.short_name AS customer_short,
@@ -167,7 +203,8 @@ def get_order(db: Database, order_id: int) -> dict | None:
                 continue
             key = (ln["part_id"], ln["ordered_qty"] or 1)
             if key not in sell_cache:
-                sell_cache[key] = _sell_price_at(conn, ln["part_id"], ln["ordered_qty"] or 1, markup)
+                sell_cache[key] = _sell_price_at(conn, ln["part_id"], ln["ordered_qty"] or 1,
+                                                 overhead, mfg)
             ln["sell_price"] = sell_cache[key]
         delivery = invoice = None
         if head["delivery_address_id"]:
@@ -245,17 +282,24 @@ def update_order(db: Database, order_id: int, data: dict) -> None:
 
 # ---- order lines ----
 
-def _sell_price_at(conn, part_id: int | None, qty: float, default_markup: float) -> float | None:
-    """The tiered customer SELL price for a product at the ordered quantity (volume-aware BOM
-    rollup for an assembly). None when the part carries no price/cost info."""
+def _sell_price_at(conn, part_id: int | None, qty: float, overhead_default: float,
+                   mfg_default: float) -> float | None:
+    """The customer SELL price for a product at the ordered quantity = its loaded build cost
+    (volume-aware BOM rollup, material × overhead) × its manufacturing margin (profit). None when the
+    part carries no price/cost info."""
     if not part_id:
         return None
-    return pricing.rolled_sell_price(conn, part_id, qty or 1, default_markup)
+    return pricing.product_sell_price(conn, part_id, qty or 1, overhead_default, mfg_default)
+
+
+def _pricing_defaults(db: Database) -> tuple[float, float]:
+    """(overhead factor, manufacturing margin) app defaults, fetched once per pricing call."""
+    return setup_repo.get_default_markup(db), setup_repo.get_default_mfg_margin(db)
 
 
 def add_line(db: Database, order_id: int, part_id: int | None, qty: float,
              unit_price: float | None, discount: float | None) -> None:
-    markup = setup_repo.get_default_markup(db)
+    overhead, mfg = _pricing_defaults(db)
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM customer_orders WHERE id = ?", (order_id,)).fetchone() is None:
             raise ValueError("Order not found.")
@@ -263,8 +307,8 @@ def add_line(db: Database, order_id: int, part_id: int | None, qty: float,
         if part_id is not None:
             if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
                 raise ValueError("Selected product was not found.")
-            if unit_price is None:   # default to the tiered sell price at the ordered volume
-                unit_price = _sell_price_at(conn, part_id, qty or 1, markup)
+            if unit_price is None:   # default to the customer sell price at the ordered volume
+                unit_price = _sell_price_at(conn, part_id, qty or 1, overhead, mfg)
             else:
                 overridden = 1       # operator typed a price -> don't auto-reprice it later
         elif unit_price is not None:
@@ -287,7 +331,7 @@ def update_line(db: Database, order_id: int, line_id: int, qty: float,
     """Save a line edit. A submitted ``unit_price`` is treated as an explicit override (and pins the
     price against future re-pricing); a blank price means "auto" and re-prices from the tiers at the
     new quantity."""
-    markup = setup_repo.get_default_markup(db)
+    overhead, mfg = _pricing_defaults(db)
     with db.connect() as conn:
         row = conn.execute(
             "SELECT part_id FROM customer_order_lines WHERE id = ? AND order_id = ?",
@@ -298,7 +342,7 @@ def update_line(db: Database, order_id: int, line_id: int, qty: float,
         if unit_price is not None:
             price, overridden = unit_price, 1
         else:                              # blank -> auto (re-price at the new qty)
-            price = _sell_price_at(conn, row["part_id"], qty or 1, markup)
+            price = _sell_price_at(conn, row["part_id"], qty or 1, overhead, mfg)
             overridden = 0
         conn.execute(
             "UPDATE customer_order_lines SET ordered_qty = ?, unit_price = ?, discount_percent = ?, "
@@ -311,7 +355,7 @@ def update_line(db: Database, order_id: int, line_id: int, qty: float,
 def reprice_line(db: Database, order_id: int, line_id: int) -> None:
     """Recompute a line's unit price from the current tiers at its ordered quantity and clear the
     manual-override flag."""
-    markup = setup_repo.get_default_markup(db)
+    overhead, mfg = _pricing_defaults(db)
     with db.connect() as conn:
         row = conn.execute(
             "SELECT part_id, ordered_qty FROM customer_order_lines WHERE id = ? AND order_id = ?",
@@ -319,7 +363,7 @@ def reprice_line(db: Database, order_id: int, line_id: int) -> None:
         ).fetchone()
         if row is None or not row["part_id"]:
             return
-        price = _sell_price_at(conn, row["part_id"], row["ordered_qty"] or 1, markup)
+        price = _sell_price_at(conn, row["part_id"], row["ordered_qty"] or 1, overhead, mfg)
         conn.execute(
             "UPDATE customer_order_lines SET unit_price = ?, price_overridden = 0 "
             "WHERE id = ? AND order_id = ?",

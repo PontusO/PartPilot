@@ -133,6 +133,107 @@ def _component(db, part_no, unit_price):
     return catrepo.create_part(db, part={"part_no": part_no}, supplier_lines=lines)
 
 
+def test_get_assembly_reports_material_loaded_and_quote(db):
+    asm = repo.create_assembly(db, {"part_no": "LQ-ASM"})
+    repo.add_bom_line(db, asm, _component(db, "LQ-1", 0.5), 3, "R1")   # material 0.5 x3 = 1.5
+    a = repo.get_assembly(db, asm)
+    assert a["total_cost"] == pytest.approx(1.5)                        # material
+    assert a["loaded_total"] == pytest.approx(1.95)                     # 0.5 x overhead 1.30 x3
+    assert a["quote_total"] == pytest.approx(2.535)                     # loaded 1.95 x mfg 1.30
+    ln = a["lines"][0]
+    assert ln["loaded_unit"] == pytest.approx(0.65) and ln["loaded_line"] == pytest.approx(1.95)
+
+
+def test_product_sell_price_applies_mfg_margin(db):
+    from digisearch.web.features.catalog import pricing
+
+    leaf = _component(db, "MG-L", 1.0)              # material 1.0
+    asm = repo.create_assembly(db, {"part_no": "MG-A"})
+    repo.add_bom_line(db, asm, leaf, 2, None)       # 2 leaves per board
+    with db.connect() as conn:
+        # loaded = material 1.0 x overhead 1.30 = 1.3, x2 = 2.6; customer = 2.6 x mfg 1.5 = 3.9
+        assert pricing.product_sell_price(conn, asm, 1, 1.30, 1.5) == pytest.approx(3.9)
+        # a per-assembly mfg_margin overrides the default
+        conn.execute("UPDATE parts SET mfg_margin = 2.0 WHERE id = ?", (asm,))
+        conn.commit()
+        assert pricing.product_sell_price(conn, asm, 1, 1.30, 1.5) == pytest.approx(2.6 * 2.0)
+        # rolled_sell_price (the loaded rollup) never includes the mfg margin
+        assert pricing.rolled_sell_price(conn, asm, 1, 1.30) == pytest.approx(2.6)
+
+
+def test_rolled_cost_at_is_volume_aware(db):
+    from digisearch.web.features.catalog import pricing
+    from digisearch.web.features.catalog import repo as catrepo
+
+    leaf = catrepo.create_part(db, part={"part_no": "LC-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "LC-1-ND", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True,
+        "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}, {"break_qty": 1000, "unit_price": 0.03}]}])
+    asm = repo.create_assembly(db, {"part_no": "LC-ASM"})
+    repo.add_bom_line(db, asm, leaf, 5, "R1")           # 5 of the leaf per board
+    with db.connect() as conn:
+        assert pricing.rolled_cost_at(conn, asm, 1) == pytest.approx(0.10 * 5)     # 5 leaves -> tier 1
+        assert pricing.rolled_cost_at(conn, asm, 200) == pytest.approx(0.03 * 5)   # 1000 -> tier 1000
+
+    # Full ladder at volume: material (0.03×5), loaded (×overhead 1.30), quote (×mfg 1.30).
+    est = repo.estimate_bom_cost(db, asm, 200)   # defaults overhead 1.30, mfg 1.30
+    assert est["build_qty"] == 200
+    assert est["material_total"] == pytest.approx(0.15)
+    assert est["loaded_total"] == pytest.approx(0.195)     # 0.15 × 1.30
+    assert est["quote_total"] == pytest.approx(0.2535)     # 0.195 × 1.30
+    line_id = repo.get_assembly(db, asm)["lines"][0]["id"]
+    assert est["per_line"][line_id]["material"] == pytest.approx(0.15)
+    assert est["per_line"][line_id]["loaded"] == pytest.approx(0.195)
+
+
+def test_rolled_cost_at_falls_back_to_unit_cost(db):
+    from digisearch.web.features.catalog import pricing
+    leaf = _component(db, "LC-2", 0.7)                   # flat unit_cost 0.7, no cost tiers
+    with db.connect() as conn:
+        assert pricing.rolled_cost_at(conn, leaf, 1000) == pytest.approx(0.7)
+
+
+def test_refresh_bom_for_estimate_skips_in_stock_and_non_distributor(db, monkeypatch):
+    from digisearch.models import Candidate
+    from digisearch.web.features.catalog import cost_refresh
+    from digisearch.web.features.catalog import repo as catrepo
+
+    short = catrepo.create_part(db, part={"part_no": "SH-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "SH-1-ND", "unit_price": 0.10, "reel_qty": 1,
+        "is_default": True, "cost_tiers": [{"break_qty": 1, "unit_price": 0.10}]}], opening={"qty": 0})
+    instock = catrepo.create_part(db, part={"part_no": "IN-1"}, supplier_lines=[{
+        "supplier_name": "Digi-Key", "supplier_pno": "IN-1-ND", "unit_price": 0.20, "reel_qty": 1,
+        "is_default": True, "cost_tiers": [{"break_qty": 1, "unit_price": 0.20}]}], opening={"qty": 1000})
+    local = catrepo.create_part(db, part={"part_no": "LO-1"}, supplier_lines=[{
+        "supplier_name": "Local Shop", "supplier_pno": "LO-1", "unit_price": 0.5, "reel_qty": 1,
+        "is_default": True}], opening={"qty": 0})
+    asm = repo.create_assembly(db, {"part_no": "RF-ASM"})
+    for leaf in (short, instock, local):
+        repo.add_bom_line(db, asm, leaf, 1, None)       # 1 each per board
+
+    class FakeDK:
+        def keyword_search(self, kw, limit=5):
+            return [Candidate(supplier="Digi-Key", mpn=kw, dk_part_number=kw,
+                              price_breaks=[(1, 0.04), (100, 0.02)])]
+
+    monkeypatch.setattr(cost_refresh, "build_clients", lambda: (FakeDK(), None))
+    cost_before = {p: catrepo.get_part(db, p)["unit_cost"] for p in (short, instock, local)}
+
+    result = repo.refresh_bom_for_estimate(db, asm, build_qty=10)   # each leaf needs 10
+    assert any("SH-1" in m for m in result["refreshed"])            # short distributor -> refreshed
+    assert any("IN-1" in m for m in result["in_stock"])            # 1000 on hand >= 10 -> kept
+    assert any("LO-1" in m for m in result["skipped"])             # not a distributor -> skipped
+
+    short_cut = sorted((t["break_qty"], t["unit_price"]) for t in
+                       catrepo.get_part(db, short)["suppliers"][0]["cost_tiers"] if t["kind"] == "cut")
+    assert short_cut == [(1, 0.04), (100, 0.02)]                    # refreshed to the fetched ladder
+    instock_cut = [(t["break_qty"], t["unit_price"]) for t in
+                   catrepo.get_part(db, instock)["suppliers"][0]["cost_tiers"] if t["kind"] == "cut"]
+    assert instock_cut == [(1, 0.20)]                              # in-stock leaf untouched
+    for p in (short, instock, local):                              # unit_cost never changes
+        assert catrepo.get_part(db, p)["unit_cost"] == cost_before[p]
+
+
 def test_assembly_line_and_total_costs(db):
     asm = repo.create_assembly(db, {"part_no": "COST-ASM"})
     repo.add_bom_line(db, asm, _component(db, "P1", 0.5), 3, "R1")    # 3 x 0.5 = 1.5
@@ -205,16 +306,16 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
         conn.commit()
     repo.add_bom_line(db, asm, p1, 3, "R1, R2")
 
-    a = repo.get_assembly_for_export(db, asm, default_markup=1.30)
+    a = repo.get_assembly_for_export(db, asm, default_markup=1.30, default_mfg_margin=1.30)
     ln = a["lines"][0]
     assert ln["child_mfr_name"] == "ACME" and ln["child_mfr_pno"] == "ACME-1"
     assert ln["child_description"] == "A resistor"
     assert ln["child_supplier_price"] == 0.5
     assert ln["unit_cost"] == 0.5 and ln["line_cost"] == 1.5
     assert a["total_cost"] == 1.5
-    # No sell tiers -> sell = cost x default markup (0.5 * 1.30), line = x qty_per (3)
-    assert ln["sell_unit"] == pytest.approx(0.65) and ln["sell_line"] == pytest.approx(1.95)
-    assert a["sell_total"] == pytest.approx(1.95) and a["build_qty"] == 1
+    # sell = loaded (material 0.5 x overhead 1.30 = 0.65) x mfg margin 1.30 = 0.845; line = x3
+    assert ln["sell_unit"] == pytest.approx(0.845) and ln["sell_line"] == pytest.approx(2.535)
+    assert a["sell_total"] == pytest.approx(2.535) and a["build_qty"] == 1
 
     # The workbook builds and round-trips through openpyxl with the header + total row.
     from io import BytesIO
@@ -232,11 +333,12 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
     assert "P1" in row6 and "ACME" in row6 and 1.5 in row6
     col_of = {key: i for i, (_n, key, _m) in enumerate(export_xlsx.COLUMNS, start=1)}
     assert ws.cell(row=7, column=col_of["line_cost"]).value == 1.5    # Total cost
-    assert ws.cell(row=7, column=col_of["sell_line"]).value == pytest.approx(1.95)  # Total sell
+    assert ws.cell(row=7, column=col_of["sell_line"]).value == pytest.approx(2.535)  # Total sell
 
 
 def test_export_sell_price_is_volume_aware(db):
-    """A component with sell tiers is priced at the tier its (qty_per x build volume) reaches."""
+    """A component's loaded cost tier is picked by (qty_per x build volume); the export sell price is
+    that loaded cost × the product manufacturing margin (default 1.30)."""
     from digisearch.web.features.catalog import repo as catrepo
 
     asm = repo.create_assembly(db, {"part_no": "VOL-ASM"})
@@ -245,15 +347,15 @@ def test_export_sell_price_is_volume_aware(db):
                                           {"break_qty": 1000, "unit_price": 1.0}])
     repo.add_bom_line(db, asm, leaf, 5, "R1")   # 5 of the leaf per board
 
-    # Build 1 -> 5 leaves -> below the 1000 break -> unit sell 2.0; line = 2.0*5
+    # Build 1 -> 5 leaves -> loaded 2.0 -> sell 2.0*1.30 = 2.6; line = 2.6*5 = 13.0
     a1 = repo.get_assembly_for_export(db, asm, build_qty=1)
-    assert a1["lines"][0]["sell_unit"] == pytest.approx(2.0)
-    assert a1["sell_total"] == pytest.approx(10.0)
+    assert a1["lines"][0]["sell_unit"] == pytest.approx(2.6)
+    assert a1["sell_total"] == pytest.approx(13.0)
 
-    # Build 200 -> 1000 leaves -> hits the 1000 break -> unit sell 1.0; line = 1.0*5
+    # Build 200 -> 1000 leaves -> loaded 1.0 -> sell 1.0*1.30 = 1.3; line = 1.3*5 = 6.5
     a2 = repo.get_assembly_for_export(db, asm, build_qty=200)
-    assert a2["lines"][0]["sell_unit"] == pytest.approx(1.0)
-    assert a2["sell_total"] == pytest.approx(5.0) and a2["build_qty"] == 200
+    assert a2["lines"][0]["sell_unit"] == pytest.approx(1.3)
+    assert a2["sell_total"] == pytest.approx(6.5) and a2["build_qty"] == 200
 
 
 def test_export_returns_none_for_missing_assembly(db):

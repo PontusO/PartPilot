@@ -39,6 +39,14 @@
                value="{{ values.get('default_build_days') if values.get('default_build_days') is not none else '' }}"
                placeholder="working days">
       </div>
+      <div>
+        <label for="mfg_margin">Manufacturing margin (× loaded cost)</label>
+        <input id="mfg_margin" name="mfg_margin" type="number" min="0" step="any"
+               value="{{ values.get('mfg_margin') if values.get('mfg_margin') is not none else '' }}"
+               placeholder="blank = Setup default">
+        <p class="note" style="margin:.25rem 0 0;">Profit margin on this product: customer price =
+          loaded build cost × this. Blank uses the Setup default.</p>
+      </div>
       <div class="full">
         <label for="description">Description</label>
         <input id="description" name="description" type="text"

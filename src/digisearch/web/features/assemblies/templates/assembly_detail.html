@@ -33,7 +33,17 @@
     <div class="card"><b>{{ a.lines|length }}</b><small>BOM lines</small></div>
     <div class="card"><b>{{ a.used_in|length }}</b><small>used in</small></div>
     <div class="card"><b>{{ "%.0f"|format(a.total_qty) }}</b><small>on hand</small></div>
-    <div class="card"><b>{{ "%.2f"|format(a.total_cost) }}</b><small>total cost (SEK)</small></div>
+    <div class="card"><b>{{ "%.2f"|format(a.total_cost) }}</b><small>material cost (SEK)</small></div>
+    <div class="card"><b>{{ "%.2f"|format(a.loaded_total) }}</b><small>loaded build cost (SEK)</small></div>
+    <div class="card"><b>{{ "%.2f"|format(a.quote_total) }}</b><small>customer quote (SEK)</small></div>
+    {% if estimate %}
+    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.material_total) }}</b>
+      <small>est. material @ {{ estimate.build_qty }}</small></div>
+    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.loaded_total) }}</b>
+      <small>est. loaded @ {{ estimate.build_qty }}</small></div>
+    <div class="card" style="border-color:var(--accent);"><b>{{ "%.2f"|format(estimate.quote_total) }}</b>
+      <small>est. quote @ {{ estimate.build_qty }}</small></div>
+    {% endif %}
     {% if a.external_price is not none %}
     <div class="card"><b>{{ "%.2f"|format(a.external_price) }}</b><small>webshop price SEK</small></div>
     {% endif %}
@@ -41,7 +51,8 @@
           style="margin:0 0 0 auto; display:flex; align-items:center; gap:0.4rem; white-space:nowrap;">
       <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
         Build vol
-        <input type="number" name="build_qty" value="1" min="1" step="1"
+        <input type="number" name="build_qty" value="{{ estimate.build_qty if estimate else 1 }}"
+               min="1" step="1"
                style="width:6rem; padding:0.35rem 0.5rem; border:1px solid var(--border);
                       border-radius:7px;">
       </label>
@@ -49,6 +60,14 @@
          background:var(--accent); color:#fff; font-weight:600; border:0; border-radius:9px;
          padding:0.55rem 1.2rem; text-decoration:none; white-space:nowrap; cursor:pointer;">
         Export BOM (.xlsx)</button>
+      {% if can_edit %}
+      <button type="submit" formaction="/assemblies/{{ a.id }}/estimate" formmethod="post"
+         title="Re-query distributor prices for components short at this volume, then estimate the build cost"
+         style="display:flex; align-items:center; justify-content:center;
+         background:var(--accent); color:#fff; font-weight:600; border:0; border-radius:9px;
+         padding:0.55rem 1.2rem; white-space:nowrap; cursor:pointer;">
+        ↻ Refresh prices &amp; estimate</button>
+      {% endif %}
     </form>
     {% if can_edit %}
     <a href="/assemblies/{{ a.id }}/edit" style="margin:0; display:flex;
@@ -74,6 +93,9 @@
         onsubmit="return confirm('Convert {{ a.part_no }} from an assembly to a plain component? It moves to the Parts catalog. (Only allowed when it has no BOM lines or work orders.)');"></form>
   {% endif %}
 
+  {% if notice %}<div style="background:rgba(70,180,120,.12); border:1px solid var(--ok);
+       border-radius:9px; padding:.6rem .9rem; margin-top:1rem; font-size:.85rem;">{{ notice }}</div>{% endif %}
+
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Bill of materials</h2>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <div style="overflow-x:auto;">
@@ -82,6 +104,7 @@
         <tr><th class="num">#</th><th class="num">Qty</th><th>Component</th><th>Value</th>
             <th>Category</th><th class="num">Unit (SEK)</th><th class="num">Line (SEK)</th>
             <th>Reference designators</th>{% if can_edit %}<th></th>{% endif %}</tr>
+        <tr><th colspan="5"></th><th class="num" style="font-weight:400; font-size:.72rem;" colspan="2">material · loaded (material × overhead)</th><th colspan="{{ 2 if can_edit else 1 }}"></th></tr>
       </thead>
       <tbody>
         {% for ln in a.lines %}
@@ -105,8 +128,17 @@
           </td>
           <td>{{ ln.child_value or '' }}</td>
           <td>{{ ln.child_category or '' }}</td>
-          <td class="num">{% if ln.unit_cost is not none %}{{ "%.4f"|format(ln.unit_cost) }}{% endif %}</td>
-          <td class="num">{% if ln.line_cost is not none %}{{ "%.2f"|format(ln.line_cost) }}{% endif %}</td>
+          <td class="num">{% if ln.unit_cost is not none %}{{ "%.4f"|format(ln.unit_cost) }}{% endif %}
+            {% if ln.loaded_unit is not none %}<br><span class="note" style="font-size:.72rem;">loaded {{ "%.4f"|format(ln.loaded_unit) }}</span>{% endif %}
+          </td>
+          <td class="num">{% if ln.line_cost is not none %}{{ "%.2f"|format(ln.line_cost) }}{% endif %}
+            {% if ln.loaded_line is not none %}<br><span class="note" style="font-size:.72rem;">loaded {{ "%.2f"|format(ln.loaded_line) }}</span>{% endif %}
+            {% if estimate and estimate.per_line.get(ln.id) %}
+              {% set e = estimate.per_line[ln.id] %}
+              {% if e.material is not none %}<br><span class="note" style="font-size:.72rem;">est mat {{ "%.2f"|format(e.material) }}</span>{% endif %}
+              {% if e.loaded is not none %}<br><span class="note" style="font-size:.72rem;">est loaded {{ "%.2f"|format(e.loaded) }}</span>{% endif %}
+            {% endif %}
+          </td>
           <td class="flag">
             <span class="v{{ ln.id }}">{{ ln.refdes or '' }}</span>
             {% if can_edit %}
@@ -140,8 +172,12 @@
       {% if a.lines %}
       <tfoot>
         <tr>
-          <td colspan="6" class="num" style="font-weight:600;">Total</td>
-          <td class="num" style="font-weight:600;">{{ "%.2f"|format(a.total_cost) }}</td>
+          <td colspan="6" class="num" style="font-weight:600;">Total material / loaded{% if estimate %} / est @ {{ estimate.build_qty }}{% endif %}</td>
+          <td class="num" style="font-weight:600;">{{ "%.2f"|format(a.total_cost) }}
+            <br><span class="note" style="font-size:.72rem;">loaded {{ "%.2f"|format(a.loaded_total) }}</span>
+            {% if estimate %}<br><span class="note" style="font-size:.72rem;">est mat {{ "%.2f"|format(estimate.material_total) }}</span>
+            <br><span class="note" style="font-size:.72rem;">est loaded {{ "%.2f"|format(estimate.loaded_total) }}</span>{% endif %}
+          </td>
           <td colspan="{{ 2 if can_edit else 1 }}"></td>
         </tr>
       </tfoot>
