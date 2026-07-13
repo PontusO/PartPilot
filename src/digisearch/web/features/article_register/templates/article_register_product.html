@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}New Product · Article Register{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:680px;">
+  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
+  <h1>New product</h1>
+  <p class="note">One running number, one line per group you tick. All share running number
+    <b style="font-family:ui-monospace,monospace;">{{ '%05d'|format(next_running_no) }}</b>.</p>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <div style="background:#0d1219; border:1px solid var(--line); border-radius:9px;
+              padding:1rem; margin:.75rem 0 1.25rem;">
+    <div class="note" style="text-transform:uppercase; letter-spacing:.5px; font-size:.7rem;">Will create</div>
+    <div id="preview" style="font-size:1.15rem; font-weight:700; font-family:ui-monospace,monospace;
+         margin-top:.4rem; line-height:1.7;">— pick one or more groups —</div>
+  </div>
+
+  <form method="post" action="/article-register/product" id="prodform" data-next="{{ next_running_no }}">
+    <label for="product">Product / description</label>
+    <input id="product" name="product" type="text" value="{{ values.product }}"
+           placeholder="e.g. AddBox 200">
+
+    <label style="margin-bottom:.2rem;">Groups</label>
+    {% for g in groups %}
+    <div style="margin:.35rem 0 .6rem;">
+      <div class="note" style="text-transform:uppercase; letter-spacing:.4px; font-size:.68rem; margin-bottom:.2rem;">{{ g.label }}</div>
+      <div style="display:flex; flex-wrap:wrap; gap:.4rem;">
+        {% for p in g.prefixes %}
+        <label class="pfx-pill" style="display:inline-flex; align-items:center; gap:.4rem;
+               padding:.3rem .6rem; background:#0d1219; border:1px solid var(--line);
+               border-radius:999px; cursor:pointer; font-size:.85rem;">
+          <input type="checkbox" name="prefixes" value="{{ p.code }}" style="width:auto; margin:0;"
+                 {{ 'checked' if p.code in values.prefixes else '' }}>
+          <span><b>{{ p.code }}</b> {{ p.label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div style="display:flex; gap:1rem;">
+      <div style="width:120px;">
+        <label for="created_by">Created by</label>
+        <input id="created_by" name="created_by" type="text" value="{{ values.created_by }}" placeholder="initials">
+      </div>
+      <div style="flex:1;">
+        <label for="comment">Comment</label>
+        <input id="comment" name="comment" type="text" value="{{ values.comment }}">
+      </div>
+    </div>
+
+    <button type="submit">Create product</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('prodform');
+  var preview = document.getElementById('preview');
+  var next = form.dataset.next;
+  function pad5(n) { return ('00000' + String(n)).slice(-5); }
+  function render() {
+    var picked = Array.prototype.slice.call(form.querySelectorAll('input[name=prefixes]:checked'));
+    if (!picked.length) { preview.textContent = '— pick one or more groups —'; return; }
+    preview.innerHTML = picked.map(function (el) {
+      return el.value + '-' + pad5(next) + '-1';
+    }).join('<br>');
+  }
+  form.querySelectorAll('input[name=prefixes]').forEach(function (el) {
+    el.addEventListener('change', render);
+  });
+  render();
+})();
+</script>
+{% endblock %}

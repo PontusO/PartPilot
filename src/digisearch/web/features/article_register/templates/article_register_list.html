@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Article Register · PartPilot{% endblock %}
+{% set cat_badge = {"customer": "stock", "ic": "warn", "document": "muted", "internal": "ok"} %}
+{% block content %}
+<div class="panel">
+  <h1>Article Register</h1>
+  <div class="cards">
+    <div class="card"><b>{{ summary.total }}</b><small>numbers</small></div>
+    <div class="card"><b>{{ summary.families }}</b><small>products</small></div>
+    <div class="card"><b>{{ summary.retired }}</b><small>retired</small></div>
+    {% if can_edit %}
+    <div style="margin-left:auto; display:flex; gap:.6rem; align-items:center;">
+      <a href="/article-register/new" style="display:flex; align-items:center; justify-content:center;
+         border:1px solid var(--line); color:var(--fg); font-weight:600; text-decoration:none;
+         border-radius:9px; padding:0 1.1rem;">New Number</a>
+      <a href="/article-register/product" style="display:flex; align-items:center; justify-content:center;
+         background:var(--accent); color:#fff; font-weight:600; text-decoration:none;
+         border-radius:9px; padding:0 1.3rem;">New Product</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <form method="get" action="/article-register"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q" style="margin-top:0;">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="code, product, running no…">
+    </div>
+    <div>
+      <label for="prefix" style="margin-top:0;">Prefix</label>
+      <select id="prefix" name="prefix"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for p in prefixes %}
+        <option value="{{ p.code }}" {{ 'selected' if p.code == prefix else '' }}>{{ p.code }} — {{ p.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="category" style="margin-top:0;">Category</label>
+      <select id="category" name="category"
+              style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                     border:1px solid var(--line); border-radius:7px;">
+        <option value="">All</option>
+        {% for key, label in categories %}
+        <option value="{{ key }}" {{ 'selected' if key == category else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="check" style="margin-top:0;">
+      <input type="checkbox" name="retired" value="1" {{ 'checked' if include_retired else '' }}
+             onchange="this.form.submit()"> show retired
+    </label>
+    <button type="submit">Filter</button>
+    {% if q or prefix or category %}<a href="/article-register" style="align-self:center;">clear</a>{% endif %}
+  </form>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Number</th><th>Product</th><th>Group</th><th>By</th><th>Catalog</th></tr></thead>
+      <tbody>
+        {% for e in entries %}
+        <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
+          <td>
+            <a href="/article-register/{{ e.running_no }}"
+               {% if e.retired %}style="text-decoration:line-through;"{% endif %}>
+              {{ e.code or ('%05d'|format(e.running_no)) }}</a>
+            {% if not e.prefix %}<span class="badge muted">reserved</span>{% endif %}
+            {% if e.retired %}<span class="badge bad">retired</span>{% endif %}
+          </td>
+          <td>{{ e.product or '' }}</td>
+          <td>
+            {% if e.prefix %}
+            <span class="badge {{ cat_badge.get(e.category, 'muted') }}">{{ e.prefix }} — {{ e.prefix_label or '?' }}</span>
+            {% else %}<span class="note">—</span>{% endif %}
+          </td>
+          <td>{{ e.created_by or '' }}</td>
+          <td>{% if e.part_id %}<a href="/catalog/{{ e.part_id }}">part ↗</a>{% else %}<span class="note">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% if not entries %}<tr><td colspan="5" class="note">No numbers{% if q or prefix or category %} match{% endif %}.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

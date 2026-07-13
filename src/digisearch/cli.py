@@ -160,6 +160,43 @@ def import_catalog(
     console.print(table)
 
 
+@app.command(name="import-article-register")
+def import_article_register(
+    xlsx: Path = typer.Argument(..., help="The Artikelregister .xlsx workbook to import."),
+    scratch_db: bool = typer.Option(
+        False, "--scratch-db",
+        help="Import into a throwaway COPY of the database (discarded on exit); the real DB is untouched.",
+    ),
+):
+    """Seed the Article Register (internal part numbers) from the legacy Excel workbook.
+
+    Idempotent — safe to re-run; already-present numbers are skipped."""
+    if not xlsx.exists():
+        console.print(f"[red]Error:[/] file not found: {xlsx}")
+        raise typer.Exit(1)
+
+    from .web.features.article_register.importer import import_register
+
+    scratch_dir = None
+    if scratch_db:
+        scratch_dir, scratch_path = _make_scratch_db()
+        console.print(f"[yellow]Scratch mode[/] — importing into a temporary copy at [bold]{scratch_path}[/].")
+    try:
+        db = _open_live_db()
+        console.print(f"Importing article register from [bold]{xlsx}[/]")
+        stats = import_register(db, xlsx)
+        table = Table(title="Article Register imported")
+        table.add_column("Item")
+        table.add_column("Rows", justify="right")
+        for key, value in stats.items():
+            table.add_row(key, str(value))
+        console.print(table)
+    finally:
+        if scratch_dir is not None:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
+            console.print(f"[dim]Removed scratch database at {scratch_dir}[/]")
+
+
 # Demo catalog used by `devmgmt-push --seed-demo` — the Connectivity840 example from
 # docs/partpilot-integration.md, so the pushed payloads match the §5 samples exactly.
 _DEMO_MODEL = dict(

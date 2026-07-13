@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ '%05d'|format(running_no) }} · Article Register{% endblock %}
+{% set cat_badge = {"customer": "stock", "ic": "warn", "document": "muted", "internal": "ok"} %}
+{% macro prefix_select(name) %}
+<select name="{{ name }}" required
+        style="padding:.45rem .55rem; background:#0d1219; color:var(--fg);
+               border:1px solid var(--line); border-radius:7px;">
+  <option value="">— group —</option>
+  {% for g in groups %}
+  <optgroup label="{{ g.label }}">
+    {% for p in g.prefixes %}<option value="{{ p.code }}">{{ p.code }} — {{ p.label }}</option>{% endfor %}
+  </optgroup>
+  {% endfor %}
+</select>
+{% endmacro %}
+{% block content %}
+<div class="panel">
+  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
+  <h1>Running number <span style="font-family:ui-monospace,monospace;">{{ '%05d'|format(running_no) }}</span></h1>
+  <p class="note">{{ family|length }} number{{ '' if family|length == 1 else 's' }} in this family.</p>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Number</th><th>Group</th><th>Product</th><th>By</th><th>Comment</th><th>Catalog</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for e in family %}
+        <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
+          <td style="font-family:ui-monospace,monospace;">
+            {% if e.code %}<span {% if e.retired %}style="text-decoration:line-through;"{% endif %}>{{ e.code }}</span>
+            {% else %}<span class="badge muted">reserved</span>{% endif %}
+            {% if e.retired %}<span class="badge bad">retired</span>{% endif %}
+          </td>
+          <td>{% if e.prefix %}<span class="badge {{ cat_badge.get(e.category, 'muted') }}">{{ e.prefix }} — {{ e.prefix_label or '?' }}</span>{% else %}—{% endif %}</td>
+          <td>{{ e.product or '' }}</td>
+          <td>{{ e.created_by or '' }}</td>
+          <td class="note">{{ e.comment or '' }}</td>
+          <td>{% if e.part_id %}<a href="/catalog/{{ e.part_id }}">part ↗</a>{% else %}—{% endif %}</td>
+          {% if can_edit %}
+          <td style="white-space:nowrap;">
+            {% if e.prefix %}
+            <form method="post" action="/article-register/{{ e.id }}/retire" style="display:inline;">
+              <input type="hidden" name="retired" value="{{ '0' if e.retired else '1' }}">
+              <button class="quiet" type="submit">{{ 'restore' if e.retired else 'retire' }}</button>
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can_edit %}
+  <div style="margin-top:1.5rem; padding:1rem; background:#0d1219; border:1px solid var(--line); border-radius:9px;">
+    <b>Add a number to this family</b>
+    <form method="post" action="/article-register/new"
+          style="display:flex; gap:.6rem; align-items:flex-end; flex-wrap:wrap; margin-top:.6rem;">
+      <input type="hidden" name="mode" value="existing">
+      <input type="hidden" name="running_no" value="{{ running_no }}">
+      <div>
+        <label style="margin-top:0;">Group</label>
+        {{ prefix_select('prefix') }}
+      </div>
+      <div>
+        <label style="margin-top:0;">Suffix</label>
+        <input name="suffix" type="number" min="1" placeholder="auto" style="width:90px;">
+      </div>
+      <div style="flex:1; min-width:180px;">
+        <label style="margin-top:0;">Product</label>
+        <input name="product" type="text">
+      </div>
+      <button class="ghost" type="submit">Add</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

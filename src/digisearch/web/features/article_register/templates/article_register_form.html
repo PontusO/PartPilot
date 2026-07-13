@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}New Number · Article Register{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:640px;">
+  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
+  <h1>Allocate a number</h1>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <div style="background:#0d1219; border:1px solid var(--line); border-radius:9px;
+              padding:1rem; text-align:center; margin:.75rem 0 1.25rem;">
+    <div class="note" style="text-transform:uppercase; letter-spacing:.5px; font-size:.7rem;">Preview</div>
+    <div id="preview" style="font-size:1.9rem; font-weight:700; letter-spacing:1px; font-family:ui-monospace,monospace;">—</div>
+  </div>
+
+  <form method="post" action="/article-register/new" id="alloc"
+        data-next="{{ next_running_no }}"
+        data-suffix-url="/article-register/api/next-suffix">
+
+    <div style="display:flex; gap:1.2rem; margin-bottom:.3rem;">
+      <label class="check" style="margin-top:0;">
+        <input type="radio" name="mode" value="new" {{ 'checked' if values.mode != 'existing' else '' }}>
+        New running number <span class="note">(next: {{ '%05d'|format(next_running_no) }})</span>
+      </label>
+      <label class="check" style="margin-top:0;">
+        <input type="radio" name="mode" value="existing" {{ 'checked' if values.mode == 'existing' else '' }}>
+        Add to existing
+      </label>
+    </div>
+
+    <div id="running-wrap" style="{{ '' if values.mode == 'existing' else 'display:none;' }}">
+      <label for="running_no">Existing running number</label>
+      <input id="running_no" name="running_no" type="number" min="1"
+             value="{{ values.running_no }}" placeholder="e.g. 390">
+    </div>
+
+    <label for="prefix">Group (prefix)</label>
+    <select id="prefix" name="prefix" required
+            style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                   border:1px solid var(--line); border-radius:7px;">
+      <option value="">— pick a group —</option>
+      {% for g in groups %}
+      <optgroup label="{{ g.label }}">
+        {% for p in g.prefixes %}
+        <option value="{{ p.code }}" {{ 'selected' if p.code == values.prefix else '' }}>{{ p.code }} — {{ p.label }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+
+    <label for="suffix">Suffix <span class="note">(blank = next free)</span></label>
+    <input id="suffix" name="suffix" type="number" min="1" value="{{ values.suffix }}" placeholder="auto">
+
+    <label for="product">Product / description</label>
+    <input id="product" name="product" type="text" value="{{ values.product }}">
+
+    <div style="display:flex; gap:1rem;">
+      <div style="width:120px;">
+        <label for="created_by">Created by</label>
+        <input id="created_by" name="created_by" type="text" value="{{ values.created_by }}" placeholder="initials">
+      </div>
+      <div style="flex:1;">
+        <label for="comment">Comment</label>
+        <input id="comment" name="comment" type="text" value="{{ values.comment }}">
+      </div>
+    </div>
+
+    <button type="submit">Allocate number</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('alloc');
+  var preview = document.getElementById('preview');
+  var runningWrap = document.getElementById('running-wrap');
+  var prefixEl = document.getElementById('prefix');
+  var suffixEl = document.getElementById('suffix');
+  var runningEl = document.getElementById('running_no');
+  var next = form.dataset.next;
+
+  function mode() {
+    var el = form.querySelector('input[name=mode]:checked');
+    return el ? el.value : 'new';
+  }
+  function pad5(n) { return ('00000' + String(n)).slice(-5); }
+
+  function runningValue() {
+    return mode() === 'existing' ? (runningEl.value || '') : next;
+  }
+
+  function render() {
+    var pfx = prefixEl.value;
+    var run = runningValue();
+    var suf = suffixEl.value || '?';
+    if (!pfx || !run) { preview.textContent = '—'; return; }
+    preview.textContent = pfx + '-' + pad5(run) + '-' + suf;
+  }
+
+  function refreshSuffix() {
+    var pfx = prefixEl.value;
+    var run = runningValue();
+    if (!pfx || !run || suffixEl.value) { render(); return; }
+    fetch(form.dataset.suffixUrl + '?prefix=' + encodeURIComponent(pfx) + '&running_no=' + encodeURIComponent(run))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) suffixEl.placeholder = 'auto → ' + d.suffix; })
+      .catch(function () {})
+      .finally(render);
+  }
+
+  form.querySelectorAll('input[name=mode]').forEach(function (el) {
+    el.addEventListener('change', function () {
+      runningWrap.style.display = mode() === 'existing' ? '' : 'none';
+      refreshSuffix();
+    });
+  });
+  prefixEl.addEventListener('change', refreshSuffix);
+  runningEl.addEventListener('input', refreshSuffix);
+  suffixEl.addEventListener('input', render);
+  render();
+})();
+</script>
+{% endblock %}

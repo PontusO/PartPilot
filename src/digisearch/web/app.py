@@ -25,6 +25,7 @@ from .core import FeatureRegistry
 from .core.db import Database
 from .core.deps import Forbidden, LoginRequired, current_user
 from .core.paths import data_dir as default_data_dir, db_path as default_db_path
+from .features.article_register import feature as article_register_feature
 from .features.assemblies import feature as assemblies_feature
 from .features.catalog import feature as catalog_feature
 from .features.contacts import feature as contacts_feature
@@ -45,6 +46,7 @@ _CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
 # built are placeholders (greyed "soon" nav entries) so the app structure is visible up front.
 FEATURES = [
     catalog_feature,                                                         # Parts (order 10)
+    article_register_feature,                                                # Article Register (order 15); soft-joins parts by code
     assemblies_feature,                                                      # order 20
     purchasing_feature,                                                      # order 50
     contacts_feature,                                                        # order 60
