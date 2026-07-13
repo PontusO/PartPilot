@@ -19,6 +19,12 @@
   <h1>Running number <span style="font-family:ui-monospace,monospace;">{{ '%05d'|format(running_no) }}</span></h1>
   <p class="note">{{ family|length }} number{{ '' if family|length == 1 else 's' }} in this family.</p>
 
+  {% if can_edit %}
+  <div class="act-bar">
+    <a href="/article-register/from-template?running_no={{ running_no }}" class="act-btn secondary">Apply template</a>
+  </div>
+  {% endif %}
+
   <div style="overflow-x:auto;">
     <table>
       <thead><tr><th>Number</th><th>Group</th><th>Product</th><th>By</th><th>Comment</th><th>Catalog</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
@@ -36,11 +42,22 @@
           <td class="note">{{ e.comment or '' }}</td>
           <td>{% if e.part_id %}<a href="/catalog/{{ e.part_id }}">part ↗</a>{% else %}—{% endif %}</td>
           {% if can_edit %}
-          <td style="white-space:nowrap;">
+          <td style="white-space:nowrap; text-align:right;">
+            <button type="button" class="ghost" style="margin-right:.4rem;"
+                    onclick="location.href='/article-register/{{ e.id }}/edit'">Edit</button>
             {% if e.prefix %}
-            <form method="post" action="/article-register/{{ e.id }}/retire" style="display:inline;">
+            <form method="post" action="/article-register/{{ e.id }}/duplicate" style="display:inline; margin:0 .4rem 0 0;">
+              <button type="submit" class="ghost">Duplicate</button>
+            </form>
+            <form method="post" action="/article-register/{{ e.id }}/retire" style="display:inline; margin:0 .4rem 0 0;">
               <input type="hidden" name="retired" value="{{ '0' if e.retired else '1' }}">
-              <button class="quiet" type="submit">{{ 'restore' if e.retired else 'retire' }}</button>
+              <button type="submit" class="{{ 'ghost' if e.retired else 'danger' }}">{{ 'Restore' if e.retired else 'Retire' }}</button>
+            </form>
+            {% endif %}
+            {% if can_delete %}
+            <form method="post" action="/article-register/{{ e.id }}/delete" style="display:inline; margin:0;"
+                  onsubmit="return confirm('Permanently delete {{ e.code or ('%05d'|format(e.running_no)) }}?\n\nThis cannot be undone. If you just want to take it out of active use, cancel and use Retire instead.');">
+              <button type="submit" class="danger">Delete</button>
             </form>
             {% endif %}
           </td>
@@ -69,6 +86,10 @@
       <div style="flex:1; min-width:180px;">
         <label style="margin-top:0;">Product</label>
         <input name="product" type="text">
+      </div>
+      <div style="width:110px;">
+        <label style="margin-top:0;">Added by</label>
+        <input name="created_by" type="text" placeholder="initials">
       </div>
       <button class="ghost" type="submit">Add</button>
     </form>

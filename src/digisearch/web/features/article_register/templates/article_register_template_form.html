@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New template' if not tmpl.id else 'Edit template' }} · Article Register{% endblock %}
+
+{% macro prefix_options(sel) %}
+  <option value="">— group —</option>
+  {% for g in groups %}
+  <optgroup label="{{ g.label }}">
+    {% for p in g.prefixes %}<option value="{{ p.code }}" {{ 'selected' if p.code == sel else '' }}>{{ p.code }} — {{ p.label }}</option>{% endfor %}
+  </optgroup>
+  {% endfor %}
+{% endmacro %}
+
+{% macro line_row(prefix='', suffix=1, label='') %}
+<tr class="line-row">
+  <td>
+    <select name="line_prefix" style="width:100%; padding:.45rem .55rem; background:#0d1219;
+            color:var(--fg); border:1px solid var(--line); border-radius:7px;">{{ prefix_options(prefix) }}</select>
+  </td>
+  <td><input name="line_suffix" type="number" min="1" value="{{ suffix }}" style="width:80px; margin:0;"></td>
+  <td><input name="line_label" type="text" value="{{ label }}" style="margin:0;"
+             placeholder="PCB, Schematic… (blank = product name only)"></td>
+  <td style="text-align:right;">
+    <button type="button" class="quiet" title="Remove line" onclick="this.closest('tr').remove()">✕</button>
+  </td>
+</tr>
+{% endmacro %}
+
+{% block content %}
+<div class="panel" style="max-width:840px;">
+  <p style="margin-bottom:.4rem;"><a href="/article-register/templates">← Templates</a></p>
+  <h1>{{ 'New template' if not tmpl.id else 'Edit template' }}</h1>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <form method="post"
+        action="{{ '/article-register/templates/new' if not tmpl.id else '/article-register/templates/' ~ tmpl.id ~ '/edit' }}">
+    <label for="name">Template name</label>
+    <input id="name" name="name" type="text" value="{{ tmpl.name }}" placeholder="e.g. Standard PCB product">
+
+    <label for="notes">Notes <span class="note">(optional)</span></label>
+    <input id="notes" name="notes" type="text" value="{{ tmpl.notes or '' }}">
+
+    <label style="margin-top:1.2rem;">Lines</label>
+    <p class="note" style="margin:.1rem 0 .5rem;">Each line becomes <code>PREFIX-NNNNN-suffix</code>; its
+      description is the product name plus the label (e.g. label <b>PCB</b> → “…&nbsp;–&nbsp;PCB”; blank
+      label = just the product name).</p>
+    <div style="overflow-x:auto;">
+      <table id="linesTable">
+        <thead><tr>
+          <th style="width:46%;">Group (prefix)</th><th style="width:90px;">Suffix</th>
+          <th>Description label</th><th style="width:2rem;"></th>
+        </tr></thead>
+        <tbody id="linesBody">
+          {% for ln in tmpl.lines %}{{ line_row(ln.prefix, ln.suffix, ln.label) }}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="ghost" style="margin-top:.6rem;" onclick="addLine()">+ Add line</button>
+
+    <div style="display:flex; gap:.8rem; align-items:center; margin-top:1.4rem;">
+      <button type="submit" class="ghost">Save template</button>
+      <button type="button" class="quiet" onclick="location.href='/article-register/templates'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<template id="rowTpl">{{ line_row() }}</template>
+<script>
+  function addLine() {
+    var tpl = document.getElementById('rowTpl');
+    document.getElementById('linesBody').appendChild(tpl.content.cloneNode(true));
+  }
+  // Start with one empty line when creating a fresh template.
+  if (!document.querySelectorAll('#linesBody .line-row').length) addLine();
+</script>
+{% endblock %}

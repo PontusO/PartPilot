@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ entry.code or ('%05d'|format(entry.running_no)) }} · Article Register{% endblock %}
+{% set cat_badge = {"customer": "stock", "ic": "warn", "document": "muted", "internal": "ok"} %}
+{% block content %}
+<div class="panel" style="max-width:640px;">
+  <p style="margin-bottom:.4rem;"><a href="/article-register/{{ entry.running_no }}">← Running number {{ '%05d'|format(entry.running_no) }}</a></p>
+  <h1>Edit number</h1>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <div style="background:#0d1219; border:1px solid var(--line); border-radius:9px;
+              padding:1rem; text-align:center; margin:.75rem 0 1.25rem;">
+    <div class="note" style="text-transform:uppercase; letter-spacing:.5px; font-size:.7rem;">Number</div>
+    <div style="font-size:1.9rem; font-weight:700; letter-spacing:1px; font-family:ui-monospace,monospace;">
+      {{ entry.code or ('%05d'|format(entry.running_no)) }}</div>
+    <div style="margin-top:.5rem;">
+      {% if entry.prefix %}
+      <span class="badge {{ cat_badge.get(entry.category, 'muted') }}">{{ entry.prefix }} — {{ entry.prefix_label or '?' }}</span>
+      {% else %}<span class="badge muted">reserved</span>{% endif %}
+      {% if entry.retired %}<span class="badge bad">retired</span>{% endif %}
+    </div>
+    <div class="note" style="margin-top:.5rem; font-size:.75rem;">The identity (group · running number · suffix) can't be changed.</div>
+  </div>
+
+  <form method="post" action="/article-register/{{ entry.id }}/edit">
+    <label for="product">Product / description</label>
+    <input id="product" name="product" type="text" value="{{ entry.product or '' }}">
+
+    <div style="display:flex; gap:1rem;">
+      <div style="width:120px;">
+        <label for="created_by">Created by</label>
+        <input id="created_by" name="created_by" type="text" value="{{ entry.created_by or '' }}" placeholder="initials">
+      </div>
+      <div style="flex:1;">
+        <label for="comment">Comment</label>
+        <input id="comment" name="comment" type="text" value="{{ entry.comment or '' }}">
+      </div>
+    </div>
+
+    <div style="display:flex; gap:.8rem; align-items:center; margin-top:1.2rem;">
+      <button type="submit" class="ghost">Save changes</button>
+      <button type="button" class="quiet" onclick="location.href='/article-register/{{ entry.running_no }}'">Cancel</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

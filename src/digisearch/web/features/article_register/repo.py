@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 
 from ...core.db import Database
-from .codes import article_code, normalize_prefix
+from .codes import article_code, compose_description, normalize_prefix
 
 # Display order + human labels for the prefix categories (used to group the allocator dropdown).
 CATEGORIES = (
@@ -156,6 +156,22 @@ def create_product(db: Database, *, product: str | None, prefixes: list[str],
     return running_no
 
 
+def duplicate_entry(db: Database, entry_id: int) -> int | None:
+    """Copy an entry into the next free suffix within its prefix + running number.
+
+    The clone keeps the prefix, running number, product name and metadata; only the suffix advances
+    (``MAX(suffix) + 1`` for that prefix+running number, so it never collides). Returns the new
+    entry id, or ``None`` if the source is missing or is a reserved row (no prefix → no suffix).
+    """
+    entry = get_entry(db, entry_id)
+    if entry is None or not entry["prefix"]:
+        return None
+    suffix = next_suffix(db, entry["prefix"], entry["running_no"])
+    return create_entry(db, prefix=entry["prefix"], running_no=entry["running_no"], suffix=suffix,
+                        product=entry["product"], created_by=entry["created_by"],
+                        comment=entry["comment"])
+
+
 def update_entry(db: Database, entry_id: int, *, product: str | None = None,
                  created_by: str | None = None, comment: str | None = None) -> None:
     """Edit the descriptive fields only — the identity (prefix/running/suffix) is immutable once set."""
@@ -168,12 +184,125 @@ def update_entry(db: Database, entry_id: int, *, product: str | None = None,
         conn.commit()
 
 
+def delete_entry(db: Database, entry_id: int) -> None:
+    """Hard-delete a single entry. Rare, admin-only, irreversible — retiring is the normal
+    lifecycle action; this is for genuine mistakes."""
+    with db.connect() as conn:
+        conn.execute("DELETE FROM article_numbers WHERE id = ?", (entry_id,))
+        conn.commit()
+
+
 def set_retired(db: Database, entry_id: int, retired: bool) -> None:
     with db.connect() as conn:
         conn.execute(
             "UPDATE article_numbers SET retired = ?, updated_at = datetime('now') WHERE id = ?",
             (1 if retired else 0, entry_id))
         conn.commit()
+
+
+# ---- templates (product-structure blueprints) ----
+
+def list_templates(db: Database, *, active_only: bool = True) -> list[dict]:
+    """Templates with their lines attached (small table — one round trip per template is fine)."""
+    where = "WHERE active = 1" if active_only else ""
+    with db.connect() as conn:
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT id FROM article_templates {where} ORDER BY name")]
+    return [t for t in (get_template(db, i) for i in ids) if t]
+
+
+def get_template(db: Database, template_id: int) -> dict | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM article_templates WHERE id = ?", (template_id,)).fetchone()
+        if not row:
+            return None
+        lines = conn.execute(
+            """SELECT l.*, ap.label AS prefix_label, ap.category AS category
+               FROM article_template_lines l
+               LEFT JOIN article_prefixes ap ON ap.code = l.prefix
+               WHERE l.template_id = ? ORDER BY l.sort_order, l.id""", (template_id,)).fetchall()
+    tmpl = dict(row)
+    tmpl["lines"] = [dict(r) for r in lines]
+    return tmpl
+
+
+def create_template(db: Database, *, name: str, notes: str | None = None) -> int:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO article_templates (name, notes) VALUES (?, ?)", (name, notes))
+        conn.commit()
+        return cur.lastrowid
+
+
+def save_template(db: Database, template_id: int, *, name: str, notes: str | None,
+                  lines: list[dict]) -> None:
+    """Update the header and replace all lines (the editor posts the full ordered set)."""
+    rows = []
+    for i, ln in enumerate(lines):
+        prefix = normalize_prefix(ln.get("prefix"))
+        if not prefix:
+            continue
+        rows.append((template_id, prefix, int(ln.get("suffix") or 1),
+                     (ln.get("label") or "").strip(), i))
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE article_templates SET name = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
+            (name, notes, template_id))
+        conn.execute("DELETE FROM article_template_lines WHERE template_id = ?", (template_id,))
+        conn.executemany(
+            """INSERT INTO article_template_lines (template_id, prefix, suffix, label, sort_order)
+               VALUES (?, ?, ?, ?, ?)""", rows)
+        conn.commit()
+
+
+def delete_template(db: Database, template_id: int) -> None:
+    with db.connect() as conn:
+        conn.execute("DELETE FROM article_template_lines WHERE template_id = ?", (template_id,))
+        conn.execute("DELETE FROM article_templates WHERE id = ?", (template_id,))
+        conn.commit()
+
+
+def apply_template(db: Database, template_id: int, *, product: str | None,
+                   created_by: str | None = None, comment: str | None = None,
+                   running_no: int | None = None) -> int:
+    """Generate a product family from a template.
+
+    ``running_no=None`` allocates a fresh running number (New Product); otherwise the lines are
+    appended to an existing family. Per prefix, the suffix is ``max(template suffix, next free)`` so
+    a fresh family honours the template's own suffixes while an existing family continues past what's
+    already there. Returns the running number written to.
+    """
+    tmpl = get_template(db, template_id)
+    if not tmpl or not tmpl["lines"]:
+        raise ValueError("That template has no lines.")
+    with db.connect() as conn:
+        if running_no is None:
+            running_no = conn.execute(
+                "SELECT COALESCE(MAX(running_no), 0) + 1 FROM article_numbers").fetchone()[0]
+        counters: dict[str, int] = {}
+        rows = []
+        for ln in tmpl["lines"]:
+            prefix = normalize_prefix(ln["prefix"])
+            if not prefix:
+                continue
+            if prefix not in counters:
+                counters[prefix] = conn.execute(
+                    "SELECT COALESCE(MAX(suffix), 0) FROM article_numbers "
+                    "WHERE prefix = ? AND running_no = ?", (prefix, running_no)).fetchone()[0]
+            suffix = max(int(ln["suffix"] or 1), counters[prefix] + 1)
+            counters[prefix] = suffix
+            rows.append((prefix, running_no, suffix, article_code(prefix, running_no, suffix),
+                         compose_description(product, ln["label"]), created_by, comment, "manual"))
+        try:
+            conn.executemany(
+                """INSERT INTO article_numbers
+                       (prefix, running_no, suffix, code, product, created_by, comment, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateNumber(str(exc)) from exc
+        conn.commit()
+    return running_no
 
 
 # ---- summary ----

@@ -8,17 +8,15 @@
     <div class="card"><b>{{ summary.total }}</b><small>numbers</small></div>
     <div class="card"><b>{{ summary.families }}</b><small>products</small></div>
     <div class="card"><b>{{ summary.retired }}</b><small>retired</small></div>
-    {% if can_edit %}
-    <div style="margin-left:auto; display:flex; gap:.6rem; align-items:center;">
-      <a href="/article-register/new" style="display:flex; align-items:center; justify-content:center;
-         border:1px solid var(--line); color:var(--fg); font-weight:600; text-decoration:none;
-         border-radius:9px; padding:0 1.1rem;">New Number</a>
-      <a href="/article-register/product" style="display:flex; align-items:center; justify-content:center;
-         background:var(--accent); color:#fff; font-weight:600; text-decoration:none;
-         border-radius:9px; padding:0 1.3rem;">New Product</a>
-    </div>
-    {% endif %}
   </div>
+  {% if can_edit %}
+  <div class="act-bar">
+    <a href="/article-register/from-template" class="act-btn">New from template</a>
+    <a href="/article-register/product" class="act-btn secondary">New Product</a>
+    <a href="/article-register/new" class="act-btn secondary">New Number</a>
+    <a href="/article-register/templates" class="act-btn secondary">Templates</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/article-register"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
@@ -58,7 +56,7 @@
 
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Number</th><th>Product</th><th>Group</th><th>By</th><th>Catalog</th></tr></thead>
+      <thead><tr><th>Number</th><th>Product</th><th>Group</th><th>By</th><th>Catalog</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for e in entries %}
         <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
@@ -77,9 +75,18 @@
           </td>
           <td>{{ e.created_by or '' }}</td>
           <td>{% if e.part_id %}<a href="/catalog/{{ e.part_id }}">part ↗</a>{% else %}<span class="note">—</span>{% endif %}</td>
+          {% if can_edit %}<td style="white-space:nowrap; text-align:right;">
+            <button type="button" class="ghost" style="margin-right:.4rem;"
+                    onclick="location.href='/article-register/{{ e.id }}/edit'">Edit</button>
+            {% if e.prefix %}
+            <form method="post" action="/article-register/{{ e.id }}/duplicate" style="display:inline; margin:0;">
+              <button type="submit" class="ghost">Duplicate</button>
+            </form>
+            {% endif %}
+          </td>{% endif %}
         </tr>
         {% endfor %}
-        {% if not entries %}<tr><td colspan="5" class="note">No numbers{% if q or prefix or category %} match{% endif %}.</td></tr>{% endif %}
+        {% if not entries %}<tr><td colspan="{{ 6 if can_edit else 5 }}" class="note">No numbers{% if q or prefix or category %} match{% endif %}.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>

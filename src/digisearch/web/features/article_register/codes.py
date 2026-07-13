@@ -14,9 +14,26 @@ from __future__ import annotations
 RUNNING_WIDTH = 5
 PREFIX_WIDTH = 2
 
+# Separator inserted between a product's base name and a template line's label, e.g.
+# "MiThings GW motherboard" + "PCB" -> "MiThings GW motherboard – PCB". En dash, spaced.
+DESC_SEP = " – "
+
 
 def article_code(prefix: str, running_no: int, suffix: int) -> str:
     return f"{prefix}-{running_no:0{RUNNING_WIDTH}d}-{suffix}"
+
+
+def compose_description(product: str | None, label: str | None) -> str | None:
+    """Build a line's description from the base product name and a template label.
+
+    ``product`` alone when the label is blank (e.g. the assembly line); otherwise
+    ``"<product>{DESC_SEP}<label>"``. Returns ``None`` if both are empty.
+    """
+    product = (product or "").strip()
+    label = (label or "").strip()
+    if product and label:
+        return f"{product}{DESC_SEP}{label}"
+    return product or label or None
 
 
 def normalize_prefix(prefix: str | int | None) -> str | None:

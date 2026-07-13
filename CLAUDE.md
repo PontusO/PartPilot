@@ -18,6 +18,14 @@ Two products in one package (`src/digisearch/`):
 The README is unusually complete — read it for domain detail (how lines are classified, reel-vs-cut-tape
 rules, Digi-Key/Mouser credential setup, miniMRP stock checking). This file covers what the README doesn't.
 
+## Design work — read the design rules first
+
+**Before doing any GUI/UI work** (new or edited templates, buttons, tables, forms, colours, layout),
+**read [`docs/design-rules.md`](docs/design-rules.md)** and follow it. It is the source of truth for
+how the web UI looks: design tokens, the button system, the `.act-bar`/`.act-btn` action-bar pattern,
+table/card/form conventions, and the "real buttons in table rows, never text links" rule. When we
+agree a new UI decision, record it in that file (append to its change log) so the UI stays in sync.
+
 ## Commands
 
 This project uses `uv`. Always prefix Python commands with `uv run`.

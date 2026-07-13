@@ -96,4 +96,44 @@ MIGRATIONS = [
         CREATE INDEX ix_article_prefix ON article_numbers(prefix);
         """,
     ),
+    Migration(
+        version=2,
+        name="article_templates",
+        # Product-structure templates: a named, ordered set of lines that generate a whole product
+        # family in one shot. Each line is a (prefix, suffix, label); on apply the code becomes
+        # PREFIX-NNNNN-suffix and the description is "<product name> – <label>" (label blank = just
+        # the name). Seeds one 'Standard PCB product' template matching the house pattern (assembly +
+        # PCB/stencils + drawings) — editable/deletable in the UI.
+        sql="""
+        CREATE TABLE article_templates (
+            id         INTEGER PRIMARY KEY,
+            name       TEXT NOT NULL,
+            notes      TEXT,
+            active     INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE article_template_lines (
+            id          INTEGER PRIMARY KEY,
+            template_id INTEGER NOT NULL REFERENCES article_templates(id) ON DELETE CASCADE,
+            prefix      TEXT NOT NULL,             -- '54','98','99' …
+            suffix      INTEGER NOT NULL DEFAULT 1,
+            label       TEXT NOT NULL DEFAULT '',  -- description tail ('PCB','Schematic'); '' = name only
+            sort_order  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX ix_article_tmpl_line ON article_template_lines(template_id, sort_order);
+
+        INSERT INTO article_templates (id, name, notes) VALUES
+            (1, 'Standard PCB product', 'Assembly + PCB/stencils + core drawings');
+        INSERT INTO article_template_lines (template_id, prefix, suffix, label, sort_order) VALUES
+            (1, '98', 1, '',            0),
+            (1, '99', 1, 'PCB',         1),
+            (1, '99', 2, 'Stencil TOP', 2),
+            (1, '99', 3, 'Stencil BOT', 3),
+            (1, '54', 1, 'Schematic',   4),
+            (1, '54', 2, 'Layout',      5),
+            (1, '54', 3, 'Gerber files',6);
+        """,
+    ),
 ]

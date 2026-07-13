@@ -17,6 +17,9 @@ from .repo import DuplicateNumber
 router = APIRouter(prefix="/article-register")
 
 WRITE_ROLES = PURCHASE_ROLES
+# Hard deletion is rare and irreversible — restrict it to admins. Retiring (the normal lifecycle
+# action) stays open to WRITE_ROLES.
+DELETE_ROLES = frozenset({"admin"})
 
 
 def _s(form, name: str) -> str | None:
@@ -161,6 +164,149 @@ async def create_product(request: Request):
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 
+# ---- templates (product-structure blueprints) ----
+
+def _parse_template_lines(form) -> list[dict]:
+    """The line editor posts parallel arrays; rebuild ordered line dicts, dropping blank-prefix rows."""
+    prefixes = form.getlist("line_prefix")
+    suffixes = form.getlist("line_suffix")
+    labels = form.getlist("line_label")
+    lines = []
+    for i, prefix in enumerate(prefixes):
+        if not (prefix or "").strip():
+            continue
+        lines.append({
+            "prefix": prefix,
+            "suffix": _int(suffixes[i] if i < len(suffixes) else None, 1) or 1,
+            "label": (labels[i] if i < len(labels) else "") or "",
+        })
+    return lines
+
+
+def _render_template_form(request, *, tmpl, error=None, status=200):
+    db = request.app.state.database
+    return request.app.state.templates.TemplateResponse(
+        request, "article_register_template_form.html",
+        {"tmpl": tmpl, "groups": repo.prefixes_grouped(db), "error": error},
+        status_code=status,
+    )
+
+
+@router.get("/templates", response_class=HTMLResponse)
+def templates_list(request: Request):
+    user = require_user(request)
+    db = request.app.state.database
+    return request.app.state.templates.TemplateResponse(
+        request, "article_register_templates.html",
+        {"templates": repo.list_templates(db, active_only=False),
+         "can_edit": user.role in WRITE_ROLES},
+    )
+
+
+@router.get("/templates/new", response_class=HTMLResponse)
+def template_new(request: Request):
+    require_role(request, WRITE_ROLES)
+    return _render_template_form(request, tmpl={"id": None, "name": "", "notes": "", "lines": []})
+
+
+@router.post("/templates/new", response_class=HTMLResponse)
+async def template_create(request: Request):
+    require_role(request, WRITE_ROLES)
+    db = request.app.state.database
+    form = await request.form()
+    name = _s(form, "name")
+    lines = _parse_template_lines(form)
+    if not name:
+        return _render_template_form(
+            request, tmpl={"id": None, "name": "", "notes": form.get("notes") or "", "lines": lines},
+            error="Give the template a name.", status=400)
+    tid = repo.create_template(db, name=name, notes=_s(form, "notes"))
+    repo.save_template(db, tid, name=name, notes=_s(form, "notes"), lines=lines)
+    return RedirectResponse("/article-register/templates", status_code=303)
+
+
+@router.get("/templates/{template_id}/edit", response_class=HTMLResponse)
+def template_edit(request: Request, template_id: int):
+    require_role(request, WRITE_ROLES)
+    tmpl = repo.get_template(request.app.state.database, template_id)
+    if not tmpl:
+        return _not_found(request)
+    return _render_template_form(request, tmpl=tmpl)
+
+
+@router.post("/templates/{template_id}/edit", response_class=HTMLResponse)
+async def template_save(request: Request, template_id: int):
+    require_role(request, WRITE_ROLES)
+    db = request.app.state.database
+    tmpl = repo.get_template(db, template_id)
+    if not tmpl:
+        return _not_found(request)
+    form = await request.form()
+    name = _s(form, "name")
+    lines = _parse_template_lines(form)
+    if not name:
+        return _render_template_form(
+            request, tmpl={**tmpl, "name": "", "notes": form.get("notes") or "", "lines": lines},
+            error="Give the template a name.", status=400)
+    repo.save_template(db, template_id, name=name, notes=_s(form, "notes"), lines=lines)
+    return RedirectResponse("/article-register/templates", status_code=303)
+
+
+@router.post("/templates/{template_id}/delete", response_class=HTMLResponse)
+async def template_delete(request: Request, template_id: int):
+    require_role(request, WRITE_ROLES)
+    repo.delete_template(request.app.state.database, template_id)
+    return RedirectResponse("/article-register/templates", status_code=303)
+
+
+def _render_apply(request, *, values, error=None, status=200):
+    db = request.app.state.database
+    return request.app.state.templates.TemplateResponse(
+        request, "article_register_from_template.html",
+        {"templates": repo.list_templates(db, active_only=True),
+         "next_running_no": repo.next_running_no(db), "values": values, "error": error},
+        status_code=status,
+    )
+
+
+@router.get("/from-template", response_class=HTMLResponse)
+def from_template_form(request: Request, running_no: int | None = None):
+    require_role(request, WRITE_ROLES)
+    return _render_apply(request, values={
+        "template_id": "", "product": "", "created_by": "", "comment": "",
+        "running_no": running_no or "", "mode": "existing" if running_no else "new"})
+
+
+@router.post("/from-template", response_class=HTMLResponse)
+async def from_template_apply(request: Request):
+    require_role(request, WRITE_ROLES)
+    db = request.app.state.database
+    form = await request.form()
+    template_id = _int(form.get("template_id"))
+    product = _s(form, "product")
+    mode = (form.get("mode") or "new").strip()
+    values = {"template_id": form.get("template_id") or "", "product": product or "",
+              "created_by": form.get("created_by") or "", "comment": form.get("comment") or "",
+              "running_no": form.get("running_no") or "", "mode": mode}
+    if not template_id:
+        return _render_apply(request, values=values, error="Pick a template.", status=400)
+    if not product:
+        return _render_apply(request, values=values, error="Enter the product name.", status=400)
+    running_no = None
+    if mode == "existing":
+        running_no = _int(form.get("running_no"))
+        if not running_no:
+            return _render_apply(request, values=values,
+                                 error="Enter the existing running number.", status=400)
+    try:
+        running_no = repo.apply_template(db, template_id, product=product,
+                                         created_by=_s(form, "created_by"),
+                                         comment=_s(form, "comment"), running_no=running_no)
+    except (ValueError, DuplicateNumber) as exc:
+        return _render_apply(request, values=values, error=str(exc), status=400)
+    return RedirectResponse(f"/article-register/{running_no}", status_code=303)
+
+
 @router.get("/{running_no}", response_class=HTMLResponse)
 def family_detail(request: Request, running_no: int):
     user = require_user(request)
@@ -175,8 +321,20 @@ def family_detail(request: Request, running_no: int):
             "family": family,
             "groups": repo.prefixes_grouped(db),
             "can_edit": user.role in WRITE_ROLES,
+            "can_delete": user.role in DELETE_ROLES,
         },
     )
+
+
+@router.get("/{entry_id}/edit", response_class=HTMLResponse)
+def edit_form(request: Request, entry_id: int):
+    require_role(request, WRITE_ROLES)
+    db = request.app.state.database
+    entry = repo.get_entry(db, entry_id)
+    if entry is None:
+        return _not_found(request)
+    return request.app.state.templates.TemplateResponse(
+        request, "article_register_edit.html", {"entry": entry, "error": None})
 
 
 @router.post("/{entry_id}/edit", response_class=HTMLResponse)
@@ -192,6 +350,17 @@ async def edit(request: Request, entry_id: int):
     return RedirectResponse(f"/article-register/{entry['running_no']}", status_code=303)
 
 
+@router.post("/{entry_id}/duplicate", response_class=HTMLResponse)
+async def duplicate(request: Request, entry_id: int):
+    require_role(request, WRITE_ROLES)
+    db = request.app.state.database
+    entry = repo.get_entry(db, entry_id)
+    if entry is None:
+        return _not_found(request)
+    repo.duplicate_entry(db, entry_id)
+    return RedirectResponse(f"/article-register/{entry['running_no']}", status_code=303)
+
+
 @router.post("/{entry_id}/retire", response_class=HTMLResponse)
 async def retire(request: Request, entry_id: int):
     require_role(request, WRITE_ROLES)
@@ -202,3 +371,15 @@ async def retire(request: Request, entry_id: int):
     form = await request.form()
     repo.set_retired(db, entry_id, (form.get("retired") or "1") != "0")
     return RedirectResponse(f"/article-register/{entry['running_no']}", status_code=303)
+
+
+@router.post("/{entry_id}/delete", response_class=HTMLResponse)
+async def delete_entry(request: Request, entry_id: int):
+    require_role(request, DELETE_ROLES)
+    db = request.app.state.database
+    entry = repo.get_entry(db, entry_id)
+    if entry is None:
+        return _not_found(request)
+    running_no = entry["running_no"]
+    repo.delete_entry(db, entry_id)
+    return RedirectResponse(f"/article-register/{running_no}", status_code=303)

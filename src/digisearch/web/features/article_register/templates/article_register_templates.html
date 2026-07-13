@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Templates · Article Register{% endblock %}
+{% block content %}
+<div class="panel">
+  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
+  <h1>Product templates</h1>
+  <p class="note">Reusable product structures. Pick one when creating a product to generate its whole
+    family of numbers (assembly, components, drawings…) in one step.</p>
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a href="/article-register/templates/new" class="act-btn">New template</a>
+    <a href="/article-register/from-template" class="act-btn secondary">Create a product from a template</a>
+  </div>
+  {% endif %}
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Template</th><th>Structure</th><th class="num">Lines</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for t in templates %}
+        <tr{% if not t.active %} style="opacity:.55;"{% endif %}>
+          <td>
+            <b>{{ t.name }}</b>
+            {% if t.notes %}<div class="note">{{ t.notes }}</div>{% endif %}
+          </td>
+          <td class="note" style="max-width:520px;">
+            {% for ln in t.lines %}<span class="badge muted" style="margin:0 .25rem .25rem 0;">{{ ln.prefix }}-{{ ln.suffix }}{% if ln.label %} · {{ ln.label }}{% endif %}</span>{% else %}—{% endfor %}
+          </td>
+          <td class="num">{{ t.lines|length }}</td>
+          {% if can_edit %}
+          <td style="white-space:nowrap; text-align:right;">
+            <button type="button" class="ghost" style="margin-right:.4rem;"
+                    onclick="location.href='/article-register/templates/{{ t.id }}/edit'">Edit</button>
+            <form method="post" action="/article-register/templates/{{ t.id }}/delete"
+                  style="display:inline; margin:0;"
+                  onsubmit="return confirm('Delete template “{{ t.name }}”? Numbers already created from it are not affected.');">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+        {% if not templates %}<tr><td colspan="{{ 4 if can_edit else 3 }}" class="note">No templates yet.{% if can_edit %} Create one to get started.{% endif %}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

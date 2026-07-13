@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}New product from template · Article Register{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:720px;">
+  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
+  <h1>{{ 'Add template lines to a family' if values.mode == 'existing' else 'New product from template' }}</h1>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  {% if not templates %}
+  <p class="note">No templates exist yet. <a href="/article-register/templates/new">Create one first.</a></p>
+  {% else %}
+  <form method="post" action="/article-register/from-template" id="applyForm"
+        data-next="{{ next_running_no }}" data-sep=" – ">
+    <input type="hidden" name="mode" value="{{ values.mode }}">
+    {% if values.mode == 'existing' %}
+    <input type="hidden" name="running_no" value="{{ values.running_no }}">
+    <p class="note">Adding to running number
+      <b style="font-family:ui-monospace,monospace;">{{ '%05d'|format(values.running_no|int) }}</b> —
+      suffixes continue after the lines already in the family.</p>
+    {% endif %}
+
+    <label for="template_id">Template</label>
+    <select id="template_id" name="template_id"
+            style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                   border:1px solid var(--line); border-radius:7px;">
+      <option value="">— pick a template —</option>
+      {% for t in templates %}
+      <option value="{{ t.id }}" {{ 'selected' if values.template_id|string == t.id|string else '' }}>{{ t.name }} ({{ t.lines|length }} lines)</option>
+      {% endfor %}
+    </select>
+
+    <label for="product">Product name</label>
+    <input id="product" name="product" type="text" value="{{ values.product }}"
+           placeholder="e.g. MiThings GW motherboard">
+
+    <div style="display:flex; gap:1rem;">
+      <div style="width:120px;">
+        <label for="created_by">Created by</label>
+        <input id="created_by" name="created_by" type="text" value="{{ values.created_by }}" placeholder="initials">
+      </div>
+      <div style="flex:1;">
+        <label for="comment">Comment</label>
+        <input id="comment" name="comment" type="text" value="{{ values.comment }}">
+      </div>
+    </div>
+
+    <div style="background:#0d1219; border:1px solid var(--line); border-radius:9px;
+                padding:.8rem 1rem; margin:1.1rem 0;">
+      <div class="note" style="text-transform:uppercase; letter-spacing:.5px; font-size:.7rem; margin-bottom:.4rem;">Preview</div>
+      <div id="preview" class="note">Pick a template and enter a product name.</div>
+    </div>
+
+    <button type="submit" class="ghost">{{ 'Add to family' if values.mode == 'existing' else 'Create product' }}</button>
+  </form>
+
+  <script>
+  (function () {
+    var TEMPLATES = {{ templates|tojson }};
+    var form = document.getElementById('applyForm');
+    var sel = document.getElementById('template_id');
+    var prod = document.getElementById('product');
+    var preview = document.getElementById('preview');
+    var SEP = form.dataset.sep;
+    var isNew = form.querySelector('input[name=mode]').value !== 'existing';
+    var runningNew = form.dataset.next;
+    function pad5(n) { return ('00000' + String(n)).slice(-5); }
+
+    function render() {
+      var t = TEMPLATES.find(function (x) { return String(x.id) === sel.value; });
+      if (!t) { preview.textContent = 'Pick a template and enter a product name.'; return; }
+      var name = prod.value.trim();
+      var counters = {};
+      var html = '<table style="width:100%;"><tbody>';
+      t.lines.forEach(function (ln) {
+        var base = counters[ln.prefix] || 0;
+        var suf = Math.max(parseInt(ln.suffix || 1, 10), base + 1);
+        counters[ln.prefix] = suf;
+        var run = isNew ? pad5(runningNew) : (isNew ? '' : 'NNNNN');
+        if (!isNew) run = pad5(form.querySelector('input[name=running_no]').value || 0);
+        var code = ln.prefix + '-' + run + '-' + suf;
+        var desc = name + (ln.label ? SEP + ln.label : '');
+        html += '<tr><td style="font-family:ui-monospace,monospace; padding:.15rem .5rem .15rem 0; color:var(--fg);">'
+              + code + '</td><td style="padding:.15rem 0; color:var(--muted);">' + (desc || '—') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      preview.innerHTML = html;
+    }
+    sel.addEventListener('change', render);
+    prod.addEventListener('input', render);
+    render();
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}
