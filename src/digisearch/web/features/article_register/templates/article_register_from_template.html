@@ -15,6 +15,7 @@
   <form method="post" action="/article-register/from-template" id="applyForm"
         data-next="{{ next_running_no }}" data-sep=" – ">
     <input type="hidden" name="mode" value="{{ values.mode }}">
+    {% if values.return_to %}<input type="hidden" name="return_to" value="{{ values.return_to }}">{% endif %}
     {% if values.mode == 'existing' %}
     <input type="hidden" name="running_no" value="{{ values.running_no }}">
     <p class="note">Adding to running number

@@ -55,6 +55,7 @@ def _parse_part(form) -> dict:
         "notes": (form.get("notes") or "").strip() or None,
         "unlimited_stock": 1 if form.get("unlimited_stock") else 0,
         "normally_stocked": 1 if form.get("normally_stocked") else 0,
+        "exclude_from_bom_cost": 1 if form.get("exclude_from_bom_cost") else 0,
         # A per-part markup must be > 0 (0/negative would zero the part's sell prices); blank/invalid
         # -> None, which falls back to the Setup default.
         "markup": _positive_or_none(_num(form.get("markup"))),
@@ -217,11 +218,13 @@ def parts_by_supplier(request: Request, name: str | None = None):
 # ---- add ----
 
 @router.get("/new", response_class=HTMLResponse)
-def new_form(request: Request):
+def new_form(request: Request, part_no: str | None = None):
     require_role(request, CATALOG_WRITE_ROLES)
+    # part_no may be prefilled when returning from the Article Register allocator.
+    values = {"part_no": part_no.strip()} if (part_no or "").strip() else {}
     return _render_form(
         request, action="/catalog/new", heading="Add component", submit_label="Save component",
-        stock_heading="Opening stock", back_url="/catalog", values={},
+        stock_heading="Opening stock", back_url="/catalog", values=values,
         supplier_rows=[{"is_default": True}], stock={"qty": 0},
     )
 

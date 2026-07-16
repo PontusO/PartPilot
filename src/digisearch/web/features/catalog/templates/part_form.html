@@ -26,8 +26,18 @@
     <div class="formgrid">
       <div>
         <label for="part_no" class="req">Part number</label>
-        <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
-               placeholder="manufacturer part number / internal P/N" required autofocus>
+        <div style="display:flex; gap:.4rem;">
+          <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
+                 placeholder="manufacturer part number / internal P/N" required autofocus
+                 style="flex:1; min-width:0;">
+          {% if not part_id %}
+          <button type="button" class="ghost" title="Allocate a new internal number, then return here"
+                  style="white-space:nowrap;"
+                  onclick="location.href='/article-register/new?prefix=99&amp;return_to=/catalog/new'">
+            ＋ New number
+          </button>
+          {% endif %}
+        </div>
       </div>
       <div>
         <label for="category">Category</label>
@@ -79,6 +89,18 @@
         <p class="note" style="margin:.25rem 0 0;">For non-physical lines like SMT Assembly or
           labour/service that sit in a BOM to carry a cost. These are never short, never below
           reorder point, and not consumed from stock when a work order is issued.</p>
+      </div>
+      <div class="full" style="margin-top:.3rem;">
+        <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+          <input id="exclude_from_bom_cost" name="exclude_from_bom_cost" type="checkbox" value="1"
+                 style="width:auto;" {{ 'checked' if values.get('exclude_from_bom_cost') else '' }}>
+          Exclude from BOM cost — don't count this part's price in an assembly total
+          <span id="exbom-doc-hint" class="badge muted" style="display:none;">documents always excluded</span>
+        </label>
+        <p class="note" style="margin:.25rem 0 0;">For parts that carry a real cost but shouldn't
+          inflate a board's material/loaded cost — e.g. a stencil (one-off tooling, not per-board
+          material). The line still appears on the BOM with its cost shown, but contributes 0 to the
+          assembly totals.</p>
       </div>
       <div class="full">
         <label for="description">Description</label>
@@ -439,5 +461,36 @@
     close();
   });
 })();
+</script>
+
+{% if not part_id %}
+<script src="/static/article-lookup.js"></script>
+<script>
+  // Suggest unassigned internal article numbers as you type; picking one fills the description too.
+  attachArticleLookup({ input: 'part_no', descTarget: 'description' });
+</script>
+{% endif %}
+
+<script>
+  // Documents (5x class, e.g. 54-00001-1) are always excluded from BOM cost — the server enforces it
+  // on save; here we mirror that in the UI (tick + lock the box) so it never looks contradictory.
+  (function () {
+    var pn = document.getElementById('part_no');
+    var cb = document.getElementById('exclude_from_bom_cost');
+    var hint = document.getElementById('exbom-doc-hint');
+    if (!pn || !cb) return;
+    var wasChecked = cb.checked;
+    function isDoc(v) { return /^5\d-\d{5}-/.test((v || '').trim()); }
+    function sync() {
+      if (isDoc(pn.value)) {
+        if (!cb.disabled) wasChecked = cb.checked;   // remember the user's choice for non-doc numbers
+        cb.checked = true; cb.disabled = true; hint.style.display = 'inline-block';
+      } else if (cb.disabled) {
+        cb.disabled = false; cb.checked = wasChecked; hint.style.display = 'none';
+      }
+    }
+    pn.addEventListener('input', sync);
+    sync();
+  })();
 </script>
 {% endblock %}

@@ -73,22 +73,41 @@ def _parse_assembly(form) -> dict:
 
 
 def _render_assembly_form(request, *, action, heading, submit_label, back_url, values,
-                          hint=None, error=None, status=200):
+                          hint=None, error=None, status=200, created_parts=None):
     return request.app.state.templates.TemplateResponse(
         request, "assembly_form.html",
         {"action": action, "heading": heading, "submit_label": submit_label,
-         "back_url": back_url, "values": values or {}, "hint": hint, "error": error},
+         "back_url": back_url, "values": values or {}, "hint": hint, "error": error,
+         "created_parts": created_parts or []},
         status_code=status,
     )
 
 
 @router.get("/new", response_class=HTMLResponse)
-def new_assembly_form(request: Request):
+def new_assembly_form(request: Request, part_no: str | None = None, desc: str | None = None,
+                      created: str | None = None):
     require_role(request, ASSEMBLY_WRITE_ROLES)
+    # part_no / desc may be prefilled when returning from an Article Register allocator; `created`
+    # carries the codes of stub parts the from-template flow just made, so we can list them.
+    values = {}
+    if (part_no or "").strip():
+        values["part_no"] = part_no.strip()
+    if (desc or "").strip():
+        values["value"] = desc.strip()
+    created_parts = []
+    if created:
+        from ..catalog import repo as catalog_repo
+        db = request.app.state.database
+        codes = [c.strip() for c in created.split(",") if c.strip()]
+        for code in codes:
+            created_parts.append(catalog_repo.find_part_by_part_no(db, code) or {"part_no": code})
+        # Carried through the form so they're added to this assembly's BOM once it's created.
+        values["bom_parts"] = ",".join(codes)
     return _render_assembly_form(
         request, action="/assemblies/new", heading="New assembly",
-        submit_label="Create assembly", back_url="/assemblies", values={},
+        submit_label="Create assembly", back_url="/assemblies", values=values,
         hint="After creating, add components to its BOM from the assembly page.",
+        created_parts=created_parts,
     )
 
 
@@ -103,8 +122,25 @@ async def create_assembly(request: Request):
             submit_label="Create assembly", back_url="/assemblies", values=dict(form),
             error="Part number is required.", status=400,
         )
-    new_id = repo.create_assembly(request.app.state.database, part)
+    db = request.app.state.database
+    new_id = repo.create_assembly(db, part)
+    _add_family_parts_to_bom(db, new_id, form.get("bom_parts"))
     return RedirectResponse(f"/assemblies/{new_id}", status_code=303)
+
+
+def _add_family_parts_to_bom(db, parent_id: int, codes_csv: str | None) -> None:
+    """Add the template-created family parts (carried as a hidden CSV of part numbers) to the new
+    assembly's BOM at qty 1. Missing codes and self-references are skipped so a stale field can never
+    break assembly creation; the user tunes quantities/refdes afterwards on the BOM page."""
+    from ..catalog import repo as catalog_repo
+    for code in (c.strip() for c in (codes_csv or "").split(",") if c.strip()):
+        child = catalog_repo.find_part_by_part_no(db, code)
+        if not child or child["id"] == parent_id:
+            continue
+        try:
+            repo.add_bom_line(db, parent_id, child["id"], 1, None)
+        except ValueError:
+            pass
 
 
 @router.get("/{part_id}/edit", response_class=HTMLResponse)
@@ -147,7 +183,8 @@ def _pricing_view(assembly: dict) -> dict:
         "total_cost": assembly["total_cost"],
         "loaded_total": assembly["loaded_total"],
         "lines": {ln["id"]: {"unit_cost": ln["unit_cost"], "loaded_unit": ln["loaded_unit"],
-                             "line_cost": ln["line_cost"], "loaded_line": ln["loaded_line"]}
+                             "line_cost": ln["line_cost"], "loaded_line": ln["loaded_line"],
+                             "exclude": ln["exclude_from_bom_cost"]}
                   for ln in assembly["lines"]},
     }
 

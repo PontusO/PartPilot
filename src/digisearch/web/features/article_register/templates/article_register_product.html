@@ -19,6 +19,7 @@
   </div>
 
   <form method="post" action="/article-register/product" id="prodform" data-next="{{ next_running_no }}">
+    {% if values.return_to %}<input type="hidden" name="return_to" value="{{ values.return_to }}">{% endif %}
     <label for="product">Product / description</label>
     <input id="product" name="product" type="text" value="{{ values.product }}"
            placeholder="e.g. AddBox 200">

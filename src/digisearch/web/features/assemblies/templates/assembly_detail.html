@@ -133,6 +133,7 @@
             {% else %}
               <a href="/catalog/{{ ln.child_id }}">{{ ln.child_part_no }}</a>
             {% endif %}
+            {% if p and p.exclude %}<span class="badge muted" title="This part's cost is not counted in the BOM total">no BOM cost</span>{% endif %}
           </td>
           <td>{{ ln.child_value or '' }}</td>
           <td>{{ ln.child_category or '' }}</td>
@@ -140,7 +141,8 @@
             {% if p and p.loaded_unit is not none %}<span class="pc pc-loaded">{{ "%.4f"|format(p.loaded_unit) }}</span>{% endif %}
             {% if r %}{{ refr(p.unit_cost if p else none, r.unit_cost, '%.4f') }}{{ refr(p.loaded_unit if p else none, r.loaded_unit, '%.4f', true) }}{% endif %}
           </td>
-          <td class="num">{% if p and p.line_cost is not none %}<span class="pc pc-cost">{{ "%.2f"|format(p.line_cost) }}</span>{% endif %}
+          <td class="num" {% if p and p.exclude %}style="text-decoration:line-through; opacity:.5;" title="Not counted in the BOM total"{% endif %}>
+            {% if p and p.line_cost is not none %}<span class="pc pc-cost">{{ "%.2f"|format(p.line_cost) }}</span>{% endif %}
             {% if p and p.loaded_line is not none %}<span class="pc pc-loaded">{{ "%.2f"|format(p.loaded_line) }}</span>{% endif %}
             {% if r %}{{ refr(p.line_cost if p else none, r.line_cost, '%.2f') }}{{ refr(p.loaded_line if p else none, r.loaded_line, '%.2f', true) }}{% endif %}
           </td>

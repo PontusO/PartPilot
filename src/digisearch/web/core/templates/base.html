@@ -114,6 +114,20 @@
     #overlay .spin { width:42px; height:42px; border:4px solid var(--line);
                      border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
+    /* ---- article-number typeahead (part-number field on the add-component / new-assembly forms) ---- */
+    .ac-wrap { position:relative; }
+    .ac-menu { position:absolute; z-index:60; left:0; right:0; top:calc(100% + 2px);
+               background:var(--panel); border:1px solid var(--line); border-radius:8px;
+               box-shadow:0 12px 32px rgba(0,0,0,.5); max-height:300px; overflow-y:auto; padding:.25rem; }
+    .ac-menu[hidden] { display:none; }
+    .ac-item { display:block; width:100%; text-align:left; background:none; border:none; margin:0;
+               padding:.45rem .55rem; border-radius:6px; color:var(--fg); cursor:pointer; font:inherit; }
+    .ac-item:hover, .ac-item.active { background:var(--line); }
+    .ac-item .ac-code { font-weight:600; font-variant-numeric:tabular-nums; }
+    .ac-item .ac-tag { margin-left:.5rem; font-size:.7rem; color:var(--muted); }
+    .ac-item .ac-desc { display:block; font-size:.8rem; color:var(--muted); margin-top:.1rem;
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ac-empty { padding:.5rem .55rem; color:var(--muted); font-size:.85rem; }
   </style>
 </head>
 <body class="{{ 'authed' if current_user else 'anon' }}">

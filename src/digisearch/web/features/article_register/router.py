@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
 from . import repo
+from .codes import article_code
 from .repo import DuplicateNumber
 
 router = APIRouter(prefix="/article-register")
@@ -31,6 +32,60 @@ def _int(value, default=None):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _safe_return(url: str | None) -> str | None:
+    """Sanitise a caller-supplied return path so allocation can bounce back to it.
+
+    Only same-site absolute paths are honoured (``/catalog/new``, ``/assemblies/new``) — anything
+    that could redirect off-site (scheme, host, protocol-relative ``//``) is rejected.
+    """
+    url = (url or "").strip()
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    return None
+
+
+def _return_url(return_to: str, **params) -> str:
+    """Build the bounce-back URL, appending the given truthy query params — the freshly-allocated
+    ``part_no`` (the prefill the create forms read), plus optionally ``desc`` (name to prefill) and
+    ``created`` (comma-separated stub codes the New-assembly dialog lists)."""
+    from urllib.parse import urlencode
+    q = urlencode({k: v for k, v in params.items() if v})
+    if not q:
+        return return_to
+    sep = "&" if "?" in return_to else "?"
+    return f"{return_to}{sep}{q}"
+
+
+def _assembly_code_for(db, running_no: int) -> str | None:
+    """The code to hand back to the New-assembly page after allocating a family: the assembly (``98``)
+    line if the family has one, else the lowest-prefix coded line. ``None`` if the family is all
+    reserved (no codes)."""
+    coded = [e for e in repo.get_family(db, running_no) if e.get("code")]
+    if not coded:
+        return None
+    return next((e["code"] for e in coded if e["prefix"] == "98"),
+                sorted(coded, key=lambda e: (e["prefix"], e["suffix"]))[0]["code"])
+
+
+def _create_stub_parts(db, running_no: int, skip_code: str) -> list[str]:
+    """Create a bare catalog PART (no supplier / price / stock) for every coded family line except
+    the assembly line handed back to the form. These are deliberately incomplete stubs — the user
+    edits them before real use. Codes already in the catalog are left untouched (idempotent). Returns
+    the codes actually created, in family order."""
+    from ..catalog import repo as catalog_repo  # catalog is registered first — parts table exists
+    created = []
+    for e in repo.get_family(db, running_no):
+        code = e.get("code")
+        if not code or code == skip_code or catalog_repo.find_part_by_part_no(db, code):
+            continue
+        # The product/description is stored in the part's `value` field (house convention), not
+        # `description` — see the note on the from-template flow.
+        catalog_repo.create_part(db, part={"part_no": code, "value": e.get("product")},
+                                 supplier_lines=[])
+        created.append(code)
+    return created
 
 
 def _not_found(request):
@@ -77,12 +132,13 @@ def _render_form(request, *, values, error=None, status=200):
 
 
 @router.get("/new", response_class=HTMLResponse)
-def new_form(request: Request, running_no: int | None = None):
+def new_form(request: Request, running_no: int | None = None, prefix: str | None = None,
+             return_to: str | None = None):
     require_role(request, WRITE_ROLES)
     mode = "existing" if running_no else "new"
     return _render_form(request, values={
-        "mode": mode, "running_no": running_no or "", "prefix": "", "suffix": "",
-        "product": "", "created_by": "", "comment": "",
+        "mode": mode, "running_no": running_no or "", "prefix": (prefix or "").strip(), "suffix": "",
+        "product": "", "created_by": "", "comment": "", "return_to": _safe_return(return_to) or "",
     })
 
 
@@ -92,6 +148,21 @@ def api_next_suffix(request: Request, prefix: str, running_no: int):
     require_user(request)
     db = request.app.state.database
     return JSONResponse({"suffix": repo.next_suffix(db, prefix.zfill(2), running_no)})
+
+
+@router.get("/api/unassigned")
+def api_unassigned(request: Request, q: str | None = None, prefix: str | None = None):
+    """Typeahead source for the part-number fields on Add-component / New-assembly.
+
+    Returns live article numbers not yet tied to a catalog part/assembly, matching the typed text.
+    Open to any signed-in user (read-only). ``prefix`` scopes to one category (e.g. ``98``).
+    """
+    require_user(request)
+    db = request.app.state.database
+    query = (q or "").strip() or None
+    prefix = (prefix or "").strip() or None
+    rows = repo.search_unassigned(db, query, prefix=prefix, limit=20)
+    return JSONResponse({"results": rows})
 
 
 @router.post("/new", response_class=HTMLResponse)
@@ -104,10 +175,11 @@ async def create(request: Request):
     product = _s(form, "product")
     created_by = _s(form, "created_by")
     comment = _s(form, "comment")
+    return_to = _safe_return(form.get("return_to"))
 
     values = {"mode": mode, "running_no": form.get("running_no") or "", "prefix": prefix or "",
               "suffix": form.get("suffix") or "", "product": product or "",
-              "created_by": created_by or "", "comment": comment or ""}
+              "created_by": created_by or "", "comment": comment or "", "return_to": return_to or ""}
 
     if not prefix:
         return _render_form(request, values=values, error="Pick a prefix (group).", status=400)
@@ -120,13 +192,17 @@ async def create(request: Request):
     else:
         running_no = repo.next_running_no(db)  # recompute at submit to avoid a stale reservation
 
-    suffix = _int(form.get("suffix")) or repo.next_suffix(db, prefix.zfill(2), running_no)
+    prefix = prefix.zfill(2)
+    suffix = _int(form.get("suffix")) or repo.next_suffix(db, prefix, running_no)
 
     try:
         repo.create_entry(db, prefix=prefix, running_no=running_no, suffix=suffix,
                           product=product, created_by=created_by, comment=comment)
     except DuplicateNumber as exc:
         return _render_form(request, values=values, error=str(exc), status=400)
+    if return_to:  # came from a create-part/assembly page — bounce back with the new code prefilled
+        return RedirectResponse(_return_url(return_to, part_no=article_code(prefix, running_no, suffix)),
+                                status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 
@@ -141,10 +217,11 @@ def _render_product_form(request, *, values, error=None, status=200):
 
 
 @router.get("/product", response_class=HTMLResponse)
-def new_product_form(request: Request):
+def new_product_form(request: Request, return_to: str | None = None):
     require_role(request, WRITE_ROLES)
     return _render_product_form(request, values={
-        "product": "", "prefixes": [], "created_by": "", "comment": ""})
+        "product": "", "prefixes": [], "created_by": "", "comment": "",
+        "return_to": _safe_return(return_to) or ""})
 
 
 @router.post("/product", response_class=HTMLResponse)
@@ -154,13 +231,19 @@ async def create_product(request: Request):
     form = await request.form()
     product = _s(form, "product")
     prefixes = [p for p in form.getlist("prefixes") if p]
+    return_to = _safe_return(form.get("return_to"))
     values = {"product": product or "", "prefixes": prefixes,
-              "created_by": form.get("created_by") or "", "comment": form.get("comment") or ""}
+              "created_by": form.get("created_by") or "", "comment": form.get("comment") or "",
+              "return_to": return_to or ""}
     if not prefixes:
         return _render_product_form(request, values=values,
                                     error="Tick at least one group.", status=400)
     running_no = repo.create_product(db, product=product, prefixes=prefixes,
                                      created_by=_s(form, "created_by"), comment=_s(form, "comment"))
+    if return_to:  # came from New Assembly — bounce back with the assembly code prefilled
+        code = _assembly_code_for(db, running_no)
+        if code:
+            return RedirectResponse(_return_url(return_to, part_no=code), status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 
@@ -270,11 +353,13 @@ def _render_apply(request, *, values, error=None, status=200):
 
 
 @router.get("/from-template", response_class=HTMLResponse)
-def from_template_form(request: Request, running_no: int | None = None):
+def from_template_form(request: Request, running_no: int | None = None,
+                       return_to: str | None = None):
     require_role(request, WRITE_ROLES)
     return _render_apply(request, values={
         "template_id": "", "product": "", "created_by": "", "comment": "",
-        "running_no": running_no or "", "mode": "existing" if running_no else "new"})
+        "running_no": running_no or "", "mode": "existing" if running_no else "new",
+        "return_to": _safe_return(return_to) or ""})
 
 
 @router.post("/from-template", response_class=HTMLResponse)
@@ -285,9 +370,10 @@ async def from_template_apply(request: Request):
     template_id = _int(form.get("template_id"))
     product = _s(form, "product")
     mode = (form.get("mode") or "new").strip()
+    return_to = _safe_return(form.get("return_to"))
     values = {"template_id": form.get("template_id") or "", "product": product or "",
               "created_by": form.get("created_by") or "", "comment": form.get("comment") or "",
-              "running_no": form.get("running_no") or "", "mode": mode}
+              "running_no": form.get("running_no") or "", "mode": mode, "return_to": return_to or ""}
     if not template_id:
         return _render_apply(request, values=values, error="Pick a template.", status=400)
     if not product:
@@ -304,6 +390,13 @@ async def from_template_apply(request: Request):
                                          comment=_s(form, "comment"), running_no=running_no)
     except (ValueError, DuplicateNumber) as exc:
         return _render_apply(request, values=values, error=str(exc), status=400)
+    if return_to:  # came from New Assembly — materialise the family's parts, then bounce back
+        code = _assembly_code_for(db, running_no)
+        if code:
+            created = _create_stub_parts(db, running_no, skip_code=code)
+            return RedirectResponse(
+                _return_url(return_to, part_no=code, desc=product, created=",".join(created)),
+                status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 

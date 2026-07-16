@@ -87,6 +87,23 @@ def test_get_part_detail(db):
     assert len(part["stock"]) == 1 and part["stock"][0]["bin"] == "KH1"
 
 
+def test_exclude_from_bom_cost_persists_and_documents_forced(db):
+    # A normal component: honours the checkbox, defaults off.
+    comp = repo.create_part(db, part={"part_no": "99-00001-1"}, supplier_lines=[])
+    assert repo.get_part(db, comp)["exclude_from_bom_cost"] is False
+    comp2 = repo.create_part(db, part={"part_no": "99-00002-1", "exclude_from_bom_cost": 1},
+                             supplier_lines=[])
+    assert repo.get_part(db, comp2)["exclude_from_bom_cost"] is True
+
+    # Documents (5x class) are always excluded, regardless of the checkbox — on create and update.
+    assert repo.is_document_part_no("54-00001-1") and not repo.is_document_part_no("99-00001-1")
+    doc = repo.create_part(db, part={"part_no": "54-00001-1", "value": "Schematic"}, supplier_lines=[])
+    assert repo.get_part(db, doc)["exclude_from_bom_cost"] is True
+    repo.update_part(db, doc, part={"part_no": "54-00001-1", "exclude_from_bom_cost": 0},
+                     supplier_lines=[])
+    assert repo.get_part(db, doc)["exclude_from_bom_cost"] is True  # re-enforced on save
+
+
 def test_normally_stocked_persists_and_defaults_off(db):
     pid = repo.create_part(db, part={"part_no": "NS-1"}, supplier_lines=[])
     assert repo.get_part(db, pid)["normally_stocked"] is False  # default unchecked

@@ -110,6 +110,11 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
 - **Forms.** `<label>` above `<input>`; inputs are full-width on `#0d1219`. Group side-by-side fields
   in a `display:flex; gap` row. Primary submit is a bare `button`; an inline Save/Cancel pair uses
   `ghost` + `quiet`. Errors render in `.err` (or a `.badge.bad` block for a single message).
+- **Typeahead / autocomplete.** For a live "type to search" field, use the `.ac-wrap` / `.ac-menu` /
+  `.ac-item` primitives in `base.html` with the shared `/static/article-lookup.js` helper
+  (`attachArticleLookup({input, prefix, descTarget})`). It progressively enhances a plain text input
+  (the field stays free-text), debounces, fetches JSON from a feature endpoint, and supports
+  arrow-key + Enter selection. Reuse it for any code/part lookup; don't hand-roll a new dropdown.
 
 ---
 
@@ -131,3 +136,13 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
 - **2026-07-13** — Promoted `.act-bar` / `.act-btn` / `.act-btn.secondary` from a per-page `<style>`
   block into `base.html` as global primitives (Article Register's template pages were the third
   consumer). Use them directly; don't paste local copies.
+- **2026-07-15** — Added a shared typeahead widget: `.ac-wrap` / `.ac-menu` / `.ac-item` CSS in
+  `base.html` + `/static/article-lookup.js` (`attachArticleLookup`). First used on the part-number
+  field of Add-component and New-assembly to suggest unassigned Article Register numbers (endpoint
+  `GET /article-register/api/unassigned`). Reuse it for future code/part lookups.
+- **2026-07-15** — "Allocate & return" pattern: an inline `ghost` button next to the part-number
+  field on Add-component / New-assembly jumps to the Article Register allocator (New Number /
+  New Product) carrying a validated `return_to` path; on success the allocator redirects back to the
+  create page with `?part_no=<code>` prefilled. Return paths are same-site only (`_safe_return`
+  rejects scheme/host/`//`). Reuse `return_to` + a `part_no` prefill param for any allocate-elsewhere
+  flow rather than opening a second window.

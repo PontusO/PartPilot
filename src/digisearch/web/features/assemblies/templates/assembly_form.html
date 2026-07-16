@@ -5,6 +5,21 @@
   .formgrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 1.2rem; }
   .formgrid .full { grid-column:1 / -1; }
   .req::after { content:" *"; color:var(--bad); }
+  .modal { position:fixed; inset:0; background:rgba(8,12,18,.7); display:flex;
+           align-items:flex-start; justify-content:center; z-index:60; padding:2.5rem 1rem; }
+  .modal-card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+                width:620px; max-width:100%; max-height:88vh; display:flex; flex-direction:column;
+                padding:1rem 1.2rem; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.6rem; }
+  .modal-head b { font-size:1.05rem; }
+  .stub-list { overflow-y:auto; border:1px solid var(--line); border-radius:8px; margin:.6rem 0; }
+  .stub-row { display:flex; align-items:center; gap:.6rem; padding:.5rem .7rem;
+              border-bottom:1px solid var(--line); }
+  .stub-row:last-child { border-bottom:none; }
+  .stub-row .pn { font-family:ui-monospace,monospace; font-weight:600; white-space:nowrap; }
+  .stub-row .ds { color:var(--muted); font-size:.85rem; overflow:hidden; text-overflow:ellipsis;
+                  white-space:nowrap; flex:1; }
+  .stub-row a { margin-left:auto; white-space:nowrap; }
 </style>
 
 <div class="panel">
@@ -13,11 +28,26 @@
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
   <form method="post" action="{{ action }}">
+    {% if values.bom_parts %}<input type="hidden" name="bom_parts" value="{{ values.bom_parts }}">{% endif %}
     <div class="formgrid">
       <div>
         <label for="part_no" class="req">Part number</label>
-        <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
-               placeholder="e.g. 98-00400-1" required autofocus>
+        <div style="display:flex; gap:.4rem;">
+          <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') or '' }}"
+                 placeholder="e.g. 98-00400-1" required autofocus style="flex:1; min-width:0;">
+          {% if action == '/assemblies/new' %}
+          <button type="button" class="ghost" title="Allocate a new product family, then return here"
+                  style="white-space:nowrap;"
+                  onclick="location.href='/article-register/product?return_to=/assemblies/new'">
+            ＋ New product
+          </button>
+          <button type="button" class="ghost" title="Allocate a product family from a template, then return here"
+                  style="white-space:nowrap;"
+                  onclick="location.href='/article-register/from-template?return_to=/assemblies/new'">
+            ＋ From template
+          </button>
+          {% endif %}
+        </div>
       </div>
       <div>
         <label for="rev">Revision</label>
@@ -52,4 +82,39 @@
     </div>
   </form>
 </div>
+
+{% if action == '/assemblies/new' %}
+<script src="/static/article-lookup.js"></script>
+<script>
+  // Suggest unassigned '98' (assembly) article numbers as you type; picking one fills the name too.
+  attachArticleLookup({ input: 'part_no', prefix: '98', descTarget: 'value' });
+</script>
+{% endif %}
+
+{% if created_parts %}
+<div class="modal" id="stubModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b>⚠ {{ created_parts|length }} part{{ 's' if created_parts|length != 1 else '' }} created — edit before use</b>
+      <button type="button" class="quiet" onclick="document.getElementById('stubModal').remove()">✕</button>
+    </div>
+    <p class="note" style="margin:.2rem 0 .4rem;">The template created these as <b>stub parts</b> in the
+      catalog (no supplier, price, or specs yet). They'll be added to this assembly's <b>BOM</b> (qty 1
+      each) when you press <b>{{ submit_label }}</b> — tune quantities and reference designators on the
+      BOM page afterwards. Edit each stub before using it in production or on a purchase order.</p>
+    <div class="stub-list">
+      {% for p in created_parts %}
+      <div class="stub-row">
+        <span class="pn">{{ p.part_no }}</span>
+        <span class="ds">{{ p.description or p.value or '' }}</span>
+        {% if p.id %}<a href="/catalog/{{ p.id }}/edit" target="_blank">Edit ↗</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top:.4rem; display:flex; justify-content:flex-end;">
+      <button type="button" class="ghost" onclick="document.getElementById('stubModal').remove()">Got it</button>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

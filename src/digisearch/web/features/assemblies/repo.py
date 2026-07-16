@@ -58,7 +58,7 @@ def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
             """SELECT b.id, b.qty_per, b.refdes, b.line_no, b.comments,
                       c.id AS child_id, c.part_no AS child_part_no, c.value AS child_value,
                       c.kind AS child_kind, c.category AS child_category,
-                      c.unit_cost AS child_unit_cost
+                      c.unit_cost AS child_unit_cost, c.exclude_from_bom_cost AS exclude_from_bom_cost
                FROM bom_lines b JOIN parts c ON c.id = b.child_id
                WHERE b.parent_id = ?
                ORDER BY COALESCE(b.line_no, 1e9), b.id""",
@@ -66,6 +66,7 @@ def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
         )]
         for ln in lines:
             qty_per = ln["qty_per"] or 0
+            ln["exclude_from_bom_cost"] = bool(ln["exclude_from_bom_cost"])
             # Price the child at the tier for the quantity this build consumes (qty_per × build_qty),
             # from the same basis as loaded, so material × overhead == loaded and both re-price with
             # the build volume without drifting when cost tiers are refreshed.
@@ -78,9 +79,12 @@ def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
             ln["loaded_line"] = loaded_unit * qty_per if loaded_unit is not None else None
         assembly["lines"] = lines
         assembly["build_qty"] = build_qty
-        assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
+        # A line flagged exclude_from_bom_cost keeps its per-line figures (shown, marked) but is left
+        # out of the assembly totals — e.g. a stencil's tooling cost shouldn't load the board cost.
+        assembly["total_cost"] = sum(ln["line_cost"] for ln in lines
+                                     if ln["line_cost"] is not None and not ln["exclude_from_bom_cost"])
         assembly["loaded_total"] = sum(ln["loaded_line"] for ln in lines
-                                       if ln["loaded_line"] is not None)
+                                       if ln["loaded_line"] is not None and not ln["exclude_from_bom_cost"])
         assembly["used_in"] = [dict(r) for r in conn.execute(
             """SELECT p.id, p.part_no, p.value, b.qty_per
                FROM bom_lines b JOIN parts p ON p.id = b.parent_id
@@ -115,6 +119,7 @@ def get_assembly_for_export(
                       c.description AS child_description, c.kind AS child_kind,
                       c.category AS child_category, c.mfr_name AS child_mfr_name,
                       c.mfr_pno AS child_mfr_pno, c.unit_cost AS child_unit_cost,
+                      c.exclude_from_bom_cost AS exclude_from_bom_cost,
                       (SELECT ps.price_per_uom / NULLIF(ps.qty_per_uom, 0)
                          FROM part_suppliers ps
                         WHERE ps.part_id = c.id
@@ -129,6 +134,7 @@ def get_assembly_for_export(
         )]
         for ln in lines:
             qty_per = ln["qty_per"] or 0
+            ln["exclude_from_bom_cost"] = bool(ln["exclude_from_bom_cost"])
             need = qty_per * build_qty          # total quantity of this child the build consumes
             # Material at the SAME cost-tier / volume basis as the on-screen BOM (and as the sell
             # price below), so material → loaded → sell stay proportional across the export.
@@ -142,11 +148,13 @@ def get_assembly_for_export(
             ln["loaded_line"] = loaded_unit * qty_per if loaded_unit is not None else None
         assembly["lines"] = lines
         assembly["build_qty"] = build_qty
-        assembly["total_cost"] = sum(ln["line_cost"] for ln in lines if ln["line_cost"] is not None)
+        # Exclude flagged lines (e.g. stencils) from the roll-up totals, matching the on-screen BOM.
+        assembly["total_cost"] = sum(ln["line_cost"] for ln in lines
+                                     if ln["line_cost"] is not None and not ln["exclude_from_bom_cost"])
         # Per-board loaded parts cost = sum of the direct lines' loaded contributions — each
         # `loaded_line` already rolled up its child's sub-tree, so no second full-BOM walk needed.
         assembly["loaded_total"] = sum(ln["loaded_line"] for ln in lines
-                                       if ln["loaded_line"] is not None)
+                                       if ln["loaded_line"] is not None and not ln["exclude_from_bom_cost"])
     return assembly
 
 
@@ -229,7 +237,8 @@ def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
     material_total = loaded_total = 0.0
     with db.connect() as conn:
         for ln in conn.execute(
-            "SELECT id, child_id, qty_per FROM bom_lines WHERE parent_id = ?", (part_id,)):
+            "SELECT b.id, b.child_id, b.qty_per, c.exclude_from_bom_cost AS exclude "
+            "FROM bom_lines b JOIN parts c ON c.id = b.child_id WHERE b.parent_id = ?", (part_id,)):
             qty_per = ln["qty_per"] or 0
             need = qty_per * build_qty
             mat_unit = pricing.rolled_cost_at(conn, ln["child_id"], need)
@@ -237,6 +246,8 @@ def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
             mat_line = mat_unit * qty_per if mat_unit is not None else None
             loaded_line = loaded_unit * qty_per if loaded_unit is not None else None
             per_line[ln["id"]] = {"material": mat_line, "loaded": loaded_line}
+            if ln["exclude"]:            # flagged (e.g. stencil): shown per-line but not in the total
+                continue
             if mat_line is not None:
                 material_total += mat_line
             if loaded_line is not None:

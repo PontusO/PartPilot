@@ -34,9 +34,25 @@ def test_allocation_and_code_format(db):
     eid = repo.create_entry(db, prefix="98", running_no=2, suffix=4, product="Enterprise PCBA")
     entry = repo.get_entry(db, eid)
     assert entry["code"] == "98-00002-4" == article_code("98", 2, 4)
-    assert repo.next_running_no(db) == 3  # MAX(2)+1
-    assert repo.next_suffix(db, "98", 2) == 5  # MAX(4)+1
+    assert repo.next_running_no(db) == 1  # 1 is free — reuse the gap, not MAX+1
+    assert repo.next_suffix(db, "98", 2) == 5  # MAX(4)+1 within the family
     assert repo.next_suffix(db, "99", 2) == 1  # different prefix, empty
+
+
+def test_next_running_no_fills_the_first_gap(db):
+    for n in (1, 2, 3, 100, 101):  # a legacy block + a far-off high block, gap at 4
+        repo.create_entry(db, prefix="98", running_no=n, suffix=1)
+    assert repo.next_running_no(db) == 4  # earliest free number, not MAX(101)+1
+    repo.create_entry(db, prefix="98", running_no=4, suffix=1)
+    assert repo.next_running_no(db) == 5
+
+    # Retired and reserved rows still occupy their running number — never reused.
+    rid = repo.create_entry(db, prefix="99", running_no=5, suffix=1)
+    repo.set_retired(db, rid, True)
+    with db.connect() as conn:  # a reserved (prefix/suffix/code NULL) running number
+        conn.execute("INSERT INTO article_numbers (running_no) VALUES (6)")
+        conn.commit()
+    assert repo.next_running_no(db) == 7
 
 
 def test_prefix_is_zero_padded(db):
@@ -102,6 +118,31 @@ def test_soft_catalog_link(db):
     assert next(e for e in repo.list_entries(db) if e["id"] == other)["part_id"] is None
 
 
+def test_search_unassigned_excludes_associated_retired_and_reserved(db):
+    free_assy = repo.create_entry(db, prefix="98", running_no=2, suffix=1, product="Gateway board")
+    taken = repo.create_entry(db, prefix="98", running_no=3, suffix=1, product="Router board")
+    retired = repo.create_entry(db, prefix="98", running_no=4, suffix=1, product="Old board")
+    repo.set_retired(db, retired, True)
+    free_comp = repo.create_entry(db, prefix="99", running_no=2, suffix=1, product="Widget")
+    repo.create_entry(db, prefix=None, running_no=99, suffix=None)  # reserved: no code
+    with db.connect() as conn:  # associate one code with a catalog part/assembly
+        conn.execute("INSERT INTO parts (part_no, kind) VALUES ('98-00003-1', 'ASSY')")
+        conn.commit()
+
+    all_codes = {r["code"] for r in repo.search_unassigned(db)}
+    assert "98-00002-1" in all_codes and "99-00002-1" in all_codes
+    assert "98-00003-1" not in all_codes  # already has a part
+    assert "98-00004-1" not in all_codes  # retired
+    assert None not in all_codes          # reserved row (no code) excluded
+    _ = (free_assy, taken, retired, free_comp)
+
+    # prefix scoping (e.g. assemblies only) and text match on code/product.
+    scoped = {r["code"] for r in repo.search_unassigned(db, prefix="98")}
+    assert scoped == {"98-00002-1"}
+    assert {r["code"] for r in repo.search_unassigned(db, "gateway")} == {"98-00002-1"}
+    assert {r["code"] for r in repo.search_unassigned(db, "99-0000")} == {"99-00002-1"}
+
+
 def test_list_filters_and_retired_visibility(db):
     good = repo.create_entry(db, prefix="98", running_no=2, suffix=4, product="Enterprise")
     dead = repo.create_entry(db, prefix="99", running_no=2, suffix=4, product="Old PCB")
@@ -111,6 +152,141 @@ def test_list_filters_and_retired_visibility(db):
     assert dead in {e["id"] for e in repo.list_entries(db, include_retired=True)}
     assert {e["id"] for e in repo.list_entries(db, category="internal")} == {good}
     assert {e["id"] for e in repo.list_entries(db, search="enterprise")} == {good}
+
+
+def _client(tmp_path):
+    from fastapi.testclient import TestClient
+
+    import digisearch.web.app as web_app
+    app = web_app.create_app(db_path=tmp_path / "p.db", data_dir=tmp_path / "data",
+                             secret_key="test-secret")
+    app.state.store.create_user("buyer1", "pw", role="purchasing")
+    client = TestClient(app)
+    client.post("/login", data={"username": "buyer1", "password": "pw"}, follow_redirects=False)
+    return app, client
+
+
+def test_allocate_returns_to_create_page_with_code(tmp_path):
+    app, client = _client(tmp_path)
+    db = app.state.database
+
+    # New Number form carries the preset prefix + hidden return path.
+    page = client.get("/article-register/new", params={"prefix": "99", "return_to": "/catalog/new"})
+    assert 'name="return_to" value="/catalog/new"' in page.text
+    assert 'value="99" selected' in page.text
+
+    nn = repo.next_running_no(db)
+    r = client.post("/article-register/new",
+                    data={"mode": "new", "prefix": "99", "return_to": "/catalog/new"},
+                    follow_redirects=False)
+    assert r.headers["location"] == f"/catalog/new?part_no=99-{nn:05d}-1"
+    # …and the create-part page prefills that number.
+    assert f'value="99-{nn:05d}-1"' in client.get(r.headers["location"]).text
+
+    # New Product returns the assembly (98) code to the New-assembly page.
+    rn = repo.next_running_no(db)
+    r = client.post("/article-register/product",
+                    data={"product": "GW", "prefixes": ["98", "99", "54"],
+                          "return_to": "/assemblies/new"}, follow_redirects=False)
+    assert r.headers["location"] == f"/assemblies/new?part_no=98-{rn:05d}-1"
+    assert f'value="98-{rn:05d}-1"' in client.get(r.headers["location"]).text
+
+
+def test_from_template_returns_assembly_code(tmp_path):
+    app, client = _client(tmp_path)
+    db = app.state.database
+    # The seeded 'Standard PCB product' template (id 1) includes a 98 assembly line.
+    page = client.get("/article-register/from-template", params={"return_to": "/assemblies/new"})
+    assert 'name="return_to" value="/assemblies/new"' in page.text
+
+    from urllib.parse import parse_qs, urlparse
+
+    rn = repo.next_running_no(db)
+    r = client.post("/article-register/from-template",
+                    data={"template_id": "1", "product": "GW mobo", "mode": "new",
+                          "return_to": "/assemblies/new"}, follow_redirects=False)
+    loc = r.headers["location"]
+    assert urlparse(loc).path == "/assemblies/new"
+    assert parse_qs(urlparse(loc).query)["part_no"][0] == f"98-{rn:05d}-1"
+    assert f'value="98-{rn:05d}-1"' in client.get(loc).text
+
+
+def test_from_template_creates_stub_parts_and_dialog(tmp_path):
+    from urllib.parse import parse_qs, urlparse
+
+    from digisearch.web.features.catalog import repo as crepo
+
+    app, client = _client(tmp_path)
+    db = app.state.database
+    rn = repo.next_running_no(db)
+    r = client.post("/article-register/from-template",
+                    data={"template_id": "1", "product": "MiThings GW", "mode": "new",
+                          "return_to": "/assemblies/new"}, follow_redirects=False)
+    qs = parse_qs(urlparse(r.headers["location"]).query)
+    assert qs["part_no"][0] == f"98-{rn:05d}-1"
+    assert qs["desc"][0] == "MiThings GW"
+    created = qs["created"][0].split(",")
+
+    # Every non-assembly line of the standard template becomes a kind=PART stub; the 98 does not.
+    assert f"98-{rn:05d}-1" not in created
+    assert len(created) == 6  # 3×99 + 3×54
+    for code in created:
+        p = crepo.find_part_by_part_no(db, code)
+        # house convention: the product/description lands in `value`, not `description`
+        assert p and p["kind"] == "PART" and p["value"] and not p["description"]
+
+    # The return page prefills part_no + name and raises the "created, edit before use" dialog.
+    page = client.get(r.headers["location"]).text
+    assert f'value="98-{rn:05d}-1"' in page and 'value="MiThings GW"' in page
+    assert "parts created" in page and created[0] in page
+
+    # Idempotent: re-running the same template into the *same* family adds no duplicate parts.
+    r2 = client.post("/article-register/from-template",
+                     data={"template_id": "1", "product": "MiThings GW", "mode": "existing",
+                           "running_no": str(rn), "return_to": "/assemblies/new"},
+                     follow_redirects=False)
+    qs2 = parse_qs(urlparse(r2.headers["location"]).query)
+    # existing-mode suffixes advance, so these are *new* codes → new stubs, but the originals are untouched.
+    for code in created:
+        assert crepo.find_part_by_part_no(db, code)  # still exactly one each
+
+
+def test_from_template_parts_land_in_new_assembly_bom(tmp_path):
+    from urllib.parse import parse_qs, urlparse
+
+    app, client = _client(tmp_path)
+    db = app.state.database
+    r = client.post("/article-register/from-template",
+                    data={"template_id": "1", "product": "GW", "mode": "new",
+                          "return_to": "/assemblies/new"}, follow_redirects=False)
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    created = q["created"][0].split(",")
+
+    # Creating the assembly (carrying the hidden bom_parts) adds every created part to its BOM at qty 1.
+    r2 = client.post("/assemblies/new",
+                     data={"part_no": q["part_no"][0], "value": "GW", "bom_parts": ",".join(created)},
+                     follow_redirects=False)
+    asm_id = int(r2.headers["location"].rsplit("/", 1)[1])
+    with db.connect() as conn:
+        rows = [dict(x) for x in conn.execute(
+            "SELECT c.part_no, b.qty_per FROM bom_lines b JOIN parts c ON c.id = b.child_id "
+            "WHERE b.parent_id = ? ORDER BY b.line_no", (asm_id,))]
+    assert {x["part_no"] for x in rows} == set(created)
+    assert all(x["qty_per"] == 1 for x in rows)
+
+
+def test_allocate_rejects_offsite_return_to(tmp_path):
+    _, client = _client(tmp_path)
+    # An external return path is ignored; allocation falls back to the family detail page.
+    r = client.post("/article-register/new",
+                    data={"mode": "new", "prefix": "99", "return_to": "https://evil.example"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/article-register/")
+    # Protocol-relative is also rejected.
+    r = client.post("/article-register/new",
+                    data={"mode": "new", "prefix": "99", "return_to": "//evil.example"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/article-register/")
 
 
 def _build_workbook(path):

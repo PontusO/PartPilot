@@ -18,6 +18,7 @@
   <form method="post" action="/article-register/new" id="alloc"
         data-next="{{ next_running_no }}"
         data-suffix-url="/article-register/api/next-suffix">
+    {% if values.return_to %}<input type="hidden" name="return_to" value="{{ values.return_to }}">{% endif %}
 
     <div style="display:flex; gap:1.2rem; margin-bottom:.3rem;">
       <label class="check" style="margin-top:0;">

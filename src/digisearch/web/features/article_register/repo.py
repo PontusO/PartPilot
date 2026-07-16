@@ -79,6 +79,35 @@ def list_entries(db: Database, *, search: str | None = None, prefix: str | None 
         )]
 
 
+def search_unassigned(db: Database, query: str | None = None, *, prefix: str | None = None,
+                      limit: int = 20) -> list[dict]:
+    """Article numbers that have a code but no catalog part/assembly yet — for the part-number
+    typeahead on the Add-component / New-assembly forms.
+
+    "Unassigned" = a live (non-reserved, non-retired) ``code`` with no matching ``parts.part_no``
+    (assemblies are parts with ``kind='ASSY'``, so this one check covers both). ``prefix`` optionally
+    scopes to a single category (e.g. ``98`` for assemblies). Matches the typed text against the code
+    or the product description; ordered so the most recent numbers surface first.
+    """
+    clauses = ["a.code IS NOT NULL", "a.retired = 0",
+               "NOT EXISTS (SELECT 1 FROM parts p WHERE p.part_no = a.code)"]
+    params: dict = {"limit": max(1, min(limit, 50))}
+    if prefix:
+        clauses.append("a.prefix = :prefix")
+        params["prefix"] = normalize_prefix(prefix)
+    if query:
+        clauses.append("(a.code LIKE :like OR a.product LIKE :like)")
+        params["like"] = f"%{query}%"
+    where = "WHERE " + " AND ".join(clauses)
+    with db.connect() as conn:
+        return [dict(r) for r in conn.execute(
+            f"""SELECT a.code, a.product, a.prefix, a.running_no, a.suffix,
+                       ap.label AS prefix_label, ap.category AS category
+                {_JOINS} {where}
+                ORDER BY a.running_no DESC, a.prefix, a.suffix
+                LIMIT :limit""", params)]
+
+
 def get_family(db: Database, running_no: int) -> list[dict]:
     """All entries (assigned + reserved) sharing a running number — the family view."""
     with db.connect() as conn:
@@ -100,10 +129,24 @@ def get_entry(db: Database, entry_id: int) -> dict | None:
 
 # ---- allocation ----
 
+def _first_free_running_no(conn) -> int:
+    """Smallest running number >= 1 not present in ``article_numbers`` — the first *gap*, not MAX+1.
+
+    The register grew with large gaps between legacy blocks (e.g. real numbers stop around 392 but a
+    few high numbers push MAX past 1000); those free numbers in between are meant to be reused, so we
+    fill the earliest gap. Retired and reserved rows still occupy their running number, so a number
+    taken for any reason is never handed out again.
+    """
+    used = {r[0] for r in conn.execute("SELECT DISTINCT running_no FROM article_numbers")}
+    n = 1
+    while n in used:
+        n += 1
+    return n
+
+
 def next_running_no(db: Database) -> int:
     with db.connect() as conn:
-        return conn.execute(
-            "SELECT COALESCE(MAX(running_no), 0) + 1 FROM article_numbers").fetchone()[0]
+        return _first_free_running_no(conn)
 
 
 def next_suffix(db: Database, prefix: str, running_no: int) -> int:
@@ -144,8 +187,7 @@ def create_product(db: Database, *, product: str | None, prefixes: list[str],
     if not codes:
         raise ValueError("Pick at least one group.")
     with db.connect() as conn:
-        running_no = conn.execute(
-            "SELECT COALESCE(MAX(running_no), 0) + 1 FROM article_numbers").fetchone()[0]
+        running_no = _first_free_running_no(conn)
         conn.executemany(
             """INSERT INTO article_numbers
                    (prefix, running_no, suffix, code, product, created_by, comment, source)
@@ -278,8 +320,7 @@ def apply_template(db: Database, template_id: int, *, product: str | None,
         raise ValueError("That template has no lines.")
     with db.connect() as conn:
         if running_no is None:
-            running_no = conn.execute(
-                "SELECT COALESCE(MAX(running_no), 0) + 1 FROM article_numbers").fetchone()[0]
+            running_no = _first_free_running_no(conn)
         counters: dict[str, int] = {}
         rows = []
         for ln in tmpl["lines"]:

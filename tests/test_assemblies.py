@@ -144,6 +144,29 @@ def test_get_assembly_reports_material_and_loaded(db):
     assert ln["loaded_unit"] == pytest.approx(0.65) and ln["loaded_line"] == pytest.approx(1.95)
 
 
+def test_exclude_from_bom_cost_omits_line_from_totals(db):
+    from digisearch.web.features.catalog import repo as catrepo
+
+    asm = repo.create_assembly(db, {"part_no": "EX-ASM"})
+    repo.add_bom_line(db, asm, _component(db, "R-1", 0.10), 4, "R1")   # 0.40 material, counted
+    stencil = catrepo.create_part(
+        db, part={"part_no": "STENCIL-1", "exclude_from_bom_cost": 1},
+        supplier_lines=[{"supplier_name": "PCBW", "unit_price": 50.0, "reel_qty": 1, "is_default": True}])
+    repo.add_bom_line(db, asm, stencil, 1, None)                        # 50.00, excluded
+
+    a = repo.get_assembly(db, asm)
+    # Totals count only the resistor; the stencil is left out of material and loaded.
+    assert a["total_cost"] == pytest.approx(0.40)
+    assert a["loaded_total"] == pytest.approx(0.52)                     # 0.40 × 1.30
+    # …but the stencil line is still present with its own cost shown, flagged excluded.
+    sl = next(ln for ln in a["lines"] if ln["child_part_no"] == "STENCIL-1")
+    assert sl["line_cost"] == pytest.approx(50.0) and sl["exclude_from_bom_cost"] is True
+
+    # The build estimate and the xlsx export exclude it too.
+    assert repo.estimate_bom_cost(db, asm, 1)["material_total"] == pytest.approx(0.40)
+    assert repo.get_assembly_for_export(db, asm, build_qty=1)["total_cost"] == pytest.approx(0.40)
+
+
 def test_rolled_cost_at_is_volume_aware(db):
     from digisearch.web.features.catalog import pricing
     from digisearch.web.features.catalog import repo as catrepo

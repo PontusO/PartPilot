@@ -349,4 +349,23 @@ MIGRATIONS = [
         # assembly; NULL falls back to the app setting `pricing.default_mfg_margin`.
         sql="ALTER TABLE parts ADD COLUMN mfg_margin REAL;",
     ),
+    Migration(
+        version=16,
+        name="exclude from BOM cost flag",
+        # A part that carries a real cost but must NOT be counted in an assembly's BOM cost roll-up —
+        # e.g. a stencil (a tooling/setup cost, not per-board material). When set, the part's line is
+        # still shown on the BOM (with its cost, marked) but contributes 0 to the material and loaded
+        # totals. Applied at the direct BOM-line level in the assemblies cost functions.
+        sql="ALTER TABLE parts ADD COLUMN exclude_from_bom_cost INTEGER NOT NULL DEFAULT 0;",
+    ),
+    Migration(
+        version=17,
+        name="documents always excluded from BOM cost",
+        # Documents (5x class: prefix 50–59, e.g. '54-00001-1') are deliverables, not per-board
+        # material, so they never count toward an assembly's BOM cost. Back-fill existing document
+        # parts; new/edited ones are enforced in create_part/update_part (is_document_part_no). GLOB
+        # matches the internal PREFIX-NNNNN-suffix shape to avoid tagging a real P/N starting '5x-'.
+        sql=r"UPDATE parts SET exclude_from_bom_cost = 1 "
+            r"WHERE part_no GLOB '5[0-9]-[0-9][0-9][0-9][0-9][0-9]-*';",
+    ),
 ]

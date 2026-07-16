@@ -21,6 +21,17 @@ _DISTRIBUTOR_URLS = {
 }
 
 
+# Internal document codes: 5x class (prefix 50–59), e.g. '54-00001-1'. The stricter
+# prefix-NNNNN-suffix shape avoids matching a real manufacturer P/N that merely starts with "5x-".
+_DOCUMENT_PART_NO = re.compile(r"^5\d-\d{5}-")
+
+
+def is_document_part_no(part_no: str | None) -> bool:
+    """True for a 5x-class internal document code. Documents carry a number but are deliverables, not
+    per-board material, so they're always excluded from an assembly's BOM cost (enforced on save)."""
+    return bool(_DOCUMENT_PART_NO.match((part_no or "").strip()))
+
+
 def distributor_url(supplier_name: str | None, supplier_pno: str | None) -> str | None:
     """A link to the supplier's page for this part, or None for unknown distributors."""
     pno = (supplier_pno or "").strip()
@@ -159,6 +170,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
     part["stock"] = stock
     part["unlimited"] = bool(part.get("unlimited_stock"))
     part["normally_stocked"] = bool(part.get("normally_stocked"))
+    part["exclude_from_bom_cost"] = bool(part.get("exclude_from_bom_cost"))
     part["free"] = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
     return part
 
@@ -314,13 +326,15 @@ def create_part(
         part_id = conn.execute(
             """INSERT INTO parts
                (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
-                unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked, markup)
-               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked, markup,
+                exclude_from_bom_cost)
+               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, opening_qty, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
-             1 if part.get("normally_stocked") else 0, part.get("markup")),
+             1 if part.get("normally_stocked") else 0, part.get("markup"),
+             1 if (part.get("exclude_from_bom_cost") or is_document_part_no(part["part_no"])) else 0),
         ).lastrowid
 
         for s in supplier_lines:
@@ -372,13 +386,15 @@ def update_part(
         conn.execute(
             """UPDATE parts SET part_no=?, value=?, description=?, category=?, mfr_name=?,
                mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, unlimited_stock=?,
-               normally_stocked=?, markup=?, updated_at=datetime('now')
+               normally_stocked=?, markup=?, exclude_from_bom_cost=?, updated_at=datetime('now')
                WHERE id=?""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
-             1 if part.get("normally_stocked") else 0, part.get("markup"), part_id),
+             1 if part.get("normally_stocked") else 0, part.get("markup"),
+             1 if (part.get("exclude_from_bom_cost") or is_document_part_no(part["part_no"])) else 0,
+             part_id),
         )
 
         # Reconcile supplier offers by (supplier_id, supplier_pno) so matched rows keep their id
