@@ -232,13 +232,17 @@ def test_allocate_returns_to_create_page_with_code(tmp_path):
     # …and the create-part page prefills that number.
     assert f'value="99-{nn:05d}-1"' in client.get(r.headers["location"]).text
 
-    # New Product returns the assembly (98) code to the New-assembly page.
+    # New Product returns the assembly (98) code to the New-assembly page, carrying the product name
+    # so the assembly form prefills it (consistent with the from-template flow).
     rn = repo.next_running_no(db)
     r = client.post("/article-register/product",
                     data={"product": "GW", "prefixes": ["98", "99", "54"],
                           "return_to": "/assemblies/new"}, follow_redirects=False)
-    assert r.headers["location"] == f"/assemblies/new?part_no=98-{rn:05d}-1"
+    assert r.headers["location"] == f"/assemblies/new?part_no=98-{rn:05d}-1&desc=GW"
     assert f'value="98-{rn:05d}-1"' in client.get(r.headers["location"]).text
+    # the document-class (54) line is materialised as a document, same as the from-template flow
+    from digisearch.web.features.documents import repo as docrepo
+    assert docrepo.document_for_code(db, f"54-{rn:05d}-1") is not None
 
 
 def test_from_template_returns_assembly_code(tmp_path):

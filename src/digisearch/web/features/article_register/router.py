@@ -278,10 +278,13 @@ async def create_product(request: Request):
                                     error="Tick at least one group.", status=400)
     running_no = repo.create_product(db, product=product, prefixes=prefixes,
                                      created_by=_s(form, "created_by"), comment=_s(form, "comment"))
-    if return_to:  # came from New Assembly — bounce back with the assembly code prefilled
+    # Document-class lines (drawings, specs, software) become document items, not parts — same as the
+    # from-template flow, so identical-looking families behave identically regardless of allocator.
+    _create_stub_documents(db, running_no)
+    if return_to:  # came from New Assembly — bounce back with the assembly code + product prefilled
         code = _assembly_code_for(db, running_no)
         if code:
-            return RedirectResponse(_return_url(return_to, part_no=code), status_code=303)
+            return RedirectResponse(_return_url(return_to, part_no=code, desc=product), status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 

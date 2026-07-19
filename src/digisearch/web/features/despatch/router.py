@@ -173,15 +173,18 @@ def despatch_detail(request: Request, despatch_id: int):
     return _render_detail(request, despatch_id, user)
 
 
-@router.post("/{despatch_id}/fortnox-invoice", response_class=HTMLResponse)
+@router.post("/{despatch_id}/fortnox-invoice")
 async def fortnox_invoice_action(request: Request, despatch_id: int):
-    user = require_role(request, DESPATCH_ROLES)
+    require_role(request, DESPATCH_ROLES)
     db = request.app.state.database
     form = await request.form()
     confirm = (form.get("confirm") or "") == "1"
-    result = await run_in_threadpool(
+    # POST/redirect/GET: the outcome persists on the despatch (invoice_no on success, invoice_error
+    # on failure, the pending-customer preview is re-derived), so the GET reload shows it in full —
+    # and a browser refresh can't re-submit the invoice.
+    await run_in_threadpool(
         lambda: fortnox_invoice.invoice_despatch(db, despatch_id, confirm_customer=confirm))
-    return _render_detail(request, despatch_id, user, fortnox_result=result)
+    return RedirectResponse(f"/despatch/{despatch_id}", status_code=303)
 
 
 @router.post("/{despatch_id}/invoice")

@@ -127,7 +127,9 @@ def list_page(request: Request, q: str | None = None, prefix: str | None = None,
 
 # ---- create ----
 
-def _render_form(request: Request, *, values: dict, error=None, status=200):
+# Defaults to 400 because every create()-path caller is a validation error; the one success caller
+# (the GET new_form) passes status=200 explicitly.
+def _render_form(request: Request, *, values: dict, error=None, status=400):
     db = request.app.state.database
     return request.app.state.templates.TemplateResponse(
         request, "document_form.html",
@@ -162,7 +164,7 @@ def new_form(request: Request, running_no: int | None = None, prefix: str | None
             values["running_no"] = int(m.group(2))
         if values["prefix"] == SOFTWARE_PREFIX:
             values["storage_kind"] = "link"
-    return _render_form(request, values=values)
+    return _render_form(request, values=values, status=200)
 
 
 @router.post("/new", response_class=HTMLResponse)

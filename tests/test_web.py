@@ -1090,12 +1090,12 @@ def test_reports_index_and_stock_ledger(app):
     assert led.status_code == 200
     # Both movements show; the sale carries its own WOOSALE type and the running balance (100-5=95).
     assert "WooCommerce sale" in led.text and "auto-sync" in led.text and "95" in led.text
-    assert ">WOOSALE<" in led.text  # webshop sales are broken out from generic issues
+    assert ">Webshop sale<" in led.text  # webshop sales are broken out from generic issues (labelled)
 
     # The movement-type filter narrows to a single kind.
     sales = client.get("/reports/stock-movements?mtype=WOOSALE")
     assert sales.status_code == 200 and "WooCommerce sale" in sales.text
-    assert ">OPENING<" not in sales.text  # the opening-balance row is filtered out
+    assert "alice" not in sales.text  # the opening-balance row (user alice) is filtered out
 
     # A date range with no movements comes back empty, not erroring.
     empty = client.get("/reports/stock-movements?start=2000-01-01&end=2000-01-02")

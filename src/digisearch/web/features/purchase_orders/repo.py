@@ -424,8 +424,10 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
         po = conn.execute("SELECT * FROM purchase_orders WHERE id = ?", (po_id,)).fetchone()
         if po is None:
             raise ValueError("Purchase order not found.")
-        if po["status"] not in ("ordered", "draft"):
-            raise ValueError(f"Can't receive against a {po['status']} PO.")
+        if po["status"] != "ordered":
+            raise ValueError(
+                f"Can't receive against a {po['status']} PO — place the order first." if po["status"] == "draft"
+                else f"Can't receive against a {po['status']} PO.")
 
         # Cap every receipt at the line's outstanding quantity — an over-typed qty (or a re-posted
         # form) must not push qty_received past what was ordered.

@@ -7,8 +7,8 @@
   <h1>Packing list {{ d.despatch_no or '#' ~ d.id }}
     <span class="badge {{ 'stock' if is_packed else 'muted' }}">{{ 'Ready to ship' if is_packed else 'Packing' }}</span></h1>
   <p class="note">{{ d.customer_name or 'No customer' }} —
-    {% if is_packed %}package confirmed ready{% if d.packed_by %} by {{ d.packed_by }}{% endif %}. Dispatch it to ship the goods and issue stock.
-    {% else %}check off each item as you pack it, then confirm the package is ready to ship. Nothing ships until you dispatch it.{% endif %}</p>
+    {% if is_packed %}package confirmed ready{% if d.packed_by %} by {{ d.packed_by }}{% endif %}. Despatch it to ship the goods and issue stock.
+    {% else %}check off each item as you pack it, then confirm the package is ready to ship. Nothing ships until you despatch it.{% endif %}</p>
 
   {% if error %}<div class="err" style="margin-top:1rem;">{{ error }}</div>{% endif %}
 
@@ -50,8 +50,8 @@
   {% if can_pack and is_packed %}
   <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center; flex-wrap:wrap;">
     <form method="post" action="/despatch/{{ d.id }}/dispatch" style="margin:0"
-          onsubmit="return confirm('Dispatch this package? This ships the goods and issues stock out.');">
-      <button type="submit">Dispatch now (ship &amp; issue stock)</button>
+          onsubmit="return confirm('Despatch this package? This ships the goods and issues stock out.');">
+      <button type="submit">Despatch now (ship &amp; issue stock)</button>
     </form>
     <form method="post" action="/despatch/{{ d.id }}/reopen" style="margin:0">
       <button type="submit" class="ghost">Reopen packing</button>
