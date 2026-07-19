@@ -9,6 +9,11 @@
     {% if g.advice_no %} · advice {{ g.advice_no }}{% endif %}
     {% if g.received_by %} · by {{ g.received_by }}{% endif %}</p>
 
+  <div class="act-bar">
+    <a class="act-btn" href="/goods-receipts/{{ g.id }}/export.pdf">Download PDF</a>
+    <a class="act-btn secondary" href="/goods-receipts/{{ g.id }}/export.csv">Download CSV</a>
+  </div>
+
   <h2 style="font-size:1.05rem; margin-top:1.2rem;">Received lines</h2>
   <div style="overflow-x:auto;">
     <table>

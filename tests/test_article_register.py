@@ -60,6 +60,55 @@ def test_prefix_is_zero_padded(db):
     assert repo.get_entry(db, eid)["code"] == "05-00357-1"
 
 
+def test_apply_template_skips_codes_already_in_family(db):
+    tid = repo.create_template(db, name="Full")
+    repo.save_template(db, tid, name="Full", notes=None, lines=[
+        {"prefix": "98", "suffix": 1, "label": ""},
+        {"prefix": "99", "suffix": 1, "label": "PCBA"},
+        {"prefix": "54", "suffix": 1, "label": "drawing"},
+    ])
+    rn = repo.apply_template(db, tid, product="Widget")  # new family — all three created
+    assert repo.family_prefixes(db, rn) == ["54", "98", "99"]
+
+    # A second template shares the exact code 98-…-1 (already present) and adds a new 51 group.
+    tid2 = repo.create_template(db, name="Extra")
+    repo.save_template(db, tid2, name="Extra", notes=None, lines=[
+        {"prefix": "98", "suffix": 1, "label": ""},
+        {"prefix": "51", "suffix": 1, "label": "stencil"},
+    ])
+    repo.apply_template(db, tid2, product="Widget", running_no=rn)
+    fam = repo.get_family(db, rn)
+    assert sum(1 for e in fam if e["prefix"] == "98") == 1  # 98-…-1 not duplicated
+    assert article_code("51", rn, 1) in {e["code"] for e in fam}  # 51 added
+
+    # Every code of the first template is now present → nothing to add.
+    with pytest.raises(ValueError, match="nothing to add"):
+        repo.apply_template(db, tid, product="Widget", running_no=rn)
+
+
+def test_apply_template_adds_new_suffixes_under_an_existing_prefix(db):
+    # Regression: a template with several lines sharing a prefix (99: PCB/Stencil TOP/Stencil BOT)
+    # must add the missing suffixes even though the prefix 99 is already in the family — the skip is
+    # by exact code, not by whole prefix.
+    tid = repo.create_template(db, name="PCB")
+    repo.save_template(db, tid, name="PCB", notes=None, lines=[
+        {"prefix": "98", "suffix": 1, "label": ""},
+        {"prefix": "99", "suffix": 1, "label": "PCB"},
+        {"prefix": "99", "suffix": 2, "label": "Stencil TOP"},
+        {"prefix": "99", "suffix": 3, "label": "Stencil BOT"},
+    ])
+    # Start a family that only has the assembly + the PCB (98-…-1, 99-…-1), as if created earlier.
+    rn = repo.next_running_no(db)
+    repo.create_entry(db, prefix="98", running_no=rn, suffix=1, product="MB")
+    repo.create_entry(db, prefix="99", running_no=rn, suffix=1, product="MB - PCB")
+
+    repo.apply_template(db, tid, product="MB", running_no=rn)
+    codes = {e["code"] for e in repo.get_family(db, rn)}
+    assert article_code("99", rn, 2) in codes  # Stencil TOP created
+    assert article_code("99", rn, 3) in codes  # Stencil BOT created
+    assert sum(1 for e in repo.get_family(db, rn) if e["prefix"] == "99") == 3  # 99-1 not duplicated
+
+
 def test_duplicate_triplet_rejected(db):
     repo.create_entry(db, prefix="98", running_no=390, suffix=1)
     with pytest.raises(DuplicateNumber):
@@ -211,10 +260,29 @@ def test_from_template_returns_assembly_code(tmp_path):
     assert f'value="98-{rn:05d}-1"' in client.get(loc).text
 
 
+def test_apply_template_link_carries_family_product(tmp_path):
+    app, client = _client(tmp_path)
+    db = app.state.database
+    # A family whose assembly (98) line carries the product name (template 1 = Standard PCB product).
+    rn = repo.apply_template(db, 1, product="MiThings GW")
+
+    # The detail page's "Apply template" link carries the running number AND the product.
+    page = client.get(f"/article-register/{rn}").text
+    assert f"running_no={rn}" in page
+    assert ("product=MiThings%20GW" in page) or ("product=MiThings+GW" in page)
+
+    # Following it lands on the dialog with the product prefilled, in existing-family mode.
+    form = client.get("/article-register/from-template",
+                      params={"running_no": rn, "product": "MiThings GW"}).text
+    assert 'value="MiThings GW"' in form
+    assert 'name="mode" value="existing"' in form
+
+
 def test_from_template_creates_stub_parts_and_dialog(tmp_path):
     from urllib.parse import parse_qs, urlparse
 
     from digisearch.web.features.catalog import repo as crepo
+    from digisearch.web.features.documents import repo as drepo
 
     app, client = _client(tmp_path)
     db = app.state.database
@@ -227,28 +295,38 @@ def test_from_template_creates_stub_parts_and_dialog(tmp_path):
     assert qs["desc"][0] == "MiThings GW"
     created = qs["created"][0].split(",")
 
-    # Every non-assembly line of the standard template becomes a kind=PART stub; the 98 does not.
+    # The component (99) lines become kind=PART stubs; the 98 assembly does not.
     assert f"98-{rn:05d}-1" not in created
-    assert len(created) == 6  # 3×99 + 3×54
+    assert len(created) == 3  # 3×99 (the 3×54 document lines become documents, not parts)
     for code in created:
+        assert code.startswith(f"99-{rn:05d}-")
         p = crepo.find_part_by_part_no(db, code)
         # house convention: the product/description lands in `value`, not `description`
         assert p and p["kind"] == "PART" and p["value"] and not p["description"]
+
+    # The 54 document lines become document items (not parts).
+    for i in (1, 2, 3):
+        doc_code = f"54-{rn:05d}-{i}"
+        assert doc_code not in created and crepo.find_part_by_part_no(db, doc_code) is None
+        doc = drepo.document_for_code(db, doc_code)
+        assert doc is not None and doc["storage_kind"] == "file"
 
     # The return page prefills part_no + name and raises the "created, edit before use" dialog.
     page = client.get(r.headers["location"]).text
     assert f'value="98-{rn:05d}-1"' in page and 'value="MiThings GW"' in page
     assert "parts created" in page and created[0] in page
 
-    # Idempotent: re-running the same template into the *same* family adds no duplicate parts.
+    # Re-running the same template into the *same* family adds nothing: every group is already
+    # present, so all lines are skipped and the form re-renders with an explanatory error (no
+    # redirect, no new/duplicate parts).
     r2 = client.post("/article-register/from-template",
                      data={"template_id": "1", "product": "MiThings GW", "mode": "existing",
                            "running_no": str(rn), "return_to": "/assemblies/new"},
                      follow_redirects=False)
-    qs2 = parse_qs(urlparse(r2.headers["location"]).query)
-    # existing-mode suffixes advance, so these are *new* codes → new stubs, but the originals are untouched.
+    assert r2.status_code == 400 and "location" not in r2.headers
+    assert "nothing to add" in r2.text
     for code in created:
-        assert crepo.find_part_by_part_no(db, code)  # still exactly one each
+        assert crepo.find_part_by_part_no(db, code)  # originals untouched, exactly one each
 
 
 def test_from_template_parts_land_in_new_assembly_bom(tmp_path):

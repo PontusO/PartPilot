@@ -8,6 +8,7 @@
       {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
       {% if part.normally_stocked %}<span class="badge stock">Normally stocked</span>{% endif %}
       {% if part.unlimited %}<span class="badge ok">∞ unlimited stock</span>{% endif %}
+      {% if part.is_document %}<span class="badge muted" title="Internal document — a deliverable, not a stocked part">document</span>{% endif %}
       {% if part.exclude_from_bom_cost %}<span class="badge muted" title="Cost not counted in assembly BOM totals">no BOM cost</span>{% endif %}</h1>
     {% if can_edit %}
     <a href="/catalog/{{ part.id }}/edit" style="background:var(--accent); color:#fff;
@@ -37,6 +38,8 @@
       <tr><th>MPN</th><td>{{ part.mfr_pno or '' }}</td><th>Revision</th><td>{{ part.rev or '' }}</td></tr>
       <tr><th>Normally stocked</th><td>{{ 'Yes' if part.normally_stocked else 'No' }}</td>
           <th>Excluded from BOM cost</th><td>{{ 'Yes' if part.exclude_from_bom_cost else 'No' }}</td></tr>
+      <tr><th>Internal document</th><td>{{ 'Yes' if part.is_document else 'No' }}</td>
+          <th></th><td></td></tr>
     </tbody>
   </table>
 
@@ -67,7 +70,7 @@
   {% if cost_suppliers %}
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Supplier cost tiers</h2>
   <p class="note">Quantity-break costs captured from the distributor (per piece). These feed the
-    sell price when a part has no explicit sell tiers.</p>
+    loaded cost when a part has no explicit loaded-cost tiers.</p>
   <div style="overflow-x:auto;">
     <table>
       <thead>
@@ -97,7 +100,7 @@
   <div style="overflow-x:auto;">
     <table>
       <thead>
-        <tr><th class="num">Break qty</th><th class="num">Unit price (SEK)</th><th>Source</th></tr>
+        <tr><th class="num">Break qty</th><th class="num">Unit loaded cost (SEK)</th><th>Source</th></tr>
       </thead>
       <tbody>
         {% for t in part.sell_tiers %}

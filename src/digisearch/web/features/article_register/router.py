@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
 from . import repo
-from .codes import article_code
+from .codes import DESC_SEP, article_code
 from .repo import DuplicateNumber
 
 router = APIRouter(prefix="/article-register")
@@ -69,6 +69,18 @@ def _assembly_code_for(db, running_no: int) -> str | None:
                 sorted(coded, key=lambda e: (e["prefix"], e["suffix"]))[0]["code"])
 
 
+def _family_product(family: list[dict]) -> str:
+    """The base product name for a family, used to seed a fresh 'Apply template'. Prefer the assembly
+    (``98``) line's product, else the lowest-prefix coded line's; strip any composed ``' – <label>'``
+    suffix so we hand back the bare product (e.g. 'MB', not 'MB – PCB')."""
+    coded = [e for e in family if e.get("code") and e.get("product")]
+    if not coded:
+        return ""
+    chosen = next((e for e in coded if e["prefix"] == "98"),
+                  sorted(coded, key=lambda e: (e["prefix"], e["suffix"]))[0])
+    return (chosen["product"] or "").split(DESC_SEP)[0].strip()
+
+
 def _create_stub_parts(db, running_no: int, skip_code: str) -> list[str]:
     """Create a bare catalog PART (no supplier / price / stock) for every coded family line except
     the assembly line handed back to the form. These are deliberately incomplete stubs — the user
@@ -80,10 +92,36 @@ def _create_stub_parts(db, running_no: int, skip_code: str) -> list[str]:
         code = e.get("code")
         if not code or code == skip_code or catalog_repo.find_part_by_part_no(db, code):
             continue
+        if _is_document_line(e):  # document-class lines become documents, not catalog parts
+            continue
         # The product/description is stored in the part's `value` field (house convention), not
         # `description` — see the note on the from-template flow.
         catalog_repo.create_part(db, part={"part_no": code, "value": e.get("product")},
                                  supplier_lines=[])
+        created.append(code)
+    return created
+
+
+def _is_document_line(entry: dict) -> bool:
+    """A family line that belongs in the Documents feature, not the parts catalog: the document
+    classes (50–59) plus 95 (software / source code). Matches the family-page Create-document rule."""
+    return entry.get("category") == "document" or entry.get("prefix") == "95"
+
+
+def _create_stub_documents(db, running_no: int) -> list[str]:
+    """Create a bare document row (no revision yet — the user attaches the file/link afterwards) for
+    every document-class family line that doesn't already have one. 95 (software) defaults to a link,
+    everything else to a file. Idempotent. Returns the codes actually created, in family order."""
+    from ..documents import repo as documents_repo  # documents is registered after article_register
+    created = []
+    for e in repo.get_family(db, running_no):
+        code = e.get("code")
+        if not code or not _is_document_line(e) or documents_repo.document_for_code(db, code):
+            continue
+        documents_repo.create_document(
+            db, code=code, running_no=running_no, prefix=e["prefix"],
+            title=e.get("product") or code,
+            storage_kind="link" if e.get("prefix") == "95" else "file")
         created.append(code)
     return created
 
@@ -344,20 +382,25 @@ async def template_delete(request: Request, template_id: int):
 
 def _render_apply(request, *, values, error=None, status=200):
     db = request.app.state.database
+    # When appending to an existing family, the preview tags template lines whose exact code is already
+    # present (they'll be skipped, not duplicated). Empty for New Product (fresh number, no lines).
+    running_no = _int(values.get("running_no")) if values.get("mode") == "existing" else None
+    existing_codes = repo.family_codes(db, running_no) if running_no else []
     return request.app.state.templates.TemplateResponse(
         request, "article_register_from_template.html",
         {"templates": repo.list_templates(db, active_only=True),
-         "next_running_no": repo.next_running_no(db), "values": values, "error": error},
+         "next_running_no": repo.next_running_no(db), "family_codes": existing_codes,
+         "values": values, "error": error},
         status_code=status,
     )
 
 
 @router.get("/from-template", response_class=HTMLResponse)
 def from_template_form(request: Request, running_no: int | None = None,
-                       return_to: str | None = None):
+                       product: str | None = None, return_to: str | None = None):
     require_role(request, WRITE_ROLES)
     return _render_apply(request, values={
-        "template_id": "", "product": "", "created_by": "", "comment": "",
+        "template_id": "", "product": (product or "").strip(), "created_by": "", "comment": "",
         "running_no": running_no or "", "mode": "existing" if running_no else "new",
         "return_to": _safe_return(return_to) or ""})
 
@@ -390,6 +433,9 @@ async def from_template_apply(request: Request):
                                          comment=_s(form, "comment"), running_no=running_no)
     except (ValueError, DuplicateNumber) as exc:
         return _render_apply(request, values=values, error=str(exc), status=400)
+    # Document-class lines (drawings, specs, software) become document items, not parts — do this in
+    # both the plain and the New-Assembly flows.
+    _create_stub_documents(db, running_no)
     if return_to:  # came from New Assembly — materialise the family's parts, then bounce back
         code = _assembly_code_for(db, running_no)
         if code:
@@ -407,11 +453,16 @@ def family_detail(request: Request, running_no: int):
     family = repo.get_family(db, running_no)
     if not family:
         return _not_found(request)
+    documents = repo.list_family_documents(db, running_no)
     return request.app.state.templates.TemplateResponse(
         request, "article_register_detail.html",
         {
             "running_no": running_no,
             "family": family,
+            "product": _family_product(family),
+            "documents": documents,
+            # code -> document id, so each family row can offer Create/Edit document for its own number.
+            "doc_ids_by_code": {d["code"]: d["id"] for d in documents},
             "groups": repo.prefixes_grouped(db),
             "can_edit": user.role in WRITE_ROLES,
             "can_delete": user.role in DELETE_ROLES,

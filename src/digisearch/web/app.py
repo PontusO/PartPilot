@@ -31,6 +31,7 @@ from .features.catalog import feature as catalog_feature
 from .features.contacts import feature as contacts_feature
 from .features.customer_orders import feature as customer_orders_feature
 from .features.despatch import feature as despatch_feature
+from .features.documents import feature as documents_feature
 from .features.goods_receipts import feature as goods_receipts_feature
 from .features.planning import feature as planning_feature
 from .features.purchase_orders import feature as purchase_orders_feature
@@ -47,6 +48,7 @@ _CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
 FEATURES = [
     catalog_feature,                                                         # Parts (order 10)
     article_register_feature,                                                # Article Register (order 15); soft-joins parts by code
+    documents_feature,                                                       # Documents (order 16); soft-joins article_numbers/parts by code
     assemblies_feature,                                                      # order 20
     purchasing_feature,                                                      # order 50
     contacts_feature,                                                        # order 60
@@ -78,6 +80,10 @@ def create_app(
         resolved_db = default_db_path()
     jobs_dir = resolved_data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
+    # Document files live here (the Documents feature stores paths in the DB, bytes on disk). NOTE:
+    # this dir is NOT inside partpilot.db, so production backups must copy it alongside the DB.
+    documents_dir = resolved_data_dir / "documents"
+    documents_dir.mkdir(parents=True, exist_ok=True)
 
     store = UserStore(resolved_db)
     _seed_admin(store)
@@ -134,6 +140,7 @@ def create_app(
     app.state.database = database
     app.state.templates = templates
     app.state.jobs_dir = jobs_dir
+    app.state.documents_dir = documents_dir
 
     # Static assets (vendored FullCalendar for the planning board). The app's only static mount.
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")

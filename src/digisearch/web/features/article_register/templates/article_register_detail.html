@@ -21,13 +21,13 @@
 
   {% if can_edit %}
   <div class="act-bar">
-    <a href="/article-register/from-template?running_no={{ running_no }}" class="act-btn secondary">Apply template</a>
+    <a href="/article-register/from-template?running_no={{ running_no }}{% if product %}&product={{ product|urlencode }}{% endif %}" class="act-btn secondary">Apply template</a>
   </div>
   {% endif %}
 
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Number</th><th>Group</th><th>Product</th><th>By</th><th>Comment</th><th>Catalog</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Number</th><th>Group</th><th>Product</th><th>By</th><th>Comment</th><th>Item</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for e in family %}
         <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
@@ -40,7 +40,28 @@
           <td>{{ e.product or '' }}</td>
           <td>{{ e.created_by or '' }}</td>
           <td class="note">{{ e.comment or '' }}</td>
-          <td>{% if e.part_id %}<a href="/catalog/{{ e.part_id }}">part ↗</a>{% else %}—{% endif %}</td>
+          <td style="white-space:nowrap;">
+            {% if e.code %}
+              {% if e.category == 'document' or e.prefix == '95' %}
+                {% set did = doc_ids_by_code.get(e.code) %}
+                {% if did %}
+                <button type="button" class="ghost"
+                        onclick="location.href='/documents/{{ did }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit document' if can_edit else 'Open document' }}</button>
+                {% elif can_edit %}
+                <button type="button" class="ghost"
+                        onclick="location.href='/documents/new?code={{ e.code|urlencode }}{% if e.product %}&title={{ e.product|urlencode }}{% endif %}'">Create document</button>
+                {% else %}<span class="note">—</span>{% endif %}
+              {% else %}
+                {% if e.part_id %}
+                <button type="button" class="ghost"
+                        onclick="location.href='/catalog/{{ e.part_id }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit part' if can_edit else 'Open part' }}</button>
+                {% elif can_edit %}
+                <button type="button" class="ghost"
+                        onclick="location.href='/catalog/new?part_no={{ e.code|urlencode }}{% if e.product %}&value={{ e.product|urlencode }}{% endif %}'">Create part</button>
+                {% else %}<span class="note">—</span>{% endif %}
+              {% endif %}
+            {% else %}<span class="note">—</span>{% endif %}
+          </td>
           {% if can_edit %}
           <td style="white-space:nowrap; text-align:right;">
             <button type="button" class="ghost" style="margin-right:.4rem;"
@@ -67,6 +88,38 @@
       </tbody>
     </table>
   </div>
+
+  {% if documents or can_edit %}
+  <h2 style="font-size:1.05rem; margin-top:1.6rem;">Documents</h2>
+  {% if documents %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Number</th><th>Title</th><th>Class</th><th>Kind</th><th></th></tr></thead>
+      <tbody>
+        {% for d in documents %}
+        <tr{% if d.retired %} style="opacity:.55;"{% endif %}>
+          <td style="font-family:ui-monospace,monospace;">{{ d.code }}
+            {% if d.retired %}<span class="badge bad">retired</span>{% endif %}</td>
+          <td>{{ d.title }}</td>
+          <td><span class="badge muted">{{ d.prefix }}</span></td>
+          <td>{% if d.storage_kind == 'link' %}<span class="badge warn">link</span>{% else %}<span class="badge stock">file</span>{% endif %}</td>
+          <td style="white-space:nowrap; text-align:right;">
+            <button type="button" class="ghost" onclick="location.href='/documents/{{ d.id }}'">Open</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="note">No documents for this family yet.</p>
+  {% endif %}
+  {% if can_edit %}
+  <div class="act-bar" style="margin-top:.6rem;">
+    <a href="/documents/new?running_no={{ running_no }}" class="act-btn secondary">New document for this family</a>
+  </div>
+  {% endif %}
+  {% endif %}
 
   {% if can_edit %}
   <div style="margin-top:1.5rem; padding:1rem; background:#0d1219; border:1px solid var(--line); border-radius:9px;">

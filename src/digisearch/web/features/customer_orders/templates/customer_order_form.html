@@ -31,9 +31,16 @@
       </div>
       <div>
         <label for="status">Status</label>
+        {% if statuses|length == 1 %}
+        {# shipped/complete/cancelled are set by the despatch/invoice/cancel actions, not by hand #}
+        <input type="hidden" name="status" value="{{ statuses[0] }}">
+        <p style="margin:.45rem 0 0;"><span class="badge muted">{{ statuses[0] }}</span>
+          <span class="note">set by despatch / invoicing</span></p>
+        {% else %}
         <select id="status" name="status">
           {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if values.get('status') == s else '' }}>{{ s }}</option>{% endfor %}
         </select>
+        {% endif %}
       </div>
       <div>
         <label for="order_ref">Our order ref</label>

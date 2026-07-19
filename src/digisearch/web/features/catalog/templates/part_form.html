@@ -92,6 +92,17 @@
       </div>
       <div class="full" style="margin-top:.3rem;">
         <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+          <input id="is_document" name="is_document" type="checkbox" value="1"
+                 style="width:auto;" {{ 'checked' if values.get('is_document') else '' }}>
+          Internal document — carries an article number but is a deliverable, not a stocked part
+          <span id="isdoc-5x-hint" class="badge muted" style="display:none;">5x number</span>
+        </label>
+        <p class="note" style="margin:.25rem 0 0;">Tick for drawings, specs and other documents that
+          live in the internal article register (e.g. a 5x-NNNNN number). Documents are always
+          excluded from BOM cost.</p>
+      </div>
+      <div class="full" style="margin-top:.3rem;">
+        <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
           <input id="exclude_from_bom_cost" name="exclude_from_bom_cost" type="checkbox" value="1"
                  style="width:auto;" {{ 'checked' if values.get('exclude_from_bom_cost') else '' }}>
           Exclude from BOM cost — don't count this part's price in an assembly total
@@ -214,7 +225,7 @@
     <h3 style="font-size:.92rem; margin:1rem 0 .3rem;">Loaded cost tiers</h3>
     <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Break qty</th><th>Unit sell price</th><th></th></tr></thead>
+        <thead><tr><th>Break qty</th><th>Unit loaded cost</th><th></th></tr></thead>
         <tbody id="selltiers">
           {% for t in manual_tiers %}
           <tr>
@@ -234,7 +245,7 @@
       quantity overrides the generated one.</p>
     <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Break qty</th><th>Unit sell price</th></tr></thead>
+        <thead><tr><th>Break qty</th><th>Unit loaded cost</th></tr></thead>
         <tbody>
           {% for t in gen_tiers %}
           <tr><td>{{ t.break_qty }}</td><td>{{ '%.5f'|format(t.unit_price) }}</td></tr>
@@ -472,24 +483,37 @@
 {% endif %}
 
 <script>
-  // Documents (5x class, e.g. 54-00001-1) are always excluded from BOM cost — the server enforces it
-  // on save; here we mirror that in the UI (tick + lock the box) so it never looks contradictory.
+  // Coupling, mirrored from the server (which is authoritative on save):
+  //   5x-class part number (e.g. 54-00001-1) => always a document
+  //   document (5x number OR ticked box)      => always excluded from BOM cost
+  // We tick + lock the downstream box so the form never looks contradictory, remembering the user's
+  // own choice so it comes back when the forcing condition goes away.
   (function () {
     var pn = document.getElementById('part_no');
-    var cb = document.getElementById('exclude_from_bom_cost');
-    var hint = document.getElementById('exbom-doc-hint');
-    if (!pn || !cb) return;
-    var wasChecked = cb.checked;
-    function isDoc(v) { return /^5\d-\d{5}-/.test((v || '').trim()); }
+    var docCb = document.getElementById('is_document');
+    var docHint = document.getElementById('isdoc-5x-hint');
+    var exCb = document.getElementById('exclude_from_bom_cost');
+    var exHint = document.getElementById('exbom-doc-hint');
+    if (!pn || !docCb || !exCb) return;
+    var docWanted = docCb.checked;   // user's choice when the number isn't 5x
+    var exWanted = exCb.checked;     // user's choice when not forced by a document
+    function isFiveX(v) { return /^(5\d|95)-\d{5}-/.test((v || '').trim()); }
     function sync() {
-      if (isDoc(pn.value)) {
-        if (!cb.disabled) wasChecked = cb.checked;   // remember the user's choice for non-doc numbers
-        cb.checked = true; cb.disabled = true; hint.style.display = 'inline-block';
-      } else if (cb.disabled) {
-        cb.disabled = false; cb.checked = wasChecked; hint.style.display = 'none';
+      if (isFiveX(pn.value)) {
+        if (!docCb.disabled) docWanted = docCb.checked;
+        docCb.checked = true; docCb.disabled = true; docHint.style.display = 'inline-block';
+      } else if (docCb.disabled) {
+        docCb.disabled = false; docCb.checked = docWanted; docHint.style.display = 'none';
+      }
+      if (docCb.checked) {
+        if (!exCb.disabled) exWanted = exCb.checked;
+        exCb.checked = true; exCb.disabled = true; exHint.style.display = 'inline-block';
+      } else if (exCb.disabled) {
+        exCb.disabled = false; exCb.checked = exWanted; exHint.style.display = 'none';
       }
     }
     pn.addEventListener('input', sync);
+    docCb.addEventListener('change', sync);
     sync();
   })();
 </script>

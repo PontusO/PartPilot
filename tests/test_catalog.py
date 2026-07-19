@@ -104,6 +104,31 @@ def test_exclude_from_bom_cost_persists_and_documents_forced(db):
     assert repo.get_part(db, doc)["exclude_from_bom_cost"] is True  # re-enforced on save
 
 
+def test_is_document_flag_persists_and_forces_bom_exclusion(db):
+    # Defaults off for an ordinary component.
+    comp = repo.create_part(db, part={"part_no": "99-00001-1"}, supplier_lines=[])
+    assert repo.get_part(db, comp)["is_document"] is False
+
+    # Ticking the document box marks it a document AND forces it out of BOM cost, even for a
+    # non-5x number and with exclude explicitly left off.
+    manual = repo.create_part(
+        db, part={"part_no": "99-00003-1", "is_document": 1, "exclude_from_bom_cost": 0},
+        supplier_lines=[])
+    got = repo.get_part(db, manual)
+    assert got["is_document"] is True and got["exclude_from_bom_cost"] is True
+
+    # 5x-class numbers are documents regardless of the box — on create and update.
+    doc = repo.create_part(db, part={"part_no": "54-00009-1"}, supplier_lines=[])
+    assert repo.get_part(db, doc)["is_document"] is True
+    repo.update_part(db, doc, part={"part_no": "54-00009-1", "is_document": 0}, supplier_lines=[])
+    assert repo.get_part(db, doc)["is_document"] is True  # re-enforced on save
+
+    # Clearing the box on a non-5x part turns it back into a normal, includable component.
+    repo.update_part(db, manual, part={"part_no": "99-00003-1", "is_document": 0}, supplier_lines=[])
+    got = repo.get_part(db, manual)
+    assert got["is_document"] is False and got["exclude_from_bom_cost"] is False
+
+
 def test_normally_stocked_persists_and_defaults_off(db):
     pid = repo.create_part(db, part={"part_no": "NS-1"}, supplier_lines=[])
     assert repo.get_part(db, pid)["normally_stocked"] is False  # default unchecked

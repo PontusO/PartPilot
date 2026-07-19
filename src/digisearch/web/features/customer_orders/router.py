@@ -69,12 +69,15 @@ def _parse_order(form) -> dict:
 
 
 def _render_form(request, *, action, heading, submit_label, back_url, values,
-                 error=None, status=200):
+                 error=None, status=200, statuses=None):
     return request.app.state.templates.TemplateResponse(
         request, "customer_order_form.html",
         {"action": action, "heading": heading, "submit_label": submit_label,
          "back_url": back_url, "values": values or {}, "error": error,
-         "customers": repo.customers(request.app.state.database), "statuses": repo.STATUSES},
+         "customers": repo.customers(request.app.state.database),
+         # Only the manually-settable statuses are offered; a shipped/complete/cancelled order shows
+         # its status fixed (those transitions belong to the despatch/invoice/cancel actions).
+         "statuses": statuses or repo.MANUAL_STATUSES},
         status_code=status,
     )
 
@@ -111,24 +114,32 @@ def edit_order_form(request: Request, order_id: int):
     return _render_form(request, action=f"/customer-orders/{order_id}/edit",
                         heading=f"Edit order {order.get('order_ref') or '#' + str(order_id)}",
                         submit_label="Save changes", back_url=f"/customer-orders/{order_id}",
-                        values=order)
+                        values=order, statuses=repo.allowed_statuses(order.get("status")))
 
 
 @router.post("/{order_id}/edit", response_class=HTMLResponse)
 async def update_order_route(request: Request, order_id: int):
     require_role(request, CUSTOMER_ORDER_WRITE_ROLES)
     db = request.app.state.database
-    if repo.get_order(db, order_id) is None:
+    order = repo.get_order(db, order_id)
+    if order is None:
         return request.app.state.templates.TemplateResponse(
             request, "error.html", {"message": "Order not found."}, status_code=404)
     form = await request.form()
     data = _parse_order(form)
+    allowed = repo.allowed_statuses(order.get("status"))
     if not data["customer_id"]:
         return _render_form(request, action=f"/customer-orders/{order_id}/edit",
                             heading="Edit customer order", submit_label="Save changes",
                             back_url=f"/customer-orders/{order_id}", values=dict(form),
-                            error="Choose a customer.", status=400)
-    repo.update_order(db, order_id, data)
+                            error="Choose a customer.", status=400, statuses=allowed)
+    try:
+        repo.update_order(db, order_id, data)
+    except ValueError as exc:  # illegal manual status transition
+        return _render_form(request, action=f"/customer-orders/{order_id}/edit",
+                            heading="Edit customer order", submit_label="Save changes",
+                            back_url=f"/customer-orders/{order_id}", values=dict(form),
+                            error=str(exc), status=400, statuses=allowed)
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
 
 

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.code }} · Documents{% endblock %}
+{% macro human_size(n) %}{% if n is none %}—{% elif n < 1024 %}{{ n }} B{% elif n < 1048576 %}{{ (n / 1024)|round(1) }} KB{% else %}{{ (n / 1048576)|round(1) }} MB{% endif %}{% endmacro %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/documents">← Documents</a></p>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+    <h1 style="margin:0; font-family:ui-monospace,monospace;">{{ doc.code }}
+      <span class="badge muted">{{ doc.prefix }} — {{ doc.prefix_label or '?' }}</span>
+      {% if doc.storage_kind == 'link' %}<span class="badge warn">link</span>{% else %}<span class="badge stock">file</span>{% endif %}
+      {% if doc.retired %}<span class="badge bad">retired</span>{% endif %}
+    </h1>
+    <a href="/article-register/{{ doc.running_no }}" class="note">family {{ '%05d'|format(doc.running_no) }} ↗</a>
+  </div>
+  <p class="note" style="font-size:1.05rem; color:var(--fg);">{{ doc.title }}</p>
+  {% if doc.doc_type %}<p class="note">Type: {{ doc.doc_type }}</p>{% endif %}
+  {% if doc.notes %}<p class="note">{{ doc.notes }}</p>{% endif %}
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a href="/documents/{{ doc.id }}/edit" class="act-btn secondary">Edit</a>
+    <form method="post" action="/documents/{{ doc.id }}/retire" style="display:inline; margin:0;">
+      <button type="submit" class="act-btn secondary">{{ 'Restore' if doc.retired else 'Retire' }}</button>
+    </form>
+    {% if can_delete %}
+    <form method="post" action="/documents/{{ doc.id }}/delete" style="display:inline; margin:0;"
+          onsubmit="return confirm('Permanently delete {{ doc.code }} and all its files?\n\nThis cannot be undone.');">
+      <button type="submit" class="act-btn secondary">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if doc.storage_kind == 'link' and doc.external_url %}
+  <p style="margin-top:1rem;">Current link:
+    <a href="{{ doc.external_url }}" target="_blank" rel="noopener">{{ doc.external_url }}</a>
+    {% if doc.ext_ref %}<span class="badge muted">{{ doc.ext_ref }}</span>{% endif %}
+    {% if doc.ext_path %}<span class="note">/{{ doc.ext_path }}</span>{% endif %}</p>
+  {% endif %}
+
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Revisions</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Rev</th><th>{{ 'URL' if doc.storage_kind == 'link' else 'File' }}</th>
+        <th>Uploaded</th><th>By</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+        {% for r in doc.revisions %}
+        <tr>
+          <td>{{ r.rev }} {% if r.is_current %}<span class="badge ok">current</span>{% endif %}</td>
+          <td>
+            {% if r.rel_path %}{{ r.filename }} <span class="note">({{ human_size(r.byte_size) }})</span>
+            {% elif r.external_url %}<a href="{{ r.external_url }}" target="_blank" rel="noopener">{{ r.external_url }}</a>{% if r.ext_ref %} <span class="badge muted">{{ r.ext_ref }}</span>{% endif %}
+            {% else %}<span class="note">—</span>{% endif %}
+          </td>
+          <td class="note">{{ r.uploaded_at }}</td>
+          <td class="note">{{ r.uploaded_by or '' }}</td>
+          <td class="note">{{ r.notes or '' }}</td>
+          <td style="white-space:nowrap; text-align:right;">
+            {% if r.rel_path %}
+            <button type="button" class="ghost"
+                    onclick="location.href='/documents/{{ doc.id }}/revisions/{{ r.id }}/download'">Download</button>
+            {% endif %}
+            {% if can_edit and not r.is_current %}
+            <form method="post" action="/documents/{{ doc.id }}/revisions/{{ r.id }}/set-current"
+                  style="display:inline; margin:0;">
+              <button type="submit" class="ghost">Make current</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not doc.revisions %}<tr><td colspan="6" class="note">No revisions yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can_edit %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">
+    {{ 'Update link' if doc.storage_kind == 'link' else 'Upload new revision' }}</h2>
+  {% if doc.storage_kind == 'link' %}
+  <form method="post" action="/documents/{{ doc.id }}/link" style="max-width:560px;">
+    <label for="external_url">URL</label>
+    <input id="external_url" name="external_url" type="text" value="{{ doc.external_url or '' }}"
+           placeholder="https://github.com/org/repo">
+    <div style="display:flex; gap:1rem;">
+      <div style="flex:1;"><label for="ext_ref">Branch / tag</label>
+        <input id="ext_ref" name="ext_ref" type="text" value="{{ doc.ext_ref or '' }}"></div>
+      <div style="flex:1;"><label for="ext_path">Path in repo</label>
+        <input id="ext_path" name="ext_path" type="text" value="{{ doc.ext_path or '' }}"></div>
+    </div>
+    <div style="display:flex; gap:1rem;">
+      <div style="width:110px;"><label for="rev">Revision</label>
+        <input id="rev" name="rev" type="text" value="{{ suggest_rev }}"></div>
+      <div style="flex:1;"><label for="notes">Notes</label>
+        <input id="notes" name="notes" type="text"></div>
+    </div>
+    <button type="submit" class="ghost">Save link revision</button>
+  </form>
+  {% else %}
+  <form method="post" action="/documents/{{ doc.id }}/revisions" enctype="multipart/form-data"
+        style="max-width:560px;">
+    <label for="file">File</label>
+    <input id="file" name="file" type="file" style="width:100%;">
+    <div style="display:flex; gap:1rem;">
+      <div style="width:110px;"><label for="rev">Revision</label>
+        <input id="rev" name="rev" type="text" value="{{ suggest_rev }}"></div>
+      <div style="flex:1;"><label for="notes">Notes</label>
+        <input id="notes" name="notes" type="text"></div>
+    </div>
+    <p class="note">Max 100 MB. The new revision becomes current; older ones stay downloadable.</p>
+    <button type="submit" class="ghost">Upload revision</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -305,36 +305,76 @@ def delete_template(db: Database, template_id: int) -> None:
         conn.commit()
 
 
+def family_prefixes(db: Database, running_no: int) -> list[str]:
+    """The distinct assigned prefixes already present in a running-number family (reserved rows have
+    no prefix and are excluded)."""
+    with db.connect() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT DISTINCT prefix FROM article_numbers "
+            "WHERE running_no = ? AND prefix IS NOT NULL ORDER BY prefix", (running_no,))]
+
+
+def list_family_documents(db: Database, running_no: int) -> list[dict]:
+    """Documents allocated under this running-number family, for the detail-page panel. The
+    ``documents`` table is owned by the (later-registered) Documents feature; guard for its absence
+    so Article-Register-only unit tests still pass — same decoupled, query-time-join spirit as the
+    ``parts`` soft link."""
+    try:
+        with db.connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT id, code, title, prefix, storage_kind, external_url, retired "
+                "FROM documents WHERE running_no = ? ORDER BY code", (running_no,))]
+    except sqlite3.OperationalError:
+        return []
+
+
+def family_codes(db: Database, running_no: int) -> list[str]:
+    """The article codes already assigned in a running-number family (reserved rows have no code and
+    are excluded). Drives the "already in family → skipped" tag when adding template lines to an
+    existing family: the skip is by **exact code**, so a template can still add new suffixes under a
+    prefix that's already present (e.g. add 99-…-2 "Stencil TOP" when only 99-…-1 "PCB" exists)."""
+    with db.connect() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT code FROM article_numbers "
+            "WHERE running_no = ? AND code IS NOT NULL ORDER BY code", (running_no,))]
+
+
 def apply_template(db: Database, template_id: int, *, product: str | None,
                    created_by: str | None = None, comment: str | None = None,
                    running_no: int | None = None) -> int:
     """Generate a product family from a template.
 
     ``running_no=None`` allocates a fresh running number (New Product); otherwise the lines are
-    appended to an existing family. Per prefix, the suffix is ``max(template suffix, next free)`` so
-    a fresh family honours the template's own suffixes while an existing family continues past what's
-    already there. Returns the running number written to.
+    appended to an existing family. When appending, a template line is skipped only if its **exact
+    code** (prefix + running number + the template line's own suffix) already exists — so a template
+    can still add new suffixes under a prefix that's already present (e.g. add the Stencil TOP/BOT
+    lines 99-…-2/-3 to a family that so far only has the PCB line 99-…-1). Returns the running number
+    written to. Raises ``ValueError`` if appending would add nothing (every code already exists).
     """
     tmpl = get_template(db, template_id)
     if not tmpl or not tmpl["lines"]:
         raise ValueError("That template has no lines.")
     with db.connect() as conn:
+        appending = running_no is not None
         if running_no is None:
             running_no = _first_free_running_no(conn)
-        counters: dict[str, int] = {}
+        existing = set(family_codes(db, running_no)) if appending else set()
+        seen: set[str] = set()
         rows = []
         for ln in tmpl["lines"]:
             prefix = normalize_prefix(ln["prefix"])
             if not prefix:
                 continue
-            if prefix not in counters:
-                counters[prefix] = conn.execute(
-                    "SELECT COALESCE(MAX(suffix), 0) FROM article_numbers "
-                    "WHERE prefix = ? AND running_no = ?", (prefix, running_no)).fetchone()[0]
-            suffix = max(int(ln["suffix"] or 1), counters[prefix] + 1)
-            counters[prefix] = suffix
-            rows.append((prefix, running_no, suffix, article_code(prefix, running_no, suffix),
+            suffix = int(ln["suffix"] or 1)
+            code = article_code(prefix, running_no, suffix)
+            if code in existing or code in seen:  # already in the family (or a duplicate line) → skip
+                continue
+            seen.add(code)
+            rows.append((prefix, running_no, suffix, code,
                          compose_description(product, ln["label"]), created_by, comment, "manual"))
+        if appending and not rows:
+            raise ValueError(
+                f"Every line in this template is already in family {running_no:05d} — nothing to add.")
         try:
             conn.executemany(
                 """INSERT INTO article_numbers

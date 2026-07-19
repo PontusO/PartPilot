@@ -56,15 +56,18 @@ def _parse_part(form) -> dict:
         "unlimited_stock": 1 if form.get("unlimited_stock") else 0,
         "normally_stocked": 1 if form.get("normally_stocked") else 0,
         "exclude_from_bom_cost": 1 if form.get("exclude_from_bom_cost") else 0,
-        # A per-part markup must be > 0 (0/negative would zero the part's sell prices); blank/invalid
-        # -> None, which falls back to the Setup default.
+        "is_document": 1 if form.get("is_document") else 0,
+        # A per-part overhead factor must be > 0 (0/negative would zero the part's loaded cost);
+        # blank/invalid -> None, which falls back to the Setup default. (Field is named 'markup' for
+        # legacy reasons; it's the loading/overhead factor, not a sell margin.)
         "markup": _positive_or_none(_num(form.get("markup"))),
     }
 
 
 def _parse_sell_tiers(form) -> list[dict]:
-    """Customer sell tiers from the flat repeating-row editor: parallel break-qty / unit-price
-    lists. Rows missing either field are dropped."""
+    """Manual loaded-cost tiers from the flat repeating-row editor: parallel break-qty / unit-price
+    lists. Rows missing either field are dropped. (Form fields are named ``sell_*`` for legacy
+    reasons; the values are internal loaded cost, not a customer price.)"""
     qtys = form.getlist("sell_break_qty")
     prices = form.getlist("sell_unit_price")
     tiers = []
@@ -218,10 +221,15 @@ def parts_by_supplier(request: Request, name: str | None = None):
 # ---- add ----
 
 @router.get("/new", response_class=HTMLResponse)
-def new_form(request: Request, part_no: str | None = None):
+def new_form(request: Request, part_no: str | None = None, value: str | None = None):
     require_role(request, CATALOG_WRITE_ROLES)
-    # part_no may be prefilled when returning from the Article Register allocator.
-    values = {"part_no": part_no.strip()} if (part_no or "").strip() else {}
+    # part_no / value may be prefilled when arriving from the Article Register (the entry's product
+    # description seeds the value/spec field).
+    values = {}
+    if (part_no or "").strip():
+        values["part_no"] = part_no.strip()
+    if (value or "").strip():
+        values["value"] = value.strip()
     return _render_form(
         request, action="/catalog/new", heading="Add component", submit_label="Save component",
         stock_heading="Opening stock", back_url="/catalog", values=values,
@@ -237,12 +245,21 @@ async def create(request: Request):
     part = _parse_part(form)
     part["sell_tiers"] = _parse_sell_tiers(form)
     lines = _parse_supplier_lines(form, _supplier_map(db))
+    error = None
     if not part["part_no"]:
+        error = "Part number is required."
+    elif repo.is_document_part_no(part["part_no"]):
+        # Document-class numbers (5x drawings/specs, 95 software) are Documents, not catalog parts —
+        # the two representations must not fork. Legacy imported 5x parts stay editable; only new
+        # creation is routed to the Documents feature.
+        error = (f"{part['part_no']} is a document-class number — create it under Documents "
+                 f"(/documents/new) instead of as a catalog part.")
+    if error:
         return _render_form(
             request, action="/catalog/new", heading="Add component", submit_label="Save component",
             stock_heading="Opening stock", back_url="/catalog", values=dict(form),
             supplier_rows=lines or [{"is_default": True}], stock=_parse_stock(form),
-            sell_tier_rows=part["sell_tiers"], error="Part number is required.",
+            sell_tier_rows=part["sell_tiers"], error=error,
         )
     part_id = repo.create_part(db, part=part, supplier_lines=lines, opening=_parse_stock(form))
     return RedirectResponse(f"/catalog/{part_id}", status_code=303)
@@ -291,9 +308,10 @@ async def edit(request: Request, part_id: int):
 
 @router.post("/{part_id}/generate-sell-tiers", response_class=HTMLResponse)
 async def generate_sell_tiers(request: Request, part_id: int):
-    """Generate customer sell tiers from the default supplier's captured cost breaks x markup
-    (per-part markup if set, else the Setup default). Manual tiers are preserved. Uses the *saved*
-    markup — save a changed markup before generating."""
+    """Generate internal loaded-cost tiers from the default supplier's captured cost breaks × overhead
+    (per-part overhead if set, else the Setup default) — not a customer price. Manual tiers are
+    preserved. Uses the *saved* overhead factor — save a changed one before generating. (Route/handler
+    keep the legacy ``sell-tiers`` name.)"""
     require_role(request, CATALOG_WRITE_ROLES)
     from ..setup import repo as setup_repo
 

@@ -34,6 +34,14 @@ def despatch_list(request: Request, q: str | None = None):
 
 # ---- ship from a customer order ----
 
+def _render_from_order(request, db, order, error=None, status=200):
+    return request.app.state.templates.TemplateResponse(
+        request, "despatch_from_order.html",
+        {"order": order, "lines": repo.shippable_lines(db, order["id"]), "error": error},
+        status_code=status,
+    )
+
+
 @router.get("/from-order/{order_id}", response_class=HTMLResponse)
 def ship_from_order(request: Request, order_id: int):
     require_role(request, DESPATCH_ROLES)
@@ -42,10 +50,13 @@ def ship_from_order(request: Request, order_id: int):
     if order is None:
         return request.app.state.templates.TemplateResponse(
             request, "error.html", {"message": "Customer order not found."}, status_code=404)
-    return request.app.state.templates.TemplateResponse(
-        request, "despatch_from_order.html",
-        {"order": order, "lines": repo.shippable_lines(db, order_id)},
-    )
+    if order["status"] != "confirmed":
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html",
+            {"message": f"Only a confirmed order can be despatched — this one is "
+                        f"{order['status']}. Confirm it on the order page first."},
+            status_code=400)
+    return _render_from_order(request, db, order)
 
 
 @router.post("/from-order/{order_id}")
@@ -60,7 +71,14 @@ async def ship_from_order_apply(request: Request, order_id: int):
             selections[line_id] = qty
     db = request.app.state.database
     # Open a packing list — nothing ships until it's packed, confirmed ready and dispatched.
-    desp_id = repo.create_packing_list(db, order_id, selections, user.username)
+    try:
+        desp_id = repo.create_packing_list(db, order_id, selections, user.username)
+    except ValueError as exc:  # unconfirmed order, or a qty above what remains to ship
+        order = repo.order_header(db, order_id)
+        if order is None:
+            return request.app.state.templates.TemplateResponse(
+                request, "error.html", {"message": "Customer order not found."}, status_code=404)
+        return _render_from_order(request, db, order, error=str(exc), status=400)
     if desp_id:
         return RedirectResponse(f"/despatch/{desp_id}", status_code=303)
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)

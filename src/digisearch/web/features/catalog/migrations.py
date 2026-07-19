@@ -368,4 +368,31 @@ MIGRATIONS = [
         sql=r"UPDATE parts SET exclude_from_bom_cost = 1 "
             r"WHERE part_no GLOB '5[0-9]-[0-9][0-9][0-9][0-9][0-9]-*';",
     ),
+    Migration(
+        version=18,
+        name="internal document flag",
+        # The company's internal article-numbering system now covers internal documents too, so a part
+        # can be flagged as a document explicitly (not only via the 5x-class part-number heuristic). A
+        # document is a deliverable, not per-board material, so it's always excluded from BOM cost —
+        # create_part/update_part force exclude_from_bom_cost whenever is_document is set.
+        sql="ALTER TABLE parts ADD COLUMN is_document INTEGER NOT NULL DEFAULT 0;",
+    ),
+    Migration(
+        version=19,
+        name="back-fill is_document for 5x documents",
+        # Existing 5x-class documents (already excluded from BOM cost by v17) are documents, so tag
+        # them so the flag and the part-number heuristic stay consistent. Same GLOB as v17.
+        sql=r"UPDATE parts SET is_document = 1 "
+            r"WHERE part_no GLOB '5[0-9]-[0-9][0-9][0-9][0-9][0-9]-*';",
+    ),
+    Migration(
+        version=20,
+        name="95 software codes are documents too",
+        # The Article Register and Documents features treat prefix 95 (software / source code) as a
+        # document class, but the catalog's is_document_part_no matched only 50-59 — so a 95- part
+        # got is_document=0 and its cost counted in BOM roll-ups. The helper now matches 95 as well;
+        # back-fill existing rows to match (same shape-anchored GLOB as v17/v19).
+        sql=r"UPDATE parts SET is_document = 1, exclude_from_bom_cost = 1 "
+            r"WHERE part_no GLOB '95-[0-9][0-9][0-9][0-9][0-9]-*';",
+    ),
 ]

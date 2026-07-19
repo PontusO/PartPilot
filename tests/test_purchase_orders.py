@@ -118,6 +118,24 @@ def test_receive_creates_goods_receipt(db):
     assert g["po_no"] == f"PO-{po_id:05d}" and g["lines"][0]["qty"] == 30
 
 
+def test_grn_csv_and_pdf_export(db):
+    p, asm, wo = _setup_shortage(db)
+    po_id = repo.create_pos_from_suggestions(db, {p: 30}, "u")[0]
+    repo.mark_ordered(db, po_id)
+    line_id = repo.get_po(db, po_id)["lines"][0]["id"]
+    grn_id = repo.receive_po(db, po_id, {line_id: 30}, "u", advice_no="ADV-7")
+
+    from digisearch.web.features.goods_receipts import export as grn_export
+    from digisearch.web.features.goods_receipts import repo as grnrepo
+    g = grnrepo.get_receipt(db, grn_id)
+
+    csv_text = grn_export.grn_csv(g)
+    assert "Part No" in csv_text and "R-1" in csv_text and "30" in csv_text
+
+    pdf = grn_export.grn_pdf(g, grn_export.company_profile(db))
+    assert pdf[:5] == b"%PDF-" and len(pdf) > 500
+
+
 def _acme_id(db):
     return next(s["id"] for s in repo.suppliers(db) if s["name"] == "Acme Supplies")
 

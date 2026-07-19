@@ -1,12 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Work Orders · PartPilot{% endblock %}
 {% set badge = {'allocated':'stock','issued':'muted','finished':'ok','cancelled':'bad'} %}
+{# WO 'allocated' means PLANNED (nothing reserved) — shown as "Planned" so it doesn't read as
+   reserved stock the way "allocated" does on a customer order. Internal status value is unchanged. #}
+{% set status_label = {'allocated':'Planned','issued':'In WIP','finished':'Finished','cancelled':'Cancelled'} %}
 {% block content %}
 <div class="panel">
   <h1>Work Orders</h1>
   <div class="cards">
     <div class="card"><b>{{ summary.total }}</b><small>work orders</small></div>
-    <div class="card"><b>{{ summary.allocated }}</b><small>allocated</small></div>
+    <div class="card"><b>{{ summary.allocated }}</b><small>planned</small></div>
     <div class="card"><b>{{ summary.issued }}</b><small>in WIP</small></div>
     <div class="card"><b>{{ summary.finished }}</b><small>finished</small></div>
     {% if can_edit %}
@@ -28,7 +31,7 @@
               style="padding:.55rem .65rem; background:#0d1219; color:var(--fg);
                      border:1px solid var(--line); border-radius:7px;">
         <option value="">All</option>
-        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status else '' }}>{{ s }}</option>{% endfor %}
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status else '' }}>{{ status_label.get(s, s) }}</option>{% endfor %}
       </select>
     </div>
     <button type="submit">Filter</button>
@@ -47,7 +50,7 @@
           <td><a href="/work-orders/{{ w.id }}">{{ w.wo_no or '#' ~ w.id }}</a></td>
           <td>{{ w.assembly_part_no }}{% if w.assembly_value %} <span class="flag">{{ w.assembly_value }}</span>{% endif %}</td>
           <td class="num">{{ "%g"|format(w.qty) }}</td>
-          <td><span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span>
+          <td><span class="badge {{ badge.get(w.status, 'muted') }}">{{ status_label.get(w.status, w.status) }}</span>
             {% if w.bom_diverged %}<span class="badge bad" title="The assembly BOM has changed since this WO was planned — open it to regenerate">⚠ BOM changed</span>{% endif %}</td>
           <td>{{ w.build_date or '' }}</td>
           <td class="num">{{ w.line_count }}</td>

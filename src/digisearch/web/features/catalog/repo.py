@@ -23,13 +23,24 @@ _DISTRIBUTOR_URLS = {
 
 # Internal document codes: 5x class (prefix 50–59), e.g. '54-00001-1'. The stricter
 # prefix-NNNNN-suffix shape avoids matching a real manufacturer P/N that merely starts with "5x-".
-_DOCUMENT_PART_NO = re.compile(r"^5\d-\d{5}-")
+_DOCUMENT_PART_NO = re.compile(r"^(5\d|95)-\d{5}-")
 
 
 def is_document_part_no(part_no: str | None) -> bool:
-    """True for a 5x-class internal document code. Documents carry a number but are deliverables, not
-    per-board material, so they're always excluded from an assembly's BOM cost (enforced on save)."""
+    """True for a document-class internal code: 5x (50-59, documents) or 95 (software/source code) —
+    the same classes the Article Register and Documents features treat as documents. Documents carry
+    a number but are deliverables, not per-board material, so they're always excluded from an
+    assembly's BOM cost (enforced on save)."""
     return bool(_DOCUMENT_PART_NO.match((part_no or "").strip()))
+
+
+def _doc_and_bom_flags(part: dict) -> tuple[int, int]:
+    """Resolve the (exclude_from_bom_cost, is_document) columns for a write. A part is a document if
+    the form flag is set OR its part number is a 5x-class document code; a document is always excluded
+    from BOM cost (a deliverable, not per-board material), on top of any explicit exclusion."""
+    is_document = bool(part.get("is_document")) or is_document_part_no(part.get("part_no"))
+    exclude = bool(part.get("exclude_from_bom_cost")) or is_document
+    return (1 if exclude else 0, 1 if is_document else 0)
 
 
 def distributor_url(supplier_name: str | None, supplier_pno: str | None) -> str | None:
@@ -171,6 +182,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
     part["unlimited"] = bool(part.get("unlimited_stock"))
     part["normally_stocked"] = bool(part.get("normally_stocked"))
     part["exclude_from_bom_cost"] = bool(part.get("exclude_from_bom_cost"))
+    part["is_document"] = bool(part.get("is_document"))
     part["free"] = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
     return part
 
@@ -327,14 +339,14 @@ def create_part(
             """INSERT INTO parts
                (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
                 unit_cost, min_qty, total_qty, notes, unlimited_stock, normally_stocked, markup,
-                exclude_from_bom_cost)
-               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                exclude_from_bom_cost, is_document)
+               VALUES (?, ?, ?, ?, 'PART', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
-             part.get("min_qty") or 0, opening_qty, part.get("notes"),
+             part.get("min_qty") or 0, 0, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
              1 if part.get("normally_stocked") else 0, part.get("markup"),
-             1 if (part.get("exclude_from_bom_cost") or is_document_part_no(part["part_no"])) else 0),
+             *_doc_and_bom_flags(part)),
         ).lastrowid
 
         for s in supplier_lines:
@@ -361,11 +373,16 @@ def create_part(
             )
 
         if opening_qty:
-            conn.execute(
-                "INSERT INTO part_stock (part_id, location_id, bin, on_hand) VALUES (?, ?, ?, ?)",
-                (part_id, _location_id(conn, (opening or {}).get("location_id")),
-                 (opening or {}).get("bin"), opening_qty),
-            )
+            # Through the ledger (OPENING), not a raw part_stock insert — post_movement creates the
+            # stock row, rolls up total_qty and records the movement, keeping the running balance
+            # honest. The bin is a plain attribute set after the row exists.
+            from .stock import OPENING, post_movement  # late import: stock.py imports this module
+            loc_id = _location_id(conn, (opening or {}).get("location_id"))
+            post_movement(conn, part_id, delta=opening_qty, mtype=OPENING,
+                          note="opening stock", location_id=loc_id)
+            if (opening or {}).get("bin"):
+                conn.execute("UPDATE part_stock SET bin = ? WHERE part_id = ? AND location_id = ?",
+                             ((opening or {}).get("bin"), part_id, loc_id))
         conn.commit()
     return part_id
 
@@ -386,14 +403,15 @@ def update_part(
         conn.execute(
             """UPDATE parts SET part_no=?, value=?, description=?, category=?, mfr_name=?,
                mfr_pno=?, rev=?, unit_cost=?, min_qty=?, notes=?, unlimited_stock=?,
-               normally_stocked=?, markup=?, exclude_from_bom_cost=?, updated_at=datetime('now')
+               normally_stocked=?, markup=?, exclude_from_bom_cost=?, is_document=?,
+               updated_at=datetime('now')
                WHERE id=?""",
             (part["part_no"], part.get("value"), part.get("description"), part.get("category"),
              part.get("mfr_name"), part.get("mfr_pno"), part.get("rev"), default_unit,
              part.get("min_qty") or 0, part.get("notes"),
              1 if part.get("unlimited_stock") else 0,
              1 if part.get("normally_stocked") else 0, part.get("markup"),
-             1 if (part.get("exclude_from_bom_cost") or is_document_part_no(part["part_no"])) else 0,
+             *_doc_and_bom_flags(part),
              part_id),
         )
 
@@ -442,21 +460,29 @@ def update_part(
         for rid in stale:                         # dropped offers -> remove (cost tiers CASCADE)
             conn.execute("DELETE FROM part_suppliers WHERE id = ?", (rid,))
 
+        # Stock edits go through the ledger: bin/location are plain attributes, but an on-hand change
+        # posts an ADJUST movement (delta vs the current value) so the running balance in
+        # stock_movements never drifts from the part-form path (mirrors the Adjust-stock action).
+        from .stock import ADJUST, OPENING, post_movement  # late import: stock.py imports this module
+
         qty = (stock or {}).get("qty")
         row = conn.execute(
-            "SELECT id FROM part_stock WHERE part_id = ? ORDER BY id LIMIT 1", (part_id,)
+            "SELECT id, on_hand FROM part_stock WHERE part_id = ? ORDER BY id LIMIT 1", (part_id,)
         ).fetchone()
         loc_id = _location_id(conn, (stock or {}).get("location_id"))
         if row is not None:
-            conn.execute(
-                "UPDATE part_stock SET on_hand=?, bin=?, location_id=? WHERE id=?",
-                (qty or 0, (stock or {}).get("bin"), loc_id, row["id"]),
-            )
+            conn.execute("UPDATE part_stock SET bin=?, location_id=? WHERE id=?",
+                         ((stock or {}).get("bin"), loc_id, row["id"]))
+            delta = (qty or 0) - (row["on_hand"] or 0)
+            if delta:
+                post_movement(conn, part_id, delta=delta, mtype=ADJUST,
+                              note="part edit", location_id=loc_id)
         elif qty:
-            conn.execute(
-                "INSERT INTO part_stock (part_id, location_id, bin, on_hand) VALUES (?, ?, ?, ?)",
-                (part_id, loc_id, (stock or {}).get("bin"), qty),
-            )
+            post_movement(conn, part_id, delta=qty, mtype=OPENING,
+                          note="opening stock (part edit)", location_id=loc_id)
+            if (stock or {}).get("bin"):
+                conn.execute("UPDATE part_stock SET bin = ? WHERE part_id = ? AND location_id = ?",
+                             ((stock or {}).get("bin"), part_id, loc_id))
 
         conn.execute(
             "UPDATE parts SET total_qty = "
@@ -501,10 +527,14 @@ def replace_cost_tiers(db: Database, part_supplier_id: int,
         conn.commit()
 
 
-# --- sell-price tiers ---
+# --- loaded-cost tiers (``part_price_tiers``) ---
+# These are the part's INTERNAL loaded unit cost at a qty break, NOT a customer sell price (the
+# customer price is a separate per-product 97- part). The ``sell``/``markup`` names here are legacy
+# (from a removed sell-price layer); ``markup`` is the loading/overhead factor. Kept un-renamed on
+# purpose — see pricing.py's module docstring.
 
 def replace_sell_tiers(db: Database, part_id: int, tiers: list[dict]) -> None:
-    """Replace the *manual* customer sell tiers for a part with ``tiers`` (each
+    """Replace the *manual* loaded-cost tiers for a part with ``tiers`` (each
     ``{"break_qty", "unit_price"}``). Generated (source='markup') tiers are left untouched; a manual
     tier at the same break qty as a generated one supersedes it (manual wins)."""
     with db.connect() as conn:
@@ -522,8 +552,9 @@ def replace_sell_tiers(db: Database, part_id: int, tiers: list[dict]) -> None:
 
 
 def generate_sell_tiers_from_cost(db: Database, part_id: int, default_markup: float) -> int:
-    """(Re)generate source='markup' sell tiers from the default supplier's cut-tape cost breaks,
-    each priced at cost x effective markup (the part's own ``markup`` if set, else ``default_markup``).
+    """(Re)generate source='markup' loaded-cost tiers from the default supplier's cut-tape cost
+    breaks, each at cost x effective overhead (the part's own ``markup`` if set, else
+    ``default_markup``) — i.e. material × overhead = loaded cost, not a sell price.
     Existing manual tiers at the same break qty win and are preserved. Returns the number written."""
     with db.connect() as conn:
         prow = conn.execute("SELECT markup FROM parts WHERE id = ?", (part_id,)).fetchone()
@@ -554,12 +585,13 @@ def generate_sell_tiers_from_cost(db: Database, part_id: int, default_markup: fl
 
 def recalc_sell_tiers_from_purchase(db: Database, part_id: int, anchor_qty: float,
                                     anchor_price: float | None, default_markup: float) -> int:
-    """Recompute the generated sell tiers from a purchase, anchored to the price we're paying.
+    """Recompute the generated loaded-cost tiers from a purchase, anchored to the price we're paying
+    (these are internal loaded cost, not a customer sell price).
 
-    Sell breaks mirror the default supplier's cut-tape cost tiers; each tier is the cost curve
-    *rebased* to the ordered price and marked up::
+    Breaks mirror the default supplier's cut-tape cost tiers; each tier is the cost curve
+    *rebased* to the ordered price and loaded with overhead::
 
-        sell[i] = anchor_price x (cost[i] / cost[bought_tier]) x markup
+        loaded[i] = anchor_price x (cost[i] / cost[bought_tier]) x overhead
 
     where ``cost[bought_tier]`` is the cost at the tier the ordered qty falls into. When the ordered
     price equals that tier's list cost (the automatic case) this is just ``cost[i] x markup``; a

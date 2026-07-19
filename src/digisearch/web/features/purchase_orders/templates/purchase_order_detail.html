@@ -185,6 +185,7 @@
             <td class="num">{{ "%g"|format(ln.qty_received) }}</td>
             <td class="num">{{ "%g"|format(ln.outstanding) }}</td>
             <td class="num"><input class="rinput" name="recv_{{ ln.id }}" type="number" step="any" min="0"
+                                   max="{{ '%g'|format(ln.outstanding) }}"
                                    value="{{ '%g'|format(ln.outstanding) }}"></td>
           </tr>
           {% endif %}{% endfor %}

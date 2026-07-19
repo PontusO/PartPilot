@@ -60,24 +60,34 @@ def import_tables(
                    conn.execute("SELECT id, minimrp_id FROM suppliers WHERE minimrp_id IS NOT NULL")}
 
         # --- parts ---
+        from .repo import is_document_part_no  # late import: repo pulls in pricing etc.
+
         for r in parts:
+            part_no = _s(r.get("MasterPNo")) or "?"
+            # Document-class codes (5x/95) are always documents + excluded from BOM cost — same rule
+            # create_part/update_part enforce. max() on conflict so a manually-set flag never drops.
+            doc = 1 if is_document_part_no(part_no) else 0
             conn.execute(
                 """INSERT INTO parts
                    (part_no, value, description, category, kind, mfr_name, mfr_pno, rev,
-                    unit_cost, min_qty, total_qty, total_alloc, total_on_order, minimrp_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    unit_cost, min_qty, total_qty, total_alloc, total_on_order, minimrp_id,
+                    is_document, exclude_from_bom_cost)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(minimrp_id) DO UPDATE SET
                      part_no=excluded.part_no, value=excluded.value, description=excluded.description,
                      category=excluded.category, kind=excluded.kind, mfr_name=excluded.mfr_name,
                      mfr_pno=excluded.mfr_pno, rev=excluded.rev, unit_cost=excluded.unit_cost,
                      min_qty=excluded.min_qty, total_qty=excluded.total_qty,
                      total_alloc=excluded.total_alloc, total_on_order=excluded.total_on_order,
+                     is_document=max(parts.is_document, excluded.is_document),
+                     exclude_from_bom_cost=max(parts.exclude_from_bom_cost, excluded.exclude_from_bom_cost),
                      updated_at=datetime('now')""",
-                (_s(r.get("MasterPNo")) or "?", _s(r.get("ItemName")), _s(r.get("ItemDescription")),
+                (part_no, _s(r.get("ItemName")), _s(r.get("ItemDescription")),
                  (_s(r.get("Category")) or "").upper() or None,
                  (_s(r.get("Type")) or "PART").upper(), _s(r.get("MfrName")), _s(r.get("MfrPNo")),
                  _s(r.get("Rev")), _f(r.get("xCost"), None), _f(r.get("MinQty")), _f(r.get("TotalQty")),
-                 _f(r.get("TotalAllocQty")), _f(r.get("TotalOnOrderQty")), _i(r.get("ItemID"))),
+                 _f(r.get("TotalAllocQty")), _f(r.get("TotalOnOrderQty")), _i(r.get("ItemID")),
+                 doc, doc),
             )
         part_map = {row["minimrp_id"]: row["id"] for row in
                     conn.execute("SELECT id, minimrp_id FROM parts WHERE minimrp_id IS NOT NULL")}

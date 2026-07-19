@@ -45,6 +45,13 @@ class FakeFortnox:
         return {"DocumentNumber": self._invoice_no}
 
 
+def _confirm_order(db, oid):
+    """Advance a draft order to 'confirmed' — the state despatch now requires before packing."""
+    with db.connect() as conn:
+        conn.execute("UPDATE customer_orders SET status = 'confirmed' WHERE id = ?", (oid,))
+        conn.commit()
+
+
 def _despatch(db, *, org_no=None, qty=2, price=50.0):
     cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme AB",
                                        "org_no": org_no, "email": "a@acme.se"})
@@ -52,6 +59,7 @@ def _despatch(db, *, org_no=None, qty=2, price=50.0):
                               supplier_lines=[], opening={"qty": 100})
     oid = corepo.create_order(db, {"customer_id": cust})
     corepo.add_line(db, oid, pid, qty, price, None)
+    _confirm_order(db, oid)  # only a confirmed order can be despatched
     line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
     desp_id = despatch_repo.create_packing_list(db, oid, {line_id: qty})
     # pack every line, confirm ready, and dispatch -> status 'open' (despatched, ready to invoice)

@@ -427,6 +427,21 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
         if po["status"] not in ("ordered", "draft"):
             raise ValueError(f"Can't receive against a {po['status']} PO.")
 
+        # Cap every receipt at the line's outstanding quantity — an over-typed qty (or a re-posted
+        # form) must not push qty_received past what was ordered.
+        for ln in conn.execute(
+            "SELECT l.id, l.qty, l.qty_received, p.part_no "
+            "FROM purchase_order_lines l LEFT JOIN parts p ON p.id = l.part_id WHERE l.po_id = ?",
+            (po_id,),
+        ):
+            qty = receipts.get(ln["id"])
+            if qty and qty > 0:
+                outstanding = (ln["qty"] or 0) - (ln["qty_received"] or 0)
+                if qty > outstanding + 1e-9:
+                    raise ValueError(
+                        f"{ln['part_no'] or 'Line'}: receiving {qty:g} exceeds the outstanding "
+                        f"{max(outstanding, 0):g}.")
+
         grn_id = None
         if any(q and q > 0 for q in receipts.values()):
             grn_id = conn.execute(

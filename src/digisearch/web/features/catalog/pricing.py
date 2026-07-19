@@ -1,9 +1,13 @@
 """Quantity-break (tiered) pricing helpers — pure DB reads, no feature/config imports.
 
 Two tier flavours (catalog migration v14):
-  * COST tiers  (``part_supplier_tiers``) — what we pay a supplier at a break qty, auto-captured
-    from Digi-Key/Mouser price breaks.
-  * SELL tiers  (``part_price_tiers``)     — what we charge the customer at a component-qty break.
+  * SUPPLIER cost tiers (``part_supplier_tiers``) — what we pay a supplier at a break qty,
+    auto-captured from Digi-Key/Mouser price breaks.
+  * LOADED cost tiers   (``part_price_tiers``)    — our internal loaded unit cost (material ×
+    overhead) at a component-qty break. This is NOT a customer sell price: the customer price is a
+    separate per-product 97- part priced outside PartPilot. The ``sell_*`` names below are legacy
+    (from a removed sell-price layer) and are kept only to avoid a wide rename; read them as
+    "loaded cost".
 
 Tier selection mirrors the CLI engine's ``Candidate.price_at`` (src/digisearch/models.py): pick the
 highest break quantity <= the quantity in play. The quantity in play for a component is the *total*
@@ -63,10 +67,12 @@ def _effective_markup(conn, part_id: int, default_markup: float) -> float:
 
 
 def leaf_sell_unit(conn, part_id: int, qty: float, default_markup: float) -> float | None:
-    """Per-piece SELL price of a single (non-assembly) part at ``qty``.
+    """Per-piece internal LOADED cost of a single (non-assembly) part at ``qty`` (not a sell price;
+    the ``sell`` in the name is legacy).
 
-    Sell tiers win when present. Otherwise the part's cost at ``qty`` (default-supplier cost tier,
-    else the flat ``parts.unit_cost``) times its effective markup (per-part override, else default).
+    Loaded-cost tiers win when present. Otherwise the part's cost at ``qty`` (default-supplier cost
+    tier, else the flat ``parts.unit_cost``) times its effective overhead (per-part override, else
+    default) — i.e. material × overhead = loaded cost.
     """
     sell = load_sell_tiers(conn, part_id)
     if sell:
@@ -83,7 +89,8 @@ def leaf_sell_unit(conn, part_id: int, qty: float, default_markup: float) -> flo
 
 def rolled_sell_price(conn, part_id: int, qty_needed: float, default_markup: float,
                       seen: frozenset = frozenset()) -> float | None:
-    """Per-unit SELL price of ``part_id`` when ``qty_needed`` of it are being made/ordered.
+    """Per-unit internal LOADED cost of ``part_id`` when ``qty_needed`` of it are being made/ordered
+    (not a sell price; the ``sell`` in the name is legacy).
 
     A leaf part is priced by ``leaf_sell_unit``. An assembly rolls up its BOM: each child
     contributes ``rolled_sell_price(child, qty_needed * qty_per) * qty_per`` — the child's tier is

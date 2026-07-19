@@ -16,9 +16,20 @@ from ..setup import repo as setup_repo
 from . import export
 
 STATUSES = ("draft", "confirmed", "shipped", "complete", "cancelled")
-OPEN_STATUSES = ("draft", "confirmed", "shipped")
+# Statuses an operator may set by hand on the order form. Everything else is owned by its action —
+# despatch sets 'shipped', invoicing the last despatch sets 'complete', Cancel sets 'cancelled' —
+# so the side effects (stock movements, allocation release) always run and can't be skipped.
+MANUAL_STATUSES = ("draft", "confirmed")
 # An acknowledgement may be (re)issued while the order is still open and unshipped.
 ACK_STATUSES = ("draft", "confirmed")
+
+
+def allowed_statuses(current: str | None) -> tuple[str, ...]:
+    """The statuses the order form may offer: draft/confirmed are interchangeable by hand; once an
+    order is shipped/complete/cancelled its status belongs to the actions and is shown fixed."""
+    if current is None or current in MANUAL_STATUSES:
+        return MANUAL_STATUSES
+    return (current,)
 
 # Header columns written from the order form (everything except id/timestamps/minimrp_id).
 _ORDER_FIELDS = ("order_ref", "customer_id", "customer_po", "status", "order_date",
@@ -234,7 +245,10 @@ def _default_address_id(conn, customer_id: int | None, usage_col: str, default_c
 
 
 def create_order(db: Database, data: dict) -> int:
-    data = {**data, "status": data.get("status") or "draft"}
+    # A new order can only start in a manual status — 'shipped'/'complete'/'cancelled' are owned by
+    # their actions and make no sense at creation.
+    status = data.get("status") or "draft"
+    data = {**data, "status": status if status in MANUAL_STATUSES else "draft"}
     cols = ", ".join(_ORDER_FIELDS)
     placeholders = ", ".join("?" for _ in _ORDER_FIELDS)
     with db.connect() as conn:
@@ -265,8 +279,21 @@ def next_order_ref(db: Database) -> str:
 
 
 def update_order(db: Database, order_id: int, data: dict) -> None:
+    """Save the order form. The status may only move between the MANUAL_STATUSES by hand — the
+    shipped/complete/cancelled transitions belong to despatch/invoicing/Cancel (which run the side
+    effects: stock movements, allocation release), so the form can't skip or reverse them."""
     assignments = ", ".join(f"{f} = ?" for f in _ORDER_FIELDS)
     with db.connect() as conn:
+        row = conn.execute("SELECT status FROM customer_orders WHERE id = ?", (order_id,)).fetchone()
+        current = row["status"] if row else None
+        new_status = data.get("status") or current
+        if new_status != current and not (
+            current in MANUAL_STATUSES and new_status in MANUAL_STATUSES
+        ):
+            raise ValueError(
+                f"Can't change a {current} order to {new_status} here — that transition is made by "
+                f"the despatch / invoice / cancel actions.")
+        data = {**data, "status": new_status}
         conn.execute(
             f"UPDATE customer_orders SET {assignments}, updated_at = datetime('now') WHERE id = ?",
             (*[data.get(f) for f in _ORDER_FIELDS], order_id),

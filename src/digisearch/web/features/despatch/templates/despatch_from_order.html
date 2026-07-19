@@ -9,6 +9,10 @@
     This opens a <b>packing list</b>; no stock moves until you've packed it, confirmed the package is
     ready, and dispatched it.</p>
 
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
   {% if order.delivery_address %}{% set a = order.delivery_address %}
   <div style="margin-top:.6rem; padding:.7rem .95rem; background:#0d1219; border:1px solid var(--line);
        border-radius:9px; max-width:360px;">

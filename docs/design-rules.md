@@ -140,6 +140,39 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `base.html` + `/static/article-lookup.js` (`attachArticleLookup`). First used on the part-number
   field of Add-component and New-assembly to suggest unassigned Article Register numbers (endpoint
   `GET /article-register/api/unassigned`). Reuse it for future code/part lookups.
+- **2026-07-17** — Article Register "Add template lines to a family" preview: a template line whose
+  group (prefix) is already present in the target family is now **skipped** (not duplicated at a new
+  suffix). The preview marks each skipped line with a `badge warn` "already in family" and strikes
+  its code (`text-decoration:line-through`, `--muted`). Reuse the strike-through + status-badge
+  pattern for any preview row that won't be created.
+- **2026-07-19** — New **Documents** feature (`/documents`, nav 📄 order 16). Controlled documents
+  (CAD, specs, drawings, compliance/ISO, binaries) carry an Article Register number and keep an
+  append-only revision history; source code is stored as an external **link** (GitHub), never a file.
+  UI conventions established here, reuse them: a **file/link kind** shown as a `badge stock`
+  (file) / `badge warn` (link); the create form uses radio toggles that show either the file input or
+  the URL fields, and auto-forces "link" (disabling the file option) when the class is `95` (software)
+  — mirror this show/lock pattern for any either/or form. Revision tables use real `.ghost` buttons
+  per row ("Download", "Make current"), never text links, and the current revision is tagged
+  `badge ok`. The Article Register family page gained a **Documents panel** (rows + an
+  `.act-btn.secondary` "New document for this family"); reuse the guarded cross-feature read
+  (`repo.list_family_documents`, try/except so the owning feature can be absent) for surfacing one
+  feature's rows on another's page.
+- **2026-07-19** — Article Register "Add template lines to a family": the skip is now by **exact
+  code**, not by whole prefix (this corrects the 2026-07-17 entry above). A template line is struck +
+  `badge warn` "already in family" only when its exact number (prefix + running no + the line's own
+  suffix) already exists. This lets a template add further suffixes under a prefix that's already
+  present — e.g. append `99-…-2` (Stencil TOP) / `99-…-3` (Stencil BOT) to a family that so far only
+  has `99-…-1` (PCB). The preview and the server (`apply_template`) both key on the family's existing
+  codes (`repo.family_codes`); template suffixes are treated as meaningful document identities and
+  honoured as-is.
+- **2026-07-19** — "Internal document" flag on parts (`is_document`). Now that the internal article
+  register also covers documents, the part form has a document checkbox. Coupling (server is
+  authoritative, the form JS mirrors it): a **5x-class part number** → always a document; a
+  **document** (5x number *or* ticked box) → always excluded from BOM cost. The form ticks + **locks**
+  the forced-downstream box and shows a `badge muted` hint (`5x number` on the document box,
+  `documents always excluded` on the exclude box), remembering the user's own choice so it returns
+  when the forcing condition is removed. Reuse this tick-lock-hint-remember pattern for any pair of
+  checkboxes where one implies the other.
 - **2026-07-15** — "Allocate & return" pattern: an inline `ghost` button next to the part-number
   field on Add-component / New-assembly jumps to the Article Register allocator (New Number /
   New Product) carrying a validated `return_to` path; on success the allocator redirects back to the

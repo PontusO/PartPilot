@@ -134,7 +134,10 @@ def test_order_discount_delivery_and_backlog(db):
 def test_list_filter_and_search(db):
     cust, _ = _seed(db)
     repo.create_order(db, {"customer_id": cust, "order_ref": "SO-100", "status": "draft"})
-    repo.create_order(db, {"customer_id": cust, "order_ref": "SO-200", "status": "complete"})
+    done = repo.create_order(db, {"customer_id": cust, "order_ref": "SO-200"})
+    with db.connect() as conn:  # 'complete' is action-owned (invoicing) — set directly for the filter test
+        conn.execute("UPDATE customer_orders SET status = 'complete' WHERE id = ?", (done,))
+        conn.commit()
     assert len(repo.list_orders(db)) == 2
     assert len(repo.list_orders(db, status="draft")) == 1
     hits = repo.list_orders(db, search="SO-200")
@@ -201,7 +204,10 @@ def test_cancel_order_releases_allocations(db):
 
 def test_cannot_cancel_shipped_order(db):
     cust, _ = _seed(db)
-    oid = repo.create_order(db, {"customer_id": cust, "status": "shipped"})
+    oid = repo.create_order(db, {"customer_id": cust})
+    with db.connect() as conn:  # 'shipped' is action-owned (dispatch) — set directly for the guard test
+        conn.execute("UPDATE customer_orders SET status = 'shipped' WHERE id = ?", (oid,))
+        conn.commit()
     with pytest.raises(ValueError):
         repo.cancel_order(db, oid)
 
@@ -304,7 +310,10 @@ def test_acknowledge_guards(db):
     with pytest.raises(ValueError):                              # no lines
         repo.acknowledge_order(db, empty)
 
-    shipped = repo.create_order(db, {"customer_id": cust, "status": "shipped"})
+    shipped = repo.create_order(db, {"customer_id": cust})
     repo.add_line(db, shipped, part, qty=1, unit_price=1.0, discount=None)
+    with db.connect() as conn:  # 'shipped' is action-owned (dispatch) — set directly for the guard test
+        conn.execute("UPDATE customer_orders SET status = 'shipped' WHERE id = ?", (shipped,))
+        conn.commit()
     with pytest.raises(ValueError):                              # not an open/unshipped status
         repo.acknowledge_order(db, shipped)

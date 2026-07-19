@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}New document · Documents{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:680px;">
+  <p style="margin-bottom:.4rem;"><a href="/documents">← Documents</a></p>
+  <h1>New document</h1>
+  {% if values.code %}
+  <p class="note">Creating a document for the existing article number
+    <b style="font-family:ui-monospace,monospace;">{{ values.code }}</b> — stores the first revision.</p>
+  {% else %}
+  <p class="note">Allocates an Article Register number and stores the first revision. A fresh number
+    uses running number
+    <b style="font-family:ui-monospace,monospace;">{{ '%05d'|format(next_running_no) }}</b>;
+    or add to an existing product family by its running number.</p>
+  {% endif %}
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/documents/new" id="docform" enctype="multipart/form-data"
+        data-software="{{ software_prefix }}" data-bound-prefix="{{ values.prefix if values.code else '' }}">
+    {% if values.code %}
+    <input type="hidden" name="code" value="{{ values.code }}">
+    <label>Article number</label>
+    <p style="font-family:ui-monospace,monospace; font-size:1.1rem; font-weight:700; margin:.2rem 0 .6rem;">
+      {{ values.code }} <span class="badge muted">{{ values.prefix }}</span></p>
+    {% else %}
+    <label for="prefix">Document class</label>
+    <select id="prefix" name="prefix"
+            style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
+                   border:1px solid var(--line); border-radius:7px;">
+      <option value="">— pick a class —</option>
+      {% for p in prefixes %}
+      <option value="{{ p.code }}" {{ 'selected' if values.prefix == p.code else '' }}>{{ p.code }} — {{ p.label }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    <label for="title">Title</label>
+    <input id="title" name="title" type="text" value="{{ values.title }}"
+           placeholder="e.g. Motherboard schematic">
+
+    <label for="doc_type">Type <span class="note">(optional)</span></label>
+    <input id="doc_type" name="doc_type" type="text" value="{{ values.doc_type }}"
+           placeholder="datasheet / manual / gerber / source…">
+
+    {% if not values.code %}
+    <label style="margin-bottom:.2rem;">Family</label>
+    <div style="display:flex; gap:1.2rem; align-items:center; margin-bottom:.4rem;">
+      <label class="check" style="margin-top:0;"><input type="radio" name="mode" value="new"
+             {{ 'checked' if values.mode != 'existing' else '' }}> New number</label>
+      <label class="check" style="margin-top:0;"><input type="radio" name="mode" value="existing"
+             {{ 'checked' if values.mode == 'existing' else '' }}> Existing running no.</label>
+      <input id="running_no" name="running_no" type="text" value="{{ values.running_no }}"
+             placeholder="e.g. 391" style="width:120px;">
+    </div>
+    {% endif %}
+
+    <label style="margin-bottom:.2rem;">Storage</label>
+    <div id="kindrow" style="display:flex; gap:1.2rem; align-items:center; margin-bottom:.4rem;">
+      <label class="check" style="margin-top:0;"><input type="radio" name="storage_kind" value="file"
+             {{ 'checked' if values.storage_kind != 'link' else '' }}> Upload a file</label>
+      <label class="check" style="margin-top:0;"><input type="radio" name="storage_kind" value="link"
+             {{ 'checked' if values.storage_kind == 'link' else '' }}> External link</label>
+      <span id="kind-doc-hint" class="badge muted" style="display:none;">source code → link</span>
+    </div>
+
+    <div id="file-fields">
+      <label for="file">File</label>
+      <input id="file" name="file" type="file" style="width:100%;">
+      <p class="note" style="margin:.25rem 0 0;">Any file type (CAD, gerbers, PDF, binaries, zip). Max 100 MB.</p>
+    </div>
+
+    <div id="link-fields" style="display:none;">
+      <label for="external_url">URL</label>
+      <input id="external_url" name="external_url" type="text" value="{{ values.external_url }}"
+             placeholder="https://github.com/org/repo">
+      <div style="display:flex; gap:1rem;">
+        <div style="flex:1;">
+          <label for="ext_ref">Branch / tag <span class="note">(optional)</span></label>
+          <input id="ext_ref" name="ext_ref" type="text" value="{{ values.ext_ref }}" placeholder="main">
+        </div>
+        <div style="flex:1;">
+          <label for="ext_path">Path in repo <span class="note">(optional)</span></label>
+          <input id="ext_path" name="ext_path" type="text" value="{{ values.ext_path }}" placeholder="firmware/">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:1rem;">
+      <div style="width:110px;">
+        <label for="rev">Revision</label>
+        <input id="rev" name="rev" type="text" value="{{ values.rev }}" placeholder="A">
+      </div>
+      <div style="width:120px;">
+        <label for="created_by">Created by</label>
+        <input id="created_by" name="created_by" type="text" value="{{ values.created_by }}" placeholder="initials">
+      </div>
+      <div style="flex:1;">
+        <label for="notes">Notes</label>
+        <input id="notes" name="notes" type="text" value="{{ values.notes }}">
+      </div>
+    </div>
+
+    <button type="submit">Create document</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('docform');
+  var software = form.dataset.software;
+  var prefix = document.getElementById('prefix');   // absent when bound to an existing code
+  var fileFields = document.getElementById('file-fields');
+  var linkFields = document.getElementById('link-fields');
+  var hint = document.getElementById('kind-doc-hint');
+  var kindRadios = form.querySelectorAll('input[name=storage_kind]');
+  function currentPrefix() { return prefix ? prefix.value : (form.dataset.boundPrefix || ''); }
+  function kind() { return (form.querySelector('input[name=storage_kind]:checked') || {}).value; }
+  function setKind(v) {
+    kindRadios.forEach(function (r) { r.checked = (r.value === v); });
+  }
+  function sync() {
+    var isSoftware = currentPrefix() === software;
+    if (isSoftware) { setKind('link'); }           // source code is always a link
+    kindRadios.forEach(function (r) { r.disabled = isSoftware; });
+    hint.style.display = isSoftware ? 'inline-block' : 'none';
+    var link = kind() === 'link';
+    linkFields.style.display = link ? 'block' : 'none';
+    fileFields.style.display = link ? 'none' : 'block';
+  }
+  if (prefix) prefix.addEventListener('change', sync);
+  kindRadios.forEach(function (r) { r.addEventListener('change', sync); });
+  sync();
+})();
+</script>
+{% endblock %}

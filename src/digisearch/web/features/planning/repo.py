@@ -16,6 +16,9 @@ from ..work_orders.repo import _diverged
 
 # Build-bar colour: purple = a planned build (its end is the due date); green = finished.
 _STATUS_COLOR = {"allocated": "#8b5cf6", "issued": "#8b5cf6", "finished": "#22c55e"}
+# A WO's 'allocated' state means PLANNED (no stock reserved) — shown as "planned" so it doesn't
+# read as reserved stock the way "allocated" does on a customer order. Status value is unchanged.
+_STATUS_LABEL = {"allocated": "planned", "issued": "in WIP", "finished": "finished"}
 
 
 def calendar_events(db: Database, start: str | None = None, end: str | None = None) -> list[dict]:
@@ -39,7 +42,7 @@ def calendar_events(db: Database, start: str | None = None, end: str | None = No
         events.append({
             "id": f"wo-{w['id']}",
             "title": ("⚠ BOM changed · " if drift else "")
-                     + f"{w['wo_no']} · {w['assembly_part_no']} ×{w['qty']:g} · due {w['due_date']} · {w['status']}",
+                     + f"{w['wo_no']} · {w['assembly_part_no']} ×{w['qty']:g} · due {w['due_date']} · {_STATUS_LABEL.get(w['status'], w['status'])}",
             "start": w["planned_start"],
             "end": iso(due + timedelta(days=1)),       # FullCalendar end is exclusive
             "allDay": True,

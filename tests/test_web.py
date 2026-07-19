@@ -375,7 +375,8 @@ def test_work_order_flow(app):
     wid = int(r.headers["location"].rsplit("/", 1)[1])
 
     page = client.get(f"/work-orders/{wid}").text
-    assert "WO-77" in page and "WC-1" in page and "allocated" in page
+    # a fresh WO is 'allocated' internally but shown as "Planned" (nothing reserved)
+    assert "WO-77" in page and "WC-1" in page and "Planned" in page
 
     client.post(f"/work-orders/{wid}/flush", follow_redirects=False)  # issue + finish
     assert worepo.get_work_order(db, wid)["status"] == "finished"
@@ -467,8 +468,15 @@ def test_purchase_order_suggestions_and_receive(app):
     assert "/goods-receipts/" in rr.headers["location"]
     assert "GRN-" in client.get("/goods-receipts").text
     # the GRN detail page shows the price paid and line value (15 x 1.0)
-    grn = client.get(rr.headers["location"]).text
+    grn_url = rr.headers["location"]
+    grn = client.get(grn_url).text
     assert "Unit price" in grn and "Line value" in grn and "15.00" in grn
+    # and offers a printable PDF + CSV of the receipt
+    assert f"{grn_url}/export.pdf" in grn and f"{grn_url}/export.csv" in grn
+    rp = client.get(f"{grn_url}/export.pdf")
+    assert rp.status_code == 200 and rp.content[:5] == b"%PDF-"
+    rc = client.get(f"{grn_url}/export.csv")
+    assert rc.status_code == 200 and "Part No" in rc.text
     # and the offer now carries that price as its "last purchase price"
     assert catrepo.get_part(db, p)["suppliers"][0]["unit_price"] == pytest.approx(1.0)
 
@@ -834,6 +842,9 @@ def test_despatch_flow(app):
     cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
     oid = corepo.create_order(db, {"customer_id": cust, "order_ref": "SO-S"})
     corepo.add_line(db, oid, part, 25, 10.0, None)
+    with db.connect() as conn:  # despatch is offered only for confirmed orders
+        conn.execute("UPDATE customer_orders SET status = 'confirmed' WHERE id = ?", (oid,))
+        conn.commit()
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
@@ -1847,6 +1858,9 @@ def _ship_order(db, *, linked=False, org_no="556-1"):
                               opening={"qty": 50})
     oid = corepo.create_order(db, {"customer_id": cust})
     corepo.add_line(db, oid, pid, 2, 50.0, None)
+    with db.connect() as conn:  # only a confirmed order can be packed/despatched
+        conn.execute("UPDATE customer_orders SET status = 'confirmed' WHERE id = ?", (oid,))
+        conn.commit()
     return cust, oid
 
 

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ doc.code }} · Documents{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:640px;">
+  <p style="margin-bottom:.4rem;"><a href="/documents/{{ doc.id }}">← {{ doc.code }}</a></p>
+  <h1>Edit document</h1>
+  <p class="note">The number, class and storage kind are fixed once allocated — edit the description
+    only. Change the file/link from the document page.</p>
+
+  {% if error %}
+  <div class="badge bad" style="display:block; padding:.6rem .8rem; margin:.5rem 0;">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/documents/{{ doc.id }}/edit">
+    <label for="title">Title</label>
+    <input id="title" name="title" type="text" value="{{ doc.title }}">
+
+    <label for="doc_type">Type</label>
+    <input id="doc_type" name="doc_type" type="text" value="{{ doc.doc_type or '' }}">
+
+    <label for="notes">Notes</label>
+    <input id="notes" name="notes" type="text" value="{{ doc.notes or '' }}">
+
+    <button type="submit">Save</button>
+  </form>
+</div>
+{% endblock %}

@@ -48,21 +48,24 @@ def test_existing_part_stock_adjusted_to_woo(db):
     report = woo_sync.sync_from_woo(db, [_p("99-100", qty=10)], user="bob")
     assert report.updated == 1 and report.matched == 1
     assert repo.get_part(db, pid)["total_qty"] == 10
-    # one ADJUST movement recording the change
+    # one ADJUST movement recording the change (besides the part's OPENING stock row)
     with db.connect() as conn:
         moves = conn.execute(
-            "SELECT mtype, qty_delta, reference FROM stock_movements WHERE part_id=?", (pid,)
+            "SELECT mtype, qty_delta, reference FROM stock_movements "
+            "WHERE part_id=? AND reference='woo-sync'", (pid,)
         ).fetchall()
     assert [m["mtype"] for m in moves] == ["ADJUST"]
-    assert moves[0]["qty_delta"] == 7 and moves[0]["reference"] == "woo-sync"
+    assert moves[0]["qty_delta"] == 7
 
 
 def test_equal_stock_writes_no_movement(db):
     pid = _make_part(db, "99-100", 8)
     report = woo_sync.sync_from_woo(db, [_p("99-100", qty=8)])
     assert report.unchanged == 1 and report.updated == 0
+    # the sync itself writes no movement (the OPENING row from part creation is not a sync move)
     with db.connect() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM stock_movements WHERE part_id=?", (pid,)).fetchone()[0]
+        n = conn.execute("SELECT COUNT(*) FROM stock_movements WHERE part_id=? AND reference='woo-sync'",
+                         (pid,)).fetchone()[0]
     assert n == 0
 
 
@@ -99,6 +102,8 @@ def test_unmanaged_stock_leaves_part_untouched(db):
 
 def test_dry_run_writes_nothing(db):
     _make_part(db, "99-100", 3)
+    with db.connect() as conn:  # baseline: the OPENING row from part creation
+        before = conn.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0]
     report = woo_sync.sync_from_woo(
         db, [_p("99-100", qty=10), _p("99-999", qty=2), _p("98-9", qty=1)], dry_run=True)
     assert report.updated == 1 and report.created_parts == 1 and report.created_assemblies == 1
@@ -106,7 +111,7 @@ def test_dry_run_writes_nothing(db):
     assert repo.find_part_by_part_no(db, "99-999") is None
     assert repo.get_part(db, repo.find_part_by_part_no(db, "99-100")["id"])["total_qty"] == 3
     with db.connect() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0] == before
 
 
 def test_two_way_sale_and_build_reconciles_and_pushes(db):

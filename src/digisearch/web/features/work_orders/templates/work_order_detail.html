@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ w.wo_no or 'WO #' ~ w.id }} · PartPilot{% endblock %}
 {% set badge = {'allocated':'stock','issued':'muted','finished':'ok','cancelled':'bad'} %}
+{# 'allocated' is shown as "Planned" (nothing is reserved yet) — the DB status value is unchanged. #}
+{% set status_label = {'allocated':'Planned','issued':'In WIP','finished':'Finished','cancelled':'Cancelled'} %}
 {% block content %}
 <div class="panel">
   <p class="note"><a href="/work-orders">← Work Orders</a></p>
   <h1>{{ w.wo_no or 'WO #' ~ w.id }}
-    <span class="badge {{ badge.get(w.status, 'muted') }}">{{ w.status }}</span></h1>
+    <span class="badge {{ badge.get(w.status, 'muted') }}">{{ status_label.get(w.status, w.status) }}</span></h1>
   <p class="note">Build <b>{{ "%g"|format(w.qty) }}</b> ×
     <a href="/assemblies/{{ w.assembly_id }}">{{ w.assembly_part_no }}</a>
     {% if w.assembly_value %} — {{ w.assembly_value }}{% endif %}</p>

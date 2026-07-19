@@ -28,7 +28,8 @@ def _order(db, qty=20, stock_qty=50):
         db, part={"part_no": "D-1"},
         supplier_lines=[{"supplier_name": "X", "unit_price": 2.0, "reel_qty": 1, "is_default": True}],
         opening={"qty": stock_qty})
-    oid = corepo.create_order(db, {"customer_id": cust, "order_ref": "SO-D"})
+    # confirmed — despatch requires it (a draft order can no longer be packed & shipped)
+    oid = corepo.create_order(db, {"customer_id": cust, "order_ref": "SO-D", "status": "confirmed"})
     corepo.add_line(db, oid, part, qty, 10.0, None)
     return cust, part, oid
 
@@ -54,7 +55,7 @@ def test_packing_list_moves_no_stock_until_dispatched(db):
     p = catrepo.get_part(db, part)
     assert p["total_qty"] == 50 and p["total_alloc"] == 20
     assert corepo.get_order(db, oid)["lines"][0]["shipped_qty"] == 0
-    assert not cstock.movements_for_part(db, part)
+    assert not [m for m in cstock.movements_for_part(db, part) if m["mtype"] != "OPENING"]
 
 
 def test_dispatch_ships_stock_and_consumes_allocation(db):
@@ -99,7 +100,8 @@ def test_cannot_dispatch_before_confirming_ready(db):
     desp_id = repo.create_packing_list(db, oid, {line_id: 5}, "u")
     with pytest.raises(ValueError):
         repo.dispatch(db, desp_id, "u")               # still 'packing'
-    assert not cstock.movements_for_part(db, part)    # nothing shipped
+    assert not [m for m in cstock.movements_for_part(db, part)
+                if m["mtype"] != "OPENING"]    # nothing shipped
 
 
 def test_reopen_and_cancel_packing(db):
@@ -113,7 +115,7 @@ def test_reopen_and_cancel_packing(db):
 
     assert repo.cancel_packing(db, desp_id) == oid
     assert repo.get_despatch(db, desp_id) is None      # discarded, no stock moved
-    assert not cstock.movements_for_part(db, part)
+    assert not [m for m in cstock.movements_for_part(db, part) if m["mtype"] != "OPENING"]
 
 
 def test_full_despatch_marks_order_shipped(db):
