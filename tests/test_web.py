@@ -1319,65 +1319,6 @@ def test_assemblies_pages_and_parts_split(app):
     assert "RES-1" in parts and "ASM-100" not in parts
 
 
-def test_setup_tools_and_import(app, monkeypatch):
-    import digisearch.web.features.setup.router as setup_router
-
-    app.state.store.create_user("admin1", "pw", role="admin")
-    monkeypatch.setattr(setup_router, "_source_path", lambda: ".")  # an existing path
-    monkeypatch.setattr(setup_router, "import_from_minimrp", lambda db, p: {"parts": 5, "suppliers": 2})
-    monkeypatch.setattr(setup_router, "import_boms", lambda db, p: {"bom_lines": 7})
-    monkeypatch.setattr(setup_router, "import_contacts", lambda db, p: {"contacts": 9})
-
-    # non-admin cannot reach Setup & Tools
-    buyer = TestClient(app)
-    _login(buyer, "buyer1", "pw")
-    assert buyer.get("/setup", follow_redirects=False).status_code == 403
-
-    admin = TestClient(app)
-    _login(admin, "admin1", "pw")
-    idx = admin.get("/setup")
-    assert idx.status_code == 200 and "Import from miniMRP" in idx.text
-    assert admin.get("/setup/import").status_code == 200
-
-    r = admin.post("/setup/import")
-    assert r.status_code == 200
-    assert "bom lines" in r.text and "7" in r.text and "Import complete" in r.text
-
-
-def test_setup_import_handles_missing_db(app, monkeypatch):
-    import digisearch.web.features.setup.router as setup_router
-
-    app.state.store.create_user("admin2", "pw", role="admin")
-    monkeypatch.setattr(setup_router, "_source_path", lambda: "/no/such/mrp5data")
-    admin = TestClient(app)
-    _login(admin, "admin2", "pw")
-    r = admin.post("/setup/import")  # no file uploaded, no valid configured path
-    assert r.status_code == 400 and "no database selected" in r.text.lower()
-
-
-def test_setup_import_with_uploaded_file(app, monkeypatch):
-    import digisearch.web.features.setup.router as setup_router
-
-    app.state.store.create_user("admin3", "pw", role="admin")
-    monkeypatch.setattr(setup_router, "_source_path", lambda: None)  # no configured default
-    captured = {}
-
-    def fake_cat(db, path):
-        captured["path"] = path
-        return {"parts": 3}
-
-    monkeypatch.setattr(setup_router, "import_from_minimrp", fake_cat)
-    monkeypatch.setattr(setup_router, "import_boms", lambda db, p: {"bom_lines": 4})
-    monkeypatch.setattr(setup_router, "import_contacts", lambda db, p: {"contacts": 2})
-
-    admin = TestClient(app)
-    _login(admin, "admin3", "pw")
-    r = admin.post("/setup/import", files={"dbfile": ("mrp5data", b"FAKEDB")})
-    assert r.status_code == 200 and "bom lines" in r.text and "Import complete" in r.text
-    # the browsed/uploaded file was imported (a temp copy named after it), not the (None) default
-    assert captured["path"] and captured["path"].endswith("mrp5data")
-
-
 def _seed_suspect_part(app, part_no="123-4567-ND", supplier="Digikey"):
     """A part whose part_no is really a supplier order code, with no manufacturer P/N."""
     db = app.state.database

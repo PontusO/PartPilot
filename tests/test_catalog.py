@@ -565,3 +565,25 @@ def test_opening_stock_and_part_edit_go_through_the_ledger(db):
     # an unchanged qty posts nothing
     repo.update_part(db, pid, part={"part_no": "L-1"}, supplier_lines=[], stock={"qty": 25})
     assert len(cstock.movements_for_part(db, pid)) == 2
+
+
+def test_catalog_stock_index_matches_and_excludes_documents(db):
+    """The stock pre-check reads our own catalog: match by MPN or generic value+package, with free
+    stock = on-hand − allocated; document-class parts are never stock."""
+    from digisearch.models import CompType
+    from digisearch.spec.units import parse_rkm_value
+    from digisearch.web.features.catalog.stock_index import build_stock_index
+
+    repo.create_part(db, part={"part_no": "MBR120LSF", "value": "Schottky", "mfr_pno": "MBR120LSF"},
+                     supplier_lines=[], opening={"qty": 300})
+    repo.create_part(db, part={"part_no": "R100K0402", "value": "100K/1%/0.0625W/0402",
+                               "category": "RESISTOR"}, supplier_lines=[], opening={"qty": 1000})
+    repo.create_part(db, part={"part_no": "54-00001-1", "value": "Drawing"},
+                     supplier_lines=[])  # document class -> excluded from stock
+
+    idx = build_stock_index(db)
+    hit = idx.match_mpn("MBR120LSF")
+    assert hit is not None and hit.free == 300
+    passive = idx.match_param(CompType.RESISTOR, parse_rkm_value("100K", CompType.RESISTOR), "0402")
+    assert passive is not None and passive.free == 1000
+    assert idx.match_mpn("54-00001-1") is None  # a document is not stock

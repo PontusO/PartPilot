@@ -41,7 +41,6 @@ uv run digisearch auth-test                # verify Digi-Key credentials
 uv run digisearch resolve slice-vb.csv --build-qty 100 -o out.xlsx   # CLI resolve
 uv run digisearch resolve slice-vb.csv --dry-run         # classify + build queries, no API calls
 uv run digisearch serve --reload           # web app at http://127.0.0.1:8000 (dev auto-reload)
-uv run digisearch import-catalog           # seed PartPilot DB from miniMRP (uses settings minimrp_path)
 ```
 
 There is no linter/formatter configured. `requirements.txt` exists but `pyproject.toml` + `uv.lock`
@@ -87,8 +86,9 @@ This is the heart of both products. `resolve_bom()` → `resolve_line()` per lin
    (`config/device_lookup.yaml`), and builds a search query + `PartSpec`. This is the no-API,
    `--dry-run` path.
 2. Lines too under-specified to resolve (no parseable value/MPN) short-circuit to `Status.MANUAL`.
-3. **miniMRP stock pre-check** (if a stock index is loaded): if free stock covers the build, mark
-   `IN_STOCK` and skip the API entirely (saves rate-limited quota).
+3. **Own-stock pre-check** (web flows only): the resolver builds a stock index from PartPilot's own
+   catalog (`catalog/stock_index.py` → generic matcher in `digisearch/stock.py`) and, if free stock
+   covers the build, marks `IN_STOCK` and skips the API entirely. A bare CLI run has no DB → skipped.
 4. Search Digi-Key (`Searcher` protocol). **Mouser is consulted only when Digi-Key is weak**
    (no/low-confidence match, or DK best is out of stock) and wins only if it out-scores DK.
 5. **`match/score.py` `rank()`** scores candidates on value/package/stock/lifecycle/type
@@ -119,8 +119,8 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   Conventional file layout per feature: `feature.py`, `router.py`, `repo.py` (all SQL — raw
   sqlite3, no ORM), `migrations.py`, `templates/`.
 - **Migrations** are ordered `Migration(version, name, sql)` per feature, tracked in
-  `schema_migrations` keyed by `(feature, version)`. They run on every startup and on
-  `import-catalog`; only unseen ones apply. **Never edit a shipped migration — add a new one.**
+  `schema_migrations` keyed by `(feature, version)`. They run on every startup; only unseen ones
+  apply. **Never edit a shipped migration — add a new one.**
 - **Routers depend only on `web/core/deps.py`**, not on `create_app`. Get platform services from
   `request.app.state` (`store`, `registry`, `database`, `templates`, `jobs_dir`). Gate actions with
   `require_role(request, roles)` / `require_user(request)`.
@@ -129,14 +129,17 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   greyed placeholder nav entries via `make_placeholder()`.
 - DB uses WAL mode (concurrent readers + single writer) for multi-user LAN access.
 
-### miniMRP as the system of record (for now)
+### PartPilot is the system of record (miniMRP decommissioned)
 
-PartPilot's SQLite is seeded from [miniMRP](https://minimrp.com/) (a Microsoft Access DB read via
-`mdbtools`). `import-catalog` upserts on a stored `minimrp_id` so it's **safe to re-run** during the
-dual-run period — miniMRP stays authoritative while features migrate the data in. Importers live in
-each owning feature (`catalog/importer.py` parts/suppliers/stock, `assemblies/importer.py` BOM tree
-from `tblusedin`, `contacts/importer.py` address books). Pricing gotcha: miniMRP's `PriceEach` is
-per-reel (per `QtyPerUOM`); per-piece price is `PriceEach / QtyPerUOM`.
+PartPilot's SQLite was originally seeded from [miniMRP](https://minimrp.com/) (a Microsoft Access DB
+read via `mdbtools`), but miniMRP has been **retired (2026-07-19)** and PartPilot is now
+authoritative. All runtime ties are gone: the mdb reader (`digisearch/minimrp/`), the
+`import-catalog` command, the Setup → Import screen, and the per-feature mdb wrappers were removed.
+What remains is inert: the `minimrp_id` columns (kept as idempotency keys / historical source ids)
+and the pure bulk-load helpers (`catalog/importer.py:import_tables`,
+`assemblies/importer.py:import_bom_rows`, `contacts/importer.py:import_contact_rows`) — these read
+nothing external and now serve only as test seeding utilities. The resolver's stock pre-check reads
+our own catalog (`catalog/stock_index.py`).
 
 ### External integrations
 
@@ -149,7 +152,7 @@ via the **Setup & Tools** feature (admin only) and `.env`. Tests mock them.
   (optional — blank disables Mouser), `DIGIKEY_SANDBOX`, locale vars. Loaded via
   `config.py` (`DigiKeyCredentials.from_env`, `MouserCredentials.from_env`).
 - **Settings** (`config/settings.yaml`, git-ignored; copy from `settings.example.yaml`) hold
-  operational defaults (`minimrp_path`, `build_qty`, `currency`, `reel_threshold`, match `weights`).
+  operational defaults (`build_qty`, `currency`, `reel_threshold`, match `weights`).
   **CLI flags always override the settings file**, which overrides built-in defaults — see how
   `cli.py resolve()` resolves each value.
 - `config/column_mappings.yaml` (BOM column aliases) and `config/device_lookup.yaml` (device→MPN/query

@@ -71,7 +71,6 @@ class MatchWeights(BaseModel):
 
 class Settings(BaseModel):
     # --- Operational defaults (overridden by CLI flags when given) ---
-    minimrp_path: str | None = None  # default for --check-stock
     build_qty: int = 1  # default for --build-qty
     currency: str | None = None  # default for --currency (else .env locale currency)
     output_dir: str | None = None  # where to write reports (default: next to the input)

@@ -1,5 +1,5 @@
 from digisearch.config import Settings
-from digisearch.minimrp.reader import StockIndex, StockItem, _parse_name
+from digisearch.stock import StockIndex, StockItem, parse_value
 from digisearch.models import BomLine, CompType, Status
 from digisearch.pipeline import resolve_line
 
@@ -27,8 +27,8 @@ def _index():
 
 
 def test_parse_name_value_and_package():
-    assert _parse_name("0u1/16V/10%/0402", CompType.CAPACITOR) == (1e-7, "0402")
-    assert _parse_name("100K/1%/0.0625W/0402", CompType.RESISTOR)[1] == "0402"
+    assert parse_value("0u1/16V/10%/0402", CompType.CAPACITOR) == (1e-7, "0402")
+    assert parse_value("100K/1%/0.0625W/0402", CompType.RESISTOR)[1] == "0402"
 
 
 def test_match_mpn_and_param():
@@ -117,14 +117,14 @@ def test_mpn_stem_rejects_digit_run_without_separator():
 # --- crystals: generic frequency -> stocked MPN ---
 
 def test_parse_name_crystal_frequency_and_package():
-    v, p = _parse_name(
+    v, p = parse_value(
         "12MHz Crystal Oscillator 12pF ±10ppm ±20ppm SMD3225-4P Crystals ROHS", CompType.CRYSTAL
     )
     assert v == 12e6 and p == "3225"
     # frequency from the description when ItemName is empty
-    assert _parse_name("", CompType.CRYSTAL, "CRYSTAL 32.7680KHZ 9PF SMD")[0] == 32768.0
+    assert parse_value("", CompType.CRYSTAL, "CRYSTAL 32.7680KHZ 9PF SMD")[0] == 32768.0
     # outline from spelled-out dimensions
-    v3, p3 = _parse_name("Crystal, 26 MHz, SMD, 3.2mm x 2.5mm, 10 pF", CompType.CRYSTAL)
+    v3, p3 = parse_value("Crystal, 26 MHz, SMD, 3.2mm x 2.5mm, 10 pF", CompType.CRYSTAL)
     assert v3 == 26e6 and p3 == "3225"
 
 

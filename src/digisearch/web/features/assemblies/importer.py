@@ -1,14 +1,11 @@
-"""Import miniMRP's BOM tree (tblusedin) into ``bom_lines``.
+"""Bulk load of a BOM tree into ``bom_lines``, over already-parsed ``usedin`` row dicts.
 
-Run after the catalog import (parts must exist so ParentID/ChildID can map via the stored
-``parts.minimrp_id``). Upserts on ``minimrp_id`` so it is re-runnable for dual-run.
+``import_bom_rows`` maps ParentID/ChildID via a caller-supplied ``{minimrp_id: parts.id}`` map and
+upserts keyed on ``minimrp_id`` (the legacy source id, kept purely as an idempotency key). It reads
+nothing external. (The miniMRP mdb reader that used to feed it was removed with the decommission.)
 """
 
 from __future__ import annotations
-
-from pathlib import Path
-
-from digisearch.minimrp.reader import export_table
 
 from ...core.db import Database
 
@@ -59,10 +56,3 @@ def import_bom_rows(db: Database, *, parts_map: dict[int, int], usedin: list[dic
     return {"bom_lines": n, "skipped": skipped}
 
 
-def import_boms(db: Database, minimrp_path: str | Path) -> dict[str, int]:
-    with db.connect() as conn:
-        parts_map = {
-            row["minimrp_id"]: row["id"]
-            for row in conn.execute("SELECT id, minimrp_id FROM parts WHERE minimrp_id IS NOT NULL")
-        }
-    return import_bom_rows(db, parts_map=parts_map, usedin=export_table(minimrp_path, "tblusedin"))

@@ -1,24 +1,25 @@
-"""Read a miniMRP Access (.mdb) database and index its stock for matching.
+"""A generic stock index for BOM matching — supplier- and source-agnostic.
 
-miniMRP stores its data in a Microsoft Access (JET) file (``Data/mrp5data``). The
-numeric columns are Access Decimal, which only ``mdbtools`` decodes reliably, so we
-shell out to ``mdb-export``. Install it once with ``sudo apt install mdbtools``.
+Answers, for a BOM line, "do we already have this in stock?" by matching on:
+  * MPN, exact or a fuller stem (``MBR120`` → stocked ``MBR120LSF``),
+  * a passive's value + package (generic ``0.1uF 0402`` → a stocked 0402 100 nF part),
+  * a crystal's frequency (± tight tolerance), preferring the same outline.
+
+The index is populated by a *builder* that knows a particular stock source (PartPilot's own
+catalog, historically miniMRP). This module holds only the matching logic + the value/notation
+parsing shared by every builder; see ``web/features/catalog/stock_index.py`` for the PartPilot one.
 """
 
 from __future__ import annotations
 
-import csv
-import io
 import re
-import shutil
-import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from ..models import CompType
-from ..spec.units import extract_frequency, parse_rkm_value
+from .models import CompType
+from .spec.units import extract_frequency, parse_rkm_value
 
+# Category label → component type, so a builder can classify a stock row for value matching.
 _CATEGORY = {
     "RESISTOR": CompType.RESISTOR,
     "CAPACITOR": CompType.CAPACITOR,
@@ -32,6 +33,11 @@ _CRYSTAL_TOL = 0.005  # crystals must match frequency tightly (0.5%)
 # Common SMD crystal outline codes (length/width in tenths of a mm), e.g. 3225 = 3.2 x 2.5 mm.
 _CRYSTAL_CODES = {"1610", "1612", "2012", "2016", "2520", "3215", "3225", "5032", "6035", "7050"}
 _CRYSTAL_DIMS = re.compile(r"(\d\.\d)\s*(?:mm)?\s*[x×]\s*(\d\.\d)\s*mm?", re.IGNORECASE)
+
+
+def comp_type_for_category(category: str | None) -> CompType:
+    """Map a stock row's category label to a CompType (OTHER when unrecognised)."""
+    return _CATEGORY.get((category or "").upper(), CompType.OTHER)
 
 
 def _norm(text: str | None) -> str:
@@ -197,12 +203,12 @@ class StockIndex:
         return best
 
 
-def _parse_name(
+def parse_value(
     name: str, comp_type: CompType, description: str = ""
 ) -> tuple[float | None, str | None]:
-    """Extract (value_si, package) from a miniMRP ItemName like '10uF/10V/20%/0402'.
+    """Extract (value_si, package) from a value string like '10uF/10V/20%/0402'.
 
-    Crystals carry their frequency + outline in free text (ItemName/ItemDescription), e.g.
+    Crystals carry their frequency + outline in free text (name/description), e.g.
     '12MHz Crystal 12pF SMD3225-4P', so they are parsed from the combined text instead.
     """
     if comp_type == CompType.CRYSTAL:
@@ -214,57 +220,3 @@ def _parse_name(
     if comp_type in (CompType.RESISTOR, CompType.CAPACITOR, CompType.INDUCTOR) and tokens:
         value_si = parse_rkm_value(tokens[0], comp_type)
     return value_si, package
-
-
-def _to_float(text: str | None) -> float:
-    try:
-        return float(text) if text not in (None, "") else 0.0
-    except ValueError:
-        return 0.0
-
-
-def export_table(db_path: str | Path, table: str) -> list[dict[str, str]]:
-    """Export one miniMRP table to a list of row dicts via ``mdb-export``."""
-    db_path = Path(db_path)
-    if not db_path.exists():
-        raise FileNotFoundError(f"miniMRP database not found: {db_path}")
-    if shutil.which("mdb-export") is None:
-        raise RuntimeError(
-            "mdb-export not found. Install mdbtools (e.g. `sudo apt install mdbtools`)."
-        )
-    out = subprocess.run(
-        ["mdb-export", str(db_path), table],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    return list(csv.DictReader(io.StringIO(out)))
-
-
-def read_stock_items(db_path: str | Path) -> list[StockItem]:
-    items: list[StockItem] = []
-    for row in export_table(db_path, "tblstockitems"):
-        category = (row.get("Category") or "").upper()
-        comp_type = _CATEGORY.get(category, CompType.OTHER)
-        value_si, package = _parse_name(
-            row.get("ItemName", ""), comp_type, row.get("ItemDescription", "")
-        )
-        items.append(
-            StockItem(
-                item_id=int(_to_float(row.get("ItemID"))),
-                master_pno=(row.get("MasterPNo") or "").strip(),
-                mfr_pno=(row.get("MfrPNo") or "").strip(),
-                name=(row.get("ItemName") or "").strip(),
-                description=(row.get("ItemDescription") or "").strip(),
-                category=category,
-                comp_type=comp_type,
-                value_si=value_si,
-                package=package,
-                on_hand=_to_float(row.get("TotalQty")),
-                allocated=_to_float(row.get("TotalAllocQty")),
-                on_order=_to_float(row.get("TotalOnOrderQty")),
-            )
-        )
-    return items
-
-
-def load_stock_index(db_path: str | Path) -> StockIndex:
-    return StockIndex.build(read_stock_items(db_path))

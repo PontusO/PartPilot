@@ -9,7 +9,7 @@ from typing import Protocol
 from .config import Settings
 from .models import BomLine, Candidate, CompType, LineKind, PartSpec, ResolvedLine, Status
 from .match.score import rank
-from .minimrp.reader import StockIndex, StockItem
+from .stock import StockIndex, StockItem
 from .purchasing import decide_packaging
 from .spec.classify import classify, looks_like_mpn
 from .spec.lookup import LookupRule, match_lookup, render

@@ -108,7 +108,7 @@ class Candidate(BaseModel):
 class Status(str, Enum):
     RESOLVED = "resolved"  # confident automatic pick
     REVIEW = "review"  # picked but low confidence -> flag
-    IN_STOCK = "in_stock"  # already covered by miniMRP stock; no purchase needed
+    IN_STOCK = "in_stock"  # already covered by our own free stock; no purchase needed
     NOT_FOUND = "not_found"  # searched but nothing matched
     MANUAL = "manual"  # under-specified (no value/MPN) -> can't auto-resolve, needs a human
     DNP = "dnp"
@@ -128,7 +128,7 @@ class ResolvedLine(BaseModel):
     confidence: float = 0.0
     status: Status = Status.NOT_FOUND
     flag_reason: str | None = None
-    # miniMRP stock cross-reference (populated only when --check-stock is used)
+    # Our own catalog stock cross-reference (populated when the stock pre-check runs)
     stock_on_hand: float | None = None
     stock_free: float | None = None
     need_to_buy: int | None = None

@@ -414,7 +414,8 @@ async def import_resolve(request: Request, part_id: int):
     bom_path = jobs_dir / f"asmimp-{job_id}-{Path(upload.filename).name}"
     bom_path.write_bytes(await upload.read())
     try:
-        run = await run_in_threadpool(resolve_bom_file, bom_path, build_qty=1)
+        run = await run_in_threadpool(
+            resolve_bom_file, bom_path, build_qty=1, database=request.app.state.database)
     except Exception as exc:  # missing creds, bad file, etc.
         return templates.TemplateResponse(
             request, "assembly_import.html", {"a": a, "error": f"Resolve failed: {exc}"},

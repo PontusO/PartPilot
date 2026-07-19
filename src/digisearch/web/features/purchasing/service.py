@@ -23,6 +23,7 @@ from digisearch.models import ResolvedLine, Status
 from digisearch.pipeline import resolve_bom
 from digisearch.report.excel import write_report
 from digisearch.spec.lookup import load_lookup
+from digisearch.web.core.db import Database
 
 
 @dataclass
@@ -67,12 +68,15 @@ def resolve_bom_file(
     reel_threshold: float | None = None,
     sandbox: bool = False,
     settings_path: str | Path | None = None,
+    database: Database | None = None,
 ) -> ResolvedRun:
-    """Load and resolve a BOM file against stock + Digi-Key/Mouser.
+    """Load and resolve a BOM file against our own stock + Digi-Key/Mouser.
 
     This is the reusable heart of the purchasing tool: both the purchasing flow and the
     assembly BOM import call it, so resolution changes propagate to both. Blocking and
-    network-bound — run it in a threadpool from async routes.
+    network-bound — run it in a threadpool from async routes. Pass ``database`` to check
+    PartPilot's own catalog stock first (a line covered by free stock skips the distributor
+    lookup); omit it to always query the distributors.
     """
     bom_path = Path(bom_path)
     settings = Settings.load(settings_path)
@@ -85,18 +89,14 @@ def resolve_bom_file(
     reel_threshold = settings.reel_threshold if reel_threshold is None else reel_threshold
 
     warnings: list[str] = []
+    # Check our own stock first: a line already covered by free catalog stock is marked IN_STOCK and
+    # skips the distributor lookup. Needs the PartPilot database; without it (a bare CLI run) the
+    # stock check is simply skipped and every line goes to the distributors.
     stock = None
-    if check_stock and settings.minimrp_path:
-        stock_path = Path(settings.minimrp_path)
-        if stock_path.exists():
-            try:
-                from digisearch.minimrp.reader import load_stock_index
+    if check_stock and database is not None:
+        from digisearch.web.features.catalog.stock_index import build_stock_index
 
-                stock = load_stock_index(stock_path)
-            except Exception as exc:  # missing mdbtools etc. shouldn't kill the run
-                warnings.append(f"Stock check skipped: {exc}")
-        else:
-            warnings.append(f"Stock check skipped: {stock_path} not found")
+        stock = build_stock_index(database)
 
     creds = DigiKeyCredentials.from_env(sandbox=sandbox)
     if currency:
@@ -131,6 +131,7 @@ def run_purchase(
     reel_threshold: float | None = None,
     sandbox: bool = False,
     settings_path: str | Path | None = None,
+    database: Database | None = None,
 ) -> PurchaseResult:
     """Resolve ``bom_path`` (via :func:`resolve_bom_file`) and write the report + cart CSVs."""
     bom_path = Path(bom_path)
@@ -140,6 +141,7 @@ def run_purchase(
     run = resolve_bom_file(
         bom_path, build_qty=build_qty, currency=currency, check_stock=check_stock,
         reel_threshold=reel_threshold, sandbox=sandbox, settings_path=settings_path,
+        database=database,
     )
 
     report_path = out_dir / f"{bom_path.stem}-resolved.xlsx"

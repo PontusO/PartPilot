@@ -1,17 +1,12 @@
-"""One-time / repeatable import of the miniMRP catalog into PartPilot's database.
+"""Bulk load logic for the catalog, over already-parsed row dicts.
 
-``import_tables`` is pure load logic over already-parsed row dicts (so it's testable
-without mdbtools); ``import_from_minimrp`` reads the Access tables via the shared
-``mdb-export`` helper and calls it. Everything upserts on ``minimrp_id`` so re-running
-re-syncs rather than duplicating — the basis for keeping miniMRP authoritative (dual-run)
-while we build confidence in the new store.
+``import_tables`` upserts suppliers / parts / part-suppliers / stock keyed by ``minimrp_id`` (the
+legacy source id, retained purely as an idempotency key). It reads nothing external — callers pass
+row dicts — so it stays a plain, testable bulk-insert helper. (The miniMRP mdb reader that used to
+feed it was removed when miniMRP was decommissioned.)
 """
 
 from __future__ import annotations
-
-from pathlib import Path
-
-from digisearch.minimrp.reader import export_table
 
 from ...core.db import Database
 
@@ -148,14 +143,3 @@ def import_tables(
         conn.commit()
     return {"suppliers": len(sup_map), "parts": len(part_map), "locations": len(loc_map),
             "part_suppliers": ps, "part_stock": st}
-
-
-def import_from_minimrp(db: Database, minimrp_path: str | Path) -> dict[str, int]:
-    """Read the miniMRP Access DB and upsert its catalog into PartPilot."""
-    return import_tables(
-        db,
-        suppliers=export_table(minimrp_path, "tblsupaddresses"),
-        parts=export_table(minimrp_path, "tblstockitems"),
-        item_suppliers=export_table(minimrp_path, "tblitemsupplier"),
-        item_locations=export_table(minimrp_path, "tblitemlocation"),
-    )

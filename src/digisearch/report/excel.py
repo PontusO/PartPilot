@@ -12,7 +12,7 @@ from ..models import ResolvedLine, Status
 
 HEADERS = [
     "RefDes", "Qty/board", "Total qty",
-    "In stock (free)", "Need to buy", "miniMRP match",
+    "In stock (free)", "Need to buy", "Stock match",
     "Original value", "Device", "Package", "Kind", "Status", "Confidence",
     "Supplier", "Manufacturer", "MPN", "Supplier #", "Lifecycle", "Supplier stock",
     "Unit price (q1)", "Packaging", "Order qty", "Order unit price", "Line cost",

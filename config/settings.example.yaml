@@ -5,7 +5,6 @@
 # --- Operational defaults (so you don't retype them every run) ---
 
 # miniMRP database to check stock against (same as --check-stock). Leave unset to disable.
-# minimrp_path: "/home/you/Dropbox/Invector/miniMRP/Data/mrp5data"
 
 # build_qty: 100          # default number of boards (--build-qty)
 # currency: SEK           # default pricing currency (--currency); else .env locale currency

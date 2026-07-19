@@ -126,40 +126,6 @@ def serve(
             console.print(f"[dim]Removed scratch database at {scratch_dir}[/]")
 
 
-@app.command(name="import-catalog")
-def import_catalog(
-    minimrp: Optional[Path] = typer.Option(
-        None, "--from", help="miniMRP database (Data/mrp5data). Defaults to settings minimrp_path."
-    ),
-):
-    """Import the miniMRP catalog (parts, suppliers, stock) into PartPilot's database."""
-    settings = Settings.load(None)
-    src = minimrp or (Path(settings.minimrp_path) if settings.minimrp_path else None)
-    if not src or not Path(src).exists():
-        console.print(
-            "[red]Error:[/] miniMRP database not found. Pass --from or set minimrp_path in settings."
-        )
-        raise typer.Exit(1)
-
-    from .web.core.paths import db_path
-    from .web.features.assemblies.importer import import_boms
-    from .web.features.catalog.importer import import_from_minimrp
-    from .web.features.contacts.importer import import_contacts
-
-    db = _open_live_db()
-
-    console.print(f"Importing catalog from [bold]{src}[/] → {db_path()}")
-    stats = import_from_minimrp(db, src)
-    stats.update(import_boms(db, src))  # assembly BOM structure (tblusedin)
-    stats.update(import_contacts(db, src))  # suppliers/customers/misc address books
-    table = Table(title="Imported")
-    table.add_column("Table")
-    table.add_column("Rows", justify="right")
-    for key, value in stats.items():
-        table.add_row(key, str(value))
-    console.print(table)
-
-
 @app.command(name="import-article-register")
 def import_article_register(
     xlsx: Path = typer.Argument(..., help="The Artikelregister .xlsx workbook to import."),
@@ -321,11 +287,6 @@ def resolve(
     mapping: Optional[Path] = typer.Option(None, "--map", help="Column-mapping YAML override."),
     lookup_file: Optional[Path] = typer.Option(None, "--lookup", help="Device-lookup YAML override."),
     settings_file: Optional[Path] = typer.Option(None, "--settings", help="Settings YAML override."),
-    check_stock: Optional[Path] = typer.Option(
-        None, "--check-stock", exists=True,
-        help="miniMRP database (Data/mrp5data); skips buying parts already in stock. "
-             "Defaults to settings 'minimrp_path' if set.",
-    ),
     reel_threshold: Optional[float] = typer.Option(
         None, "--reel-threshold",
         help="Buy a full reel when the whole reel costs under this (locale currency). "
@@ -351,17 +312,6 @@ def resolve(
     build_qty = build_qty if build_qty is not None else settings.build_qty
     currency = currency or settings.currency
     reel_threshold = settings.reel_threshold if reel_threshold is None else reel_threshold
-    stock_path = check_stock or (Path(settings.minimrp_path) if settings.minimrp_path else None)
-
-    stock = None
-    if stock_path:
-        if not stock_path.exists():
-            console.print(f"[red]Error:[/] miniMRP database not found: {stock_path}")
-            raise typer.Exit(code=1)
-        from .minimrp.reader import load_stock_index
-
-        stock = load_stock_index(stock_path)
-        console.print(f"Loaded [bold]{len(stock.items)}[/] stock items from {stock_path.name}")
 
     if dry_run:
         _dry_run(lines, settings, lookup)
@@ -386,7 +336,7 @@ def resolve(
                   console=console) as progress:
         progress.add_task(f"Resolving against Digi-Key ({creds.locale_currency})…", total=None)
         resolved = resolve_bom(
-            lines, client, settings, build_qty, lookup, stock, mouser, reel_threshold
+            lines, client, settings, build_qty, lookup, None, mouser, reel_threshold
         )
 
     if output:

@@ -45,7 +45,7 @@ def upload_page(request: Request):
             "can_purchase": user.role in PURCHASE_ROLES,
             "default_build_qty": settings.build_qty,
             "default_currency": settings.currency or "",
-            "stock_available": bool(settings.minimrp_path),
+            "stock_available": True,  # we always check our own catalog stock first
         },
     )
 
@@ -78,7 +78,8 @@ async def run(
 
     try:
         result = await run_in_threadpool(
-            run_purchase, bom_path, job_dir, build_qty=build_qty, check_stock=check_stock
+            run_purchase, bom_path, job_dir, build_qty=build_qty, check_stock=check_stock,
+            database=request.app.state.database,
         )
     except Exception as exc:  # surface engine/credential errors to the user
         return templates.TemplateResponse(

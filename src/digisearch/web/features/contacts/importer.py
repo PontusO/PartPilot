@@ -1,14 +1,10 @@
-"""Import miniMRP's address books (supplier/customer/misc) into the contacts table."""
+"""Bulk load of address-book rows into the contacts table (over already-parsed row dicts)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from digisearch.minimrp.reader import export_table
-
 from ...core.db import Database
 
-# (miniMRP table, contact kind, source tag)
+# (legacy source table, contact kind, source tag) — retained for reference / row-source tagging.
 _SOURCES = [
     ("tblsupaddresses", "supplier", "sup"),
     ("tblcusaddresses", "customer", "cus"),
@@ -67,10 +63,3 @@ def import_contact_rows(db: Database, *, kind: str, source: str, rows: list[dict
     return len(rows)
 
 
-def import_contacts(db: Database, minimrp_path: str | Path) -> dict[str, int]:
-    """Import all three miniMRP address books into the contacts table."""
-    total = 0
-    for table, kind, source in _SOURCES:
-        total += import_contact_rows(db, kind=kind, source=source,
-                                     rows=export_table(minimrp_path, table))
-    return {"contacts": total}
