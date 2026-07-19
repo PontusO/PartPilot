@@ -25,7 +25,7 @@
           <td>{{ r.part_no or '#' ~ r.part_id }}</td>
           <td>{% if r.value %}<code>{{ r.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
           <td>{% for m in r.missing %}<span class="badge warn">{{ m }}</span> {% endfor %}</td>
-          <td><a href="/catalog/{{ r.part_id }}/edit" target="_blank" rel="noopener">Edit ↗</a></td>
+          <td><button type="button" class="ghost" onclick="window.open('/catalog/{{ r.part_id }}/edit', '_blank', 'noopener')">Edit ↗</button></td>
         </tr>
         {% endfor %}
       </tbody>

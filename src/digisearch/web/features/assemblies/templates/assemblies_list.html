@@ -7,12 +7,13 @@
     <div class="card"><b>{{ summary.assemblies }}</b><small>assemblies</small></div>
     <div class="card"><b>{{ summary.lines }}</b><small>BOM lines</small></div>
     <div class="card"><b>{{ summary.empty }}</b><small>without a BOM</small></div>
-    {% if can_edit %}
-    <a href="/assemblies/new" style="margin-left:auto; display:flex; align-items:center;
-       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
-       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Assy</a>
-    {% endif %}
   </div>
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a class="act-btn" href="/assemblies/new">New Assy</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/assemblies"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">

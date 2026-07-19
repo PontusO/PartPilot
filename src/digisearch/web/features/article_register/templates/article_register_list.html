@@ -61,7 +61,7 @@
         {% for e in entries %}
         <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
           <td>
-            <a href="/article-register/{{ e.running_no }}"
+            <a class="code" href="/article-register/{{ e.running_no }}"
                {% if e.retired %}style="text-decoration:line-through;"{% endif %}>
               {{ e.code or ('%05d'|format(e.running_no)) }}</a>
             {% if not e.prefix %}<span class="badge muted">reserved</span>{% endif %}

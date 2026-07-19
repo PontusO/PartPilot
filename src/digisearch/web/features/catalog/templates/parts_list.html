@@ -8,12 +8,13 @@
     <div class="card"><b>{{ summary.categories }}</b><small>categories</small></div>
     <div class="card"><b>{{ summary.below_min }}</b><small>below min</small></div>
     <div class="card"><b>{{ summary.normally_stocked }}</b><small>normally stocked</small></div>
-    {% if can_add %}
-    <a href="/catalog/new" style="margin-left:auto; display:flex; align-items:center;
-       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
-       text-decoration:none; border-radius:9px; padding:0 1.3rem;">+ Add component</a>
-    {% endif %}
   </div>
+
+  {% if can_add %}
+  <div class="act-bar">
+    <a class="act-btn" href="/catalog/new">+ Add component</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/catalog"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">
@@ -51,14 +52,14 @@
           <th>Part No</th><th>Value</th><th>Category</th><th>Kind</th><th>Stocked</th>
           <th class="num">Free</th><th class="num">On hand</th><th class="num">Min</th>
           <th>Supplier</th><th>Supplier P/N</th><th class="num">Unit (SEK)</th>
-          <th class="num">Webshop (SEK)</th>
+          <th class="num">Webshop (SEK)</th>{% if can_add %}<th></th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for p in parts %}
         <tr>
           <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a></td>
-          <td><a href="/catalog/{{ p.id }}/edit" target="_blank" rel="noopener">{{ p.value or '' }}</a></td>
+          <td>{{ p.value or '' }}</td>
           <td>{{ p.category or '' }}</td>
           <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>
           <td>{% if p.normally_stocked %}<span class="badge stock">✓</span>{% endif %}</td>
@@ -69,9 +70,10 @@
           <td>{{ p.supplier_pno or '' }}</td>
           <td class="num">{% if p.unit_price is not none %}{{ "%.4f"|format(p.unit_price) }}{% endif %}</td>
           <td class="num">{% if p.external_price is not none %}{{ "%.2f"|format(p.external_price) }}{% endif %}</td>
+          {% if can_add %}<td><button type="button" class="ghost" onclick="location.href='/catalog/{{ p.id }}/edit'">Edit</button></td>{% endif %}
         </tr>
         {% endfor %}
-        {% if not parts %}<tr><td colspan="12" class="note">No parts match.</td></tr>{% endif %}
+        {% if not parts %}<tr><td colspan="{{ 13 if can_add else 12 }}" class="note">No parts match.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>

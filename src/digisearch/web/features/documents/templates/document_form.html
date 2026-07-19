@@ -37,8 +37,8 @@
     </select>
     {% endif %}
 
-    <label for="title">Title</label>
-    <input id="title" name="title" type="text" value="{{ values.title }}"
+    <label for="title">Title <span class="note">(required)</span></label>
+    <input id="title" name="title" type="text" value="{{ values.title }}" required
            placeholder="e.g. Motherboard schematic">
 
     <label for="doc_type">Type <span class="note">(optional)</span></label>

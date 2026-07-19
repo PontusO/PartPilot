@@ -11,9 +11,7 @@
       {% if part.is_document %}<span class="badge muted" title="Internal document — a deliverable, not a stocked part">document</span>{% endif %}
       {% if part.exclude_from_bom_cost %}<span class="badge muted" title="Cost not counted in assembly BOM totals">no BOM cost</span>{% endif %}</h1>
     {% if can_edit %}
-    <a href="/catalog/{{ part.id }}/edit" style="background:var(--accent); color:#fff;
-       font-weight:600; text-decoration:none; border-radius:7px; padding:.55rem 1.1rem;
-       white-space:nowrap;">Edit</a>
+    <a class="act-btn" href="/catalog/{{ part.id }}/edit">Edit</a>
     {% endif %}
   </div>
   <p class="note">{{ part.value or '' }}{% if part.description %} — {{ part.description }}{% endif %}</p>

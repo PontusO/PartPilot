@@ -15,8 +15,8 @@
 {% endmacro %}
 {% block content %}
 <div class="panel">
-  <p style="margin-bottom:.4rem;"><a href="/article-register">← Article Register</a></p>
-  <h1>Running number <span style="font-family:ui-monospace,monospace;">{{ '%05d'|format(running_no) }}</span></h1>
+  <p class="note"><a href="/article-register">← Article Register</a></p>
+  <h1>Running number <span class="code">{{ '%05d'|format(running_no) }}</span></h1>
   <p class="note">{{ family|length }} number{{ '' if family|length == 1 else 's' }} in this family.</p>
 
   {% if can_edit %}

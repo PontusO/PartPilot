@@ -8,12 +8,13 @@
     <div class="card"><b>{{ summary.total }}</b><small>orders</small></div>
     <div class="card"><b>{{ summary.open }}</b><small>open</small></div>
     <div class="card"><b>{{ "%.0f"|format(summary.backlog) }}</b><small>backlog value</small></div>
-    {% if can_edit %}
-    <a href="/customer-orders/new" style="margin-left:auto; display:flex; align-items:center;
-       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
-       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Order</a>
-    {% endif %}
   </div>
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a class="act-btn" href="/customer-orders/new">New Order</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/customer-orders"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">

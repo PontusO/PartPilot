@@ -49,7 +49,7 @@
             {% for s in suspects %}
             <tr>
               <td class="num"><input type="checkbox" name="pick" value="{{ s.id }}"></td>
-              <td><a href="/catalog/{{ s.id }}/edit" target="_blank" rel="noopener">{{ s.part_no }}</a></td>
+              <td><a href="/catalog/{{ s.id }}" target="_blank" rel="noopener">{{ s.part_no }}</a></td>
               <td class="note">{{ s.value or '' }}</td>
               <td class="note">
                 {% for sup in s.suppliers %}{{ sup.supplier or '?' }}: <code>{{ sup.supplier_pno }}</code><br>{% endfor %}

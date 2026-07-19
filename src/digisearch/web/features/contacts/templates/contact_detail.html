@@ -55,10 +55,9 @@
   {% if c.notes %}<p class="note" style="margin-top:.6rem;">{{ c.notes }}</p>{% endif %}
 
   {% if can_edit %}
-  <div style="margin-top:1rem; display:flex; gap:.7rem; flex-wrap:wrap;">
-    <a href="/contacts/{{ c.id }}/edit" style="text-decoration:none; background:var(--accent); color:#fff;
-       font-weight:600; border-radius:7px; padding:.5rem 1rem;">Edit contact</a>
-    <button type="button" class="ghost" onclick="openAddr()">+ Add address</button>
+  <div class="act-bar" style="margin-top:1rem;">
+    <a class="act-btn" href="/contacts/{{ c.id }}/edit">Edit contact</a>
+    <button type="button" class="act-btn secondary" onclick="openAddr()">+ Add address</button>
   </div>
   {% endif %}
 

@@ -10,7 +10,7 @@ from .router import router
 feature = Feature(
     name="goods-receipts",
     router=router,
-    nav=NavItem(label="Goods Receipts", url="/goods-receipts", roles=None, icon="📦", order=46),
+    nav=NavItem(label="Goods Receipts", url="/goods-receipts", roles=None, icon="📥", order=46),
     migrations=[],
     template_dir=Path(__file__).parent / "templates",
 )

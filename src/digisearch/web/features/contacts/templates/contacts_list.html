@@ -8,12 +8,13 @@
     <div class="card"><b>{{ summary.suppliers }}</b><small>suppliers</small></div>
     <div class="card"><b>{{ summary.customers }}</b><small>customers</small></div>
     <div class="card"><b>{{ summary.other }}</b><small>other</small></div>
-    {% if can_edit %}
-    <a href="/contacts/new{% if kind %}?kind={{ kind }}{% endif %}" style="margin-left:auto;
-       display:flex; align-items:center; justify-content:center; background:var(--accent);
-       color:#fff; font-weight:600; text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Contact</a>
-    {% endif %}
   </div>
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a class="act-btn" href="/contacts/new{% if kind %}?kind={{ kind }}{% endif %}">New Contact</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/contacts"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">

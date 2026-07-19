@@ -12,12 +12,13 @@
     <div class="card"><b>{{ summary.allocated }}</b><small>planned</small></div>
     <div class="card"><b>{{ summary.issued }}</b><small>in WIP</small></div>
     <div class="card"><b>{{ summary.finished }}</b><small>finished</small></div>
-    {% if can_edit %}
-    <a href="/work-orders/new" style="margin-left:auto; display:flex; align-items:center;
-       justify-content:center; background:var(--accent); color:#fff; font-weight:600;
-       text-decoration:none; border-radius:9px; padding:0 1.3rem;">New Work Order</a>
-    {% endif %}
   </div>
+
+  {% if can_edit %}
+  <div class="act-bar">
+    <a class="act-btn" href="/work-orders/new">New Work Order</a>
+  </div>
+  {% endif %}
 
   <form method="get" action="/work-orders"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin-bottom:1rem;">

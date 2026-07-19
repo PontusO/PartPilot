@@ -173,6 +173,17 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `documents always excluded` on the exclude box), remembering the user's own choice so it returns
   when the forcing condition is removed. Reuse this tick-lock-hint-remember pattern for any pair of
   checkboxes where one implies the other.
+- **2026-07-19** — UI-consistency sweep bringing the older list/detail pages in line with this file.
+  (1) The **"New X"** button on every list page (Parts, Assemblies, Contacts, Customer/Work/Purchase
+  Orders) moved out of the `.cards` stat row into its own `.act-bar` below the cards, as an
+  `.act-btn` — no more inline-styled `<a>` jammed in with the numbers (cards are for numbers, actions
+  live in an action bar). The Part/Contact detail "Edit" links became `.act-btn` (was inline 7px).
+  (2) **No text-link row actions**: `parts_list` value cell is now plain text with a real per-row
+  `.ghost` **Edit** button in a trailing `can_add`-gated column; `assembly_import_result` and
+  `part_cleanup` no longer use text-link edits (a real button / a part-number hyperlink to the detail
+  page respectively). (3) New **`.code`** utility in `base.html` (`font-family:ui-monospace,…`) — use
+  it for internal codes (article/part numbers) instead of an inline `font-family`; first adopted on
+  the Article Register list + detail. (4) Documents form Title marked `(required)` + `required` attr.
 - **2026-07-15** — "Allocate & return" pattern: an inline `ghost` button next to the part-number
   field on Add-component / New-assembly jumps to the Article Register allocator (New Number /
   New Product) carrying a validated `return_to` path; on success the allocator redirects back to the
