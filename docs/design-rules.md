@@ -173,6 +173,13 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `documents always excluded` on the exclude box), remembering the user's own choice so it returns
   when the forcing condition is removed. Reuse this tick-lock-hint-remember pattern for any pair of
   checkboxes where one implies the other.
+- **2026-07-19** — Lifecycle-owned statuses in forms. A status that is set by an *action* (customer
+  order `shipped` by dispatch, `complete` by invoicing the last despatch, `cancelled` by Cancel) is
+  never offered in an edit-form dropdown: the form shows it as a fixed `badge muted` + a note ("set
+  by despatch / invoicing"), and only the hand-settable statuses (draft/confirmed) remain options.
+  Action buttons that require a state are hidden until it holds (Pack & ship appears only on a
+  confirmed order). Apply this pattern to any future status field whose transitions carry side
+  effects.
 - **2026-07-19** — UI-consistency sweep bringing the older list/detail pages in line with this file.
   (1) The **"New X"** button on every list page (Parts, Assemblies, Contacts, Customer/Work/Purchase
   Orders) moved out of the `.cards` stat row into its own `.act-bar` below the cards, as an
@@ -184,6 +191,25 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   page respectively). (3) New **`.code`** utility in `base.html` (`font-family:ui-monospace,…`) — use
   it for internal codes (article/part numbers) instead of an inline `font-family`; first adopted on
   the Article Register list + detail. (4) Documents form Title marked `(required)` + `required` attr.
+- **2026-07-19** — **Product = the Article Register family; documents are collected under it, not in
+  the BOM.** An assembly and its documents/parts share one running number (`98-NNNNN-1` assembly,
+  `54-NNNNN-x` drawings, `99-NNNNN-x` parts = family `NNNNN`). Document-class lines are zero-cost
+  *deliverables*: they live in the Documents feature (revision history, controlled files/GitHub
+  links) and are **never** BOM lines. The assembly detail page now shows a **Documents panel**
+  (below the BOM, above devmgmt) listing the family's documents — reached by parsing the running
+  number from the assembly's own part number (`_family_no` + guarded `family_documents` read) — with
+  a `＋ New document` `.act-btn.secondary` linking to `/documents/new?running_no=NNNNN`. File/link
+  kind badge follows the Documents convention (`stock`=file / `warn`=link). When the from-template
+  flow creates a product, the new-assembly "created" dialog now lists the documents alongside the
+  stub parts so they're never silently created. Reuse this "surface a family's documents by running
+  number" read for any other product-scoped view.
+  **Split lists, one per thing-kind:** on the Article Register family page a family is shown as two
+  tables — **Parts & assemblies** (98/99 lines) and **Documents** (50–59/95 lines) — a document-class
+  number appears ONLY under Documents, never in the items table (no more "same number in two lists").
+  The Documents table lists *every* document-class family line: materialised → "Edit/Open document";
+  allocated-but-empty → a `not created` tag + "Create document". The article-number management actions
+  (Edit/Duplicate/Retire/Delete) live alongside each row in whichever table it belongs to. General
+  rule: **group a product's rows by kind (physical/BOM vs deliverable), don't interleave them.**
 - **2026-07-15** — "Allocate & return" pattern: an inline `ghost` button next to the part-number
   field on Add-component / New-assembly jumps to the Article Register allocator (New Number /
   New Product) carrying a validated `return_to` path; on success the allocator redirects back to the

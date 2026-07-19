@@ -9,9 +9,13 @@
   </div>
   <p class="note">Goods Received Notes are raised when you receive a purchase order.</p>
 
-  <form method="get" action="/goods-receipts" style="display:flex; gap:.6rem; margin:1rem 0; max-width:420px;">
-    <input name="q" type="text" value="{{ q }}" placeholder="GRN no, advice no, supplier, PO…" style="flex:1;">
-    <button type="submit">Search</button>
+  <form method="get" action="/goods-receipts"
+        style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; margin:1rem 0;">
+    <div style="flex:1; min-width:220px;">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="GRN no, advice no, supplier, PO…">
+    </div>
+    <button type="submit">Filter</button>
     {% if q %}<a href="/goods-receipts" style="align-self:center;">clear</a>{% endif %}
   </form>
 

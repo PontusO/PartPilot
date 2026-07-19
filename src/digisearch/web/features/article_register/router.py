@@ -239,8 +239,11 @@ async def create(request: Request):
     except DuplicateNumber as exc:
         return _render_form(request, values=values, error=str(exc), status=400)
     if return_to:  # came from a create-part/assembly page — bounce back with the new code prefilled
-        return RedirectResponse(_return_url(return_to, part_no=article_code(prefix, running_no, suffix)),
-                                status_code=303)
+        # `desc` carries the product name the user just typed, so the create form's name/value field
+        # is seeded too (same param the from-template bounce uses).
+        return RedirectResponse(
+            _return_url(return_to, part_no=article_code(prefix, running_no, suffix), desc=product),
+            status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
 
@@ -438,13 +441,16 @@ async def from_template_apply(request: Request):
         return _render_apply(request, values=values, error=str(exc), status=400)
     # Document-class lines (drawings, specs, software) become document items, not parts — do this in
     # both the plain and the New-Assembly flows.
-    _create_stub_documents(db, running_no)
+    created_docs = _create_stub_documents(db, running_no)
     if return_to:  # came from New Assembly — materialise the family's parts, then bounce back
         code = _assembly_code_for(db, running_no)
         if code:
             created = _create_stub_parts(db, running_no, skip_code=code)
+            # Carry both what became BOM parts (``created``) and what became documents (``docs``) so
+            # the new-assembly screen can show the documents too — they're made but not added to the BOM.
             return RedirectResponse(
-                _return_url(return_to, part_no=code, desc=product, created=",".join(created)),
+                _return_url(return_to, part_no=code, desc=product,
+                            created=",".join(created), docs=",".join(created_docs)),
                 status_code=303)
     return RedirectResponse(f"/article-register/{running_no}", status_code=303)
 
@@ -456,16 +462,26 @@ def family_detail(request: Request, running_no: int):
     family = repo.get_family(db, running_no)
     if not family:
         return _not_found(request)
-    documents = repo.list_family_documents(db, running_no)
+    # A family splits into physical/BOM items (assembly + parts) and its deliverables (documents).
+    # Document-class lines live only under the Documents section — each carries its materialised
+    # document record (id/kind/rev), or None when the number is allocated but no document exists yet.
+    docs_by_code = {d["code"]: d for d in repo.list_family_documents(db, running_no)}
+    part_lines, doc_lines = [], []
+    for e in family:
+        if _is_document_line(e):
+            row = dict(e)
+            row["document"] = docs_by_code.get(e.get("code"))
+            doc_lines.append(row)
+        else:
+            part_lines.append(e)
     return request.app.state.templates.TemplateResponse(
         request, "article_register_detail.html",
         {
             "running_no": running_no,
-            "family": family,
+            "family": family,            # kept for the family-size count in the header
+            "part_lines": part_lines,    # assembly + component numbers → the items table
+            "doc_lines": doc_lines,      # document-class numbers → the Documents section (only here)
             "product": _family_product(family),
-            "documents": documents,
-            # code -> document id, so each family row can offer Create/Edit document for its own number.
-            "doc_ids_by_code": {d["code"]: d["id"] for d in documents},
             "groups": repo.prefixes_grouped(db),
             "can_edit": user.role in WRITE_ROLES,
             "can_delete": user.role in DELETE_ROLES,

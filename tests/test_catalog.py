@@ -523,3 +523,45 @@ def test_create_part_reuses_existing_supplier_by_name(db):
     )
     assert len(repo.suppliers(db)) == before  # matched case-insensitively, no duplicate
     assert repo.get_part(db, pid)["suppliers"][0]["supplier_name"] == "Digikey"
+
+
+def test_document_class_includes_95_software(db):
+    # 95 (software / source code) is a document class like 5x — flags forced on create.
+    assert repo.is_document_part_no("95-00001-1")
+    assert not repo.is_document_part_no("96-00001-1")
+    pid = repo.create_part(db, part={"part_no": "95-00001-1"}, supplier_lines=[])
+    p = repo.get_part(db, pid)
+    assert p["is_document"] is True and p["exclude_from_bom_cost"] is True
+
+
+def test_importer_flags_document_class_parts(db):
+    rows = PARTS + [{"ItemID": "500", "MasterPNo": "54-00007-1", "ItemName": "Drawing",
+                     "ItemDescription": "", "Category": "", "Type": "PART", "xCost": "",
+                     "MinQty": "0", "TotalQty": "0", "TotalAllocQty": "0", "TotalOnOrderQty": "0"}]
+    importer.import_tables(db, suppliers=SUPPLIERS, parts=rows,
+                           item_suppliers=ITEM_SUPPLIERS, item_locations=ITEM_LOCATIONS)
+    doc = repo.find_part_by_part_no(db, "54-00007-1")
+    p = repo.get_part(db, doc["id"])
+    assert p["is_document"] is True and p["exclude_from_bom_cost"] is True
+    normal = repo.find_part_by_part_no(db, "GRM155R61A106ME11D")
+    assert repo.get_part(db, normal["id"])["is_document"] is False
+
+
+def test_opening_stock_and_part_edit_go_through_the_ledger(db):
+    from digisearch.web.features.catalog import stock as cstock
+
+    pid = repo.create_part(db, part={"part_no": "L-1"}, supplier_lines=[],
+                           opening={"qty": 30, "bin": "A1"})
+    moves = cstock.movements_for_part(db, pid)
+    assert [m["mtype"] for m in moves] == ["OPENING"] and moves[0]["qty_after"] == 30
+    part = repo.get_part(db, pid)
+    assert part["total_qty"] == 30 and part["stock"][0]["bin"] == "A1"
+
+    # editing on-hand on the part form posts an ADJUST with the delta
+    repo.update_part(db, pid, part={"part_no": "L-1"}, supplier_lines=[], stock={"qty": 25})
+    moves = cstock.movements_for_part(db, pid)
+    assert moves[0]["mtype"] == "ADJUST" and moves[0]["qty_delta"] == -5
+    assert moves[0]["qty_after"] == 25 == repo.get_part(db, pid)["total_qty"]
+    # an unchanged qty posts nothing
+    repo.update_part(db, pid, part={"part_no": "L-1"}, supplier_lines=[], stock={"qty": 25})
+    assert len(cstock.movements_for_part(db, pid)) == 2

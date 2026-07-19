@@ -450,3 +450,18 @@ def test_cannot_receive_a_draft_then_place_first(db):
     repo.mark_ordered(db, po_id)
     with pytest.raises(ValueError):
         repo.mark_ordered(db, po_id)  # already ordered
+
+
+def test_receive_capped_at_outstanding(db):
+    import pytest as _pytest
+
+    p, asm, wo = _setup_shortage(db)
+    po_id = repo.create_pos_from_suggestions(db, {p: 30}, "u")[0]
+    repo.mark_ordered(db, po_id)
+    line_id = repo.get_po(db, po_id)["lines"][0]["id"]
+    with _pytest.raises(ValueError, match="exceeds the outstanding"):
+        repo.receive_po(db, po_id, {line_id: 31}, "u")      # 31 > 30 ordered
+    repo.receive_po(db, po_id, {line_id: 30}, "u")          # exactly outstanding is fine
+    assert repo.get_po(db, po_id)["status"] == "received"
+    with _pytest.raises(ValueError):                        # nothing left; a re-post is rejected
+        repo.receive_po(db, po_id, {line_id: 1}, "u")

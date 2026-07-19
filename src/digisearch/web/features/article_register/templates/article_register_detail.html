@@ -25,11 +25,12 @@
   </div>
   {% endif %}
 
+  <h2 style="font-size:1.05rem; margin-top:.6rem;">Parts &amp; assemblies</h2>
   <div style="overflow-x:auto;">
     <table>
       <thead><tr><th>Number</th><th>Group</th><th>Product</th><th>By</th><th>Comment</th><th>Item</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
       <tbody>
-        {% for e in family %}
+        {% for e in part_lines %}
         <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
           <td style="font-family:ui-monospace,monospace;">
             {% if e.code %}<span {% if e.retired %}style="text-decoration:line-through;"{% endif %}>{{ e.code }}</span>
@@ -42,24 +43,13 @@
           <td class="note">{{ e.comment or '' }}</td>
           <td style="white-space:nowrap;">
             {% if e.code %}
-              {% if e.category == 'document' or e.prefix == '95' %}
-                {% set did = doc_ids_by_code.get(e.code) %}
-                {% if did %}
-                <button type="button" class="ghost"
-                        onclick="location.href='/documents/{{ did }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit document' if can_edit else 'Open document' }}</button>
-                {% elif can_edit %}
-                <button type="button" class="ghost"
-                        onclick="location.href='/documents/new?code={{ e.code|urlencode }}{% if e.product %}&title={{ e.product|urlencode }}{% endif %}'">Create document</button>
-                {% else %}<span class="note">—</span>{% endif %}
-              {% else %}
-                {% if e.part_id %}
-                <button type="button" class="ghost"
-                        onclick="location.href='/catalog/{{ e.part_id }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit part' if can_edit else 'Open part' }}</button>
-                {% elif can_edit %}
-                <button type="button" class="ghost"
-                        onclick="location.href='/catalog/new?part_no={{ e.code|urlencode }}{% if e.product %}&value={{ e.product|urlencode }}{% endif %}'">Create part</button>
-                {% else %}<span class="note">—</span>{% endif %}
-              {% endif %}
+              {% if e.part_id %}
+              <button type="button" class="ghost"
+                      onclick="location.href='/catalog/{{ e.part_id }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit part' if can_edit else 'Open part' }}</button>
+              {% elif can_edit %}
+              <button type="button" class="ghost"
+                      onclick="location.href='/catalog/new?part_no={{ e.code|urlencode }}{% if e.product %}&value={{ e.product|urlencode }}{% endif %}'">Create part</button>
+              {% else %}<span class="note">—</span>{% endif %}
             {% else %}<span class="note">—</span>{% endif %}
           </td>
           {% if can_edit %}
@@ -85,39 +75,71 @@
           {% endif %}
         </tr>
         {% endfor %}
+        {% if not part_lines %}<tr><td colspan="{{ 7 if can_edit else 6 }}" class="note">No parts or assemblies in this family — its documents are listed below.</td></tr>{% endif %}
       </tbody>
     </table>
   </div>
 
-  {% if documents or can_edit %}
-  <h2 style="font-size:1.05rem; margin-top:1.6rem;">Documents</h2>
-  {% if documents %}
+  {% if doc_lines or can_edit %}
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-top:1.6rem;">
+    <h2 style="font-size:1.05rem; margin:0;">Documents</h2>
+    {% if can_edit %}
+    <a class="act-btn secondary" href="/documents/new?running_no={{ running_no }}{% if product %}&title={{ product|urlencode }}{% endif %}">＋ New document</a>
+    {% endif %}
+  </div>
+  <p class="note">Controlled documents for this product (drawings, specs, software). Zero-cost
+    deliverables tracked against the product's article number.</p>
+  {% if doc_lines %}
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Number</th><th>Title</th><th>Class</th><th>Kind</th><th></th></tr></thead>
+      <thead><tr><th>Number</th><th>Title</th><th>Kind</th><th>Rev</th><th>Item</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
       <tbody>
-        {% for d in documents %}
-        <tr{% if d.retired %} style="opacity:.55;"{% endif %}>
-          <td style="font-family:ui-monospace,monospace;">{{ d.code }}
-            {% if d.retired %}<span class="badge bad">retired</span>{% endif %}</td>
-          <td>{{ d.title }}</td>
-          <td><span class="badge muted">{{ d.prefix }}</span></td>
-          <td>{% if d.storage_kind == 'link' %}<span class="badge warn">link</span>{% else %}<span class="badge stock">file</span>{% endif %}</td>
-          <td style="white-space:nowrap; text-align:right;">
-            <button type="button" class="ghost" onclick="location.href='/documents/{{ d.id }}'">Open</button>
+        {% for e in doc_lines %}
+        {% set d = e.document %}
+        <tr{% if e.retired %} style="opacity:.55;"{% endif %}>
+          <td class="code">
+            {% if d %}<a href="/documents/{{ d.id }}"{% if e.retired %} style="text-decoration:line-through;"{% endif %}>{{ e.code }}</a>
+            {% else %}<span {% if e.retired %}style="text-decoration:line-through;"{% endif %}>{{ e.code }}</span>{% endif %}
+            {% if e.retired %}<span class="badge bad">retired</span>{% endif %}
           </td>
+          <td>{{ (d.title if d else e.product) or '' }}</td>
+          <td>{% if d %}<span class="badge {{ 'warn' if d.storage_kind == 'link' else 'stock' }}">{{ 'link' if d.storage_kind == 'link' else 'file' }}</span>{% else %}<span class="note">not created</span>{% endif %}</td>
+          <td>{% if d %}{{ d.current_rev or '—' }}{% else %}—{% endif %}</td>
+          <td style="white-space:nowrap;">
+            {% if d %}
+            <button type="button" class="ghost"
+                    onclick="location.href='/documents/{{ d.id }}{{ '/edit' if can_edit else '' }}'">{{ 'Edit document' if can_edit else 'Open document' }}</button>
+            {% elif can_edit %}
+            <button type="button" class="ghost"
+                    onclick="location.href='/documents/new?code={{ e.code|urlencode }}{% if e.product %}&title={{ e.product|urlencode }}{% endif %}'">Create document</button>
+            {% else %}<span class="note">—</span>{% endif %}
+          </td>
+          {% if can_edit %}
+          <td style="white-space:nowrap; text-align:right;">
+            <button type="button" class="ghost" style="margin-right:.4rem;"
+                    onclick="location.href='/article-register/{{ e.id }}/edit'">Edit</button>
+            <form method="post" action="/article-register/{{ e.id }}/duplicate" style="display:inline; margin:0 .4rem 0 0;">
+              <button type="submit" class="ghost">Duplicate</button>
+            </form>
+            <form method="post" action="/article-register/{{ e.id }}/retire" style="display:inline; margin:0 .4rem 0 0;">
+              <input type="hidden" name="retired" value="{{ '0' if e.retired else '1' }}">
+              <button type="submit" class="{{ 'ghost' if e.retired else 'danger' }}">{{ 'Restore' if e.retired else 'Retire' }}</button>
+            </form>
+            {% if can_delete %}
+            <form method="post" action="/article-register/{{ e.id }}/delete" style="display:inline; margin:0;"
+                  onsubmit="return confirm('Permanently delete {{ e.code }}?\n\nThis cannot be undone. If you just want to take it out of active use, cancel and use Retire instead.');">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="note">No documents for this family yet.</p>
-  {% endif %}
-  {% if can_edit %}
-  <div class="act-bar" style="margin-top:.6rem;">
-    <a href="/documents/new?running_no={{ running_no }}" class="act-btn secondary">New document for this family</a>
-  </div>
+  <p class="note">No documents yet for this product.</p>
   {% endif %}
   {% endif %}
 

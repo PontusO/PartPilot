@@ -33,29 +33,27 @@
     <div class="card"><b>{{ po.lines|length }}</b><small>lines</small></div>
     <div class="card"><b>{{ "%.2f"|format(po.total) }}</b><small>total{% if po.currency %} ({{ po.currency }}){% endif %}</small></div>
     <div class="card"><b>{{ "%g"|format(po.outstanding_qty) }}</b><small>outstanding qty</small></div>
-    {% if can_edit and po.status == 'draft' %}
-    <button type="button" onclick="openAdd()" style="margin:0 0 0 auto; display:flex; align-items:center;
-       justify-content:center; background:var(--accent); color:#fff; font-weight:600; border:0;
-       border-radius:9px; padding:0 1.2rem; cursor:pointer; white-space:nowrap;">Add Part</button>
-    {% endif %}
   </div>
 
   {% if error %}<div class="err" style="margin-top:1rem;">{{ error }}</div>{% endif %}
 
   {% if can_edit and (po.status in ('draft', 'ordered') or not receipts) %}
-  <div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem;">
+  <div class="act-bar">
+    {% if po.status == 'draft' %}
+    <button type="button" class="act-btn" onclick="openAdd()">Add Part</button>
+    {% endif %}
     {% if po.status == 'draft' and po.lines %}
-    <form method="post" action="/purchase-orders/{{ po.id }}/order" style="margin:0"
+    <form method="post" action="/purchase-orders/{{ po.id }}/order" style="display:inline; margin:0;"
           onsubmit="return confirm('Place this order with the supplier?');">
-      <button type="submit" class="ghost">Place order</button></form>
+      <button type="submit" class="act-btn secondary">Place order</button></form>
     {% endif %}
     {% if po.status in ('draft', 'ordered') %}
-    <form method="post" action="/purchase-orders/{{ po.id }}/cancel" style="margin:0"
+    <form method="post" action="/purchase-orders/{{ po.id }}/cancel" style="display:inline; margin:0;"
           onsubmit="return confirm('Cancel this purchase order? It stays on record.');">
-      <button type="submit" class="ghost">Cancel PO</button></form>
+      <button type="submit" class="act-btn secondary">Cancel PO</button></form>
     {% endif %}
     {% if not receipts %}
-    <form method="post" action="/purchase-orders/{{ po.id }}/delete" style="margin:0"
+    <form method="post" action="/purchase-orders/{{ po.id }}/delete" style="display:inline; margin:0;"
           onsubmit="return confirm('Permanently delete {{ po.po_no or 'PO #' ~ po.id }} and its archived CSV/PDF? Nothing has been received, so this leaves no record. This cannot be undone.');">
       <button type="submit" class="danger">Delete PO</button></form>
     {% endif %}

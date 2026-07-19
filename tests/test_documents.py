@@ -27,6 +27,47 @@ def _alloc(db, prefix, *, product="Doc"):
     return rn, article_code(prefix, rn, 1)
 
 
+def test_backfill_stub_documents_for_existing_article_numbers(tmp_path):
+    """The documents v2 migration turns pre-existing document-class article numbers into stub
+    documents. Simulated by allocating numbers BEFORE the Documents feature is registered, then
+    applying its migrations."""
+    db = Database(tmp_path / "backfill.db")
+    reg1 = FeatureRegistry()
+    reg1.register(catalog_feature, article_register_feature)     # no documents table yet
+    db.apply_migrations(reg1)
+
+    def alloc(prefix, product, *, retired=False):
+        rn = ar_repo.next_running_no(db)
+        ar_repo.create_entry(db, prefix=prefix, running_no=rn, suffix=1, product=product)
+        code = article_code(prefix, rn, 1)
+        if retired:
+            with db.connect() as conn:
+                conn.execute("UPDATE article_numbers SET retired = 1 WHERE code = ?", (code,))
+                conn.commit()
+        return code
+
+    doc = alloc("54", "Old Schematic")          # document class → stub file document
+    soft = alloc("95", "Firmware repo")         # software → stub link document
+    part = alloc("99", "A component")           # not a document → left alone
+    gone = alloc("54", "Retired drawing", retired=True)  # retired → left alone
+
+    # Now register the Documents feature and apply its migrations → v2 back-fills.
+    reg2 = FeatureRegistry()
+    reg2.register(catalog_feature, article_register_feature, documents_feature)
+    db.apply_migrations(reg2)
+
+    d = repo.document_for_code(db, doc)
+    assert d and d["storage_kind"] == "file" and d["title"] == "Old Schematic"
+    s = repo.document_for_code(db, soft)
+    assert s and s["storage_kind"] == "link"
+    assert repo.document_for_code(db, part) is None   # 99 component is not a document
+    assert repo.document_for_code(db, gone) is None   # retired numbers are not back-filled
+
+    # Idempotent: re-applying does not duplicate.
+    db.apply_migrations(reg2)
+    assert repo.document_for_code(db, doc) is not None
+
+
 def test_document_prefixes_are_document_class_plus_software(db):
     codes = [p["code"] for p in repo.document_prefixes(db)]
     assert codes == ["50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "95"]

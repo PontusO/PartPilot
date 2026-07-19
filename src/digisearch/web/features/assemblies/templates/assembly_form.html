@@ -91,17 +91,19 @@
 </script>
 {% endif %}
 
-{% if created_parts %}
+{% if created_parts or created_docs %}
 <div class="modal" id="stubModal">
   <div class="modal-card">
     <div class="modal-head">
-      <b>⚠ {{ created_parts|length }} part{{ 's' if created_parts|length != 1 else '' }} created — edit before use</b>
+      <b>Template created {{ created_parts|length }} part{{ 's' if created_parts|length != 1 else '' }}{% if created_docs %}
+         and {{ created_docs|length }} document{{ 's' if created_docs|length != 1 else '' }}{% endif %}</b>
       <button type="button" class="quiet" onclick="document.getElementById('stubModal').remove()">✕</button>
     </div>
-    <p class="note" style="margin:.2rem 0 .4rem;">The template created these as <b>stub parts</b> in the
-      catalog (no supplier, price, or specs yet). They'll be added to this assembly's <b>BOM</b> (qty 1
-      each) when you press <b>{{ submit_label }}</b> — tune quantities and reference designators on the
-      BOM page afterwards. Edit each stub before using it in production or on a purchase order.</p>
+    {% if created_parts %}
+    <p class="note" style="margin:.2rem 0 .4rem;">These are <b>stub parts</b> in the catalog (no supplier,
+      price, or specs yet). They'll be added to this assembly's <b>BOM</b> (qty 1 each) when you press
+      <b>{{ submit_label }}</b> — tune quantities and reference designators on the BOM page afterwards.
+      Edit each stub before using it in production or on a purchase order.</p>
     <div class="stub-list">
       {% for p in created_parts %}
       <div class="stub-row">
@@ -111,6 +113,21 @@
       </div>
       {% endfor %}
     </div>
+    {% endif %}
+    {% if created_docs %}
+    <p class="note" style="margin:.7rem 0 .4rem;">The template's document-class lines were created as
+      <b>documents</b> in the Article Register (drawings, specs, software). They are <b>not</b> BOM lines —
+      open each to attach its file or link.</p>
+    <div class="stub-list">
+      {% for d in created_docs %}
+      <div class="stub-row">
+        <span class="pn">{{ d.code }}</span>
+        <span class="ds">{{ d.title or '' }}</span>
+        {% if d.id %}<a href="/documents/{{ d.id }}" target="_blank">Open ↗</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div style="margin-top:.4rem; display:flex; justify-content:flex-end;">
       <button type="button" class="ghost" onclick="document.getElementById('stubModal').remove()">Got it</button>
     </div>

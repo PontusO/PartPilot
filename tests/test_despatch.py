@@ -141,3 +141,35 @@ def test_shippable_qty_capped_at_stock(db):
     cust, part, oid = _order(db, qty=30, stock_qty=10)
     s = repo.shippable_lines(db, oid)[0]
     assert s["outstanding"] == 30 and s["suggested_qty"] == 10
+
+
+def test_draft_order_cannot_open_packing_list(db):
+    cust, part, oid = _order(db)
+    with db.connect() as conn:  # back to draft — despatch must refuse
+        conn.execute("UPDATE customer_orders SET status = 'draft' WHERE id = ?", (oid,))
+        conn.commit()
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    with pytest.raises(ValueError, match="confirmed"):
+        repo.create_packing_list(db, oid, {line_id: 5}, "u")
+
+
+def test_second_packing_list_capped_at_remaining(db):
+    # Two packing lists must never together exceed the ordered qty (double-click / two operators).
+    cust, part, oid = _order(db, qty=20, stock_qty=50)
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    repo.create_packing_list(db, oid, {line_id: 15}, "u")   # 15 of 20 now on an open list
+    assert repo.shippable_lines(db, oid)[0]["outstanding"] == 5   # open list subtracted
+    with pytest.raises(ValueError, match="exceeds"):
+        repo.create_packing_list(db, oid, {line_id: 6}, "u")      # 6 > the 5 remaining
+    d2 = repo.create_packing_list(db, oid, {line_id: 5}, "u")     # exactly the rest is fine
+    assert d2 is not None
+
+
+def test_invoicing_last_despatch_completes_the_order(db):
+    cust, part, oid = _order(db, qty=20, stock_qty=50)
+    line_id = corepo.get_order(db, oid)["lines"][0]["id"]
+    desp_id = repo.create_packing_list(db, oid, {line_id: 20}, "u")
+    _pack_and_dispatch(db, desp_id)
+    assert corepo.get_order(db, oid)["status"] == "shipped"
+    repo.mark_invoiced(db, desp_id, "INV-1", None)
+    assert corepo.get_order(db, oid)["status"] == "complete"  # fully shipped + all invoiced

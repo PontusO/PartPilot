@@ -73,22 +73,25 @@ def _parse_assembly(form) -> dict:
 
 
 def _render_assembly_form(request, *, action, heading, submit_label, back_url, values,
-                          hint=None, error=None, status=200, created_parts=None):
+                          hint=None, error=None, status=200, created_parts=None,
+                          created_docs=None):
     return request.app.state.templates.TemplateResponse(
         request, "assembly_form.html",
         {"action": action, "heading": heading, "submit_label": submit_label,
          "back_url": back_url, "values": values or {}, "hint": hint, "error": error,
-         "created_parts": created_parts or []},
+         "created_parts": created_parts or [], "created_docs": created_docs or []},
         status_code=status,
     )
 
 
 @router.get("/new", response_class=HTMLResponse)
 def new_assembly_form(request: Request, part_no: str | None = None, desc: str | None = None,
-                      created: str | None = None):
+                      created: str | None = None, docs: str | None = None):
     require_role(request, ASSEMBLY_WRITE_ROLES)
     # part_no / desc may be prefilled when returning from an Article Register allocator; `created`
-    # carries the codes of stub parts the from-template flow just made, so we can list them.
+    # carries the stub-part codes the from-template flow just made (added to the BOM), and `docs` the
+    # document codes it made (shown for reference — documents are deliverables, not BOM lines).
+    db = request.app.state.database
     values = {}
     if (part_no or "").strip():
         values["part_no"] = part_no.strip()
@@ -97,17 +100,21 @@ def new_assembly_form(request: Request, part_no: str | None = None, desc: str | 
     created_parts = []
     if created:
         from ..catalog import repo as catalog_repo
-        db = request.app.state.database
         codes = [c.strip() for c in created.split(",") if c.strip()]
         for code in codes:
             created_parts.append(catalog_repo.find_part_by_part_no(db, code) or {"part_no": code})
         # Carried through the form so they're added to this assembly's BOM once it's created.
         values["bom_parts"] = ",".join(codes)
+    created_docs = []
+    if docs:
+        from ..documents import repo as documents_repo
+        for code in [c.strip() for c in docs.split(",") if c.strip()]:
+            created_docs.append(documents_repo.document_for_code(db, code) or {"code": code})
     return _render_assembly_form(
         request, action="/assemblies/new", heading="New assembly",
         submit_label="Create assembly", back_url="/assemblies", values=values,
         hint="After creating, add components to its BOM from the assembly page.",
-        created_parts=created_parts,
+        created_parts=created_parts, created_docs=created_docs,
     )
 
 
@@ -189,6 +196,31 @@ def _pricing_view(assembly: dict) -> dict:
     }
 
 
+# An internal family code: PREFIX-NNNNN-suffix. The NNNNN is the running number that ties an
+# assembly to its documents (and other family members) — the "product" grouping.
+_FAMILY_CODE_RE = re.compile(r"^\d{2}-(\d{5})-\d+$")
+
+
+def _family_no(part_no: str | None) -> int | None:
+    """The Article Register running number embedded in an internal code (PREFIX-NNNNN-suffix), or None
+    for a part number that isn't an internal family code."""
+    m = _FAMILY_CODE_RE.match((part_no or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def _family_documents(db, running_no: int | None) -> list[dict]:
+    """Documents that share this assembly's Article Register running number — i.e. belong to the same
+    product. Zero-cost deliverables, shown alongside the BOM but never part of it. Guarded so
+    assemblies keeps working if the Documents feature isn't installed."""
+    if running_no is None:
+        return []
+    try:
+        from ..documents import repo as documents_repo
+        return [d for d in documents_repo.family_documents(db, running_no) if not d.get("retired")]
+    except Exception:
+        return []
+
+
 def _render_detail(request: Request, part_id: int, user, error: str | None = None, status: int = 200,
                    build_qty: int = 1, pricing: dict | None = None, refreshed: dict | None = None,
                    notice: str | None = None):
@@ -223,6 +255,10 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             "product": product,
             "sync": sync,
             "devmgmt_configured": DevmgmtConfig.from_env() is not None,
+            # Zero-cost documents sharing this product's article-register family (drawings, specs,
+            # software) — collected under the product, shown as a panel, never in the BOM total.
+            "family_no": _family_no(assembly.get("part_no")),
+            "documents": _family_documents(db, _family_no(assembly.get("part_no"))),
         },
         status_code=status,
     )

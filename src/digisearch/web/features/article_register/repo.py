@@ -322,8 +322,11 @@ def list_family_documents(db: Database, running_no: int) -> list[dict]:
     try:
         with db.connect() as conn:
             return [dict(r) for r in conn.execute(
-                "SELECT id, code, title, prefix, storage_kind, external_url, retired "
-                "FROM documents WHERE running_no = ? ORDER BY code", (running_no,))]
+                "SELECT d.id, d.code, d.title, d.prefix, d.storage_kind, d.external_url, d.retired, "
+                "       cr.rev AS current_rev "
+                "FROM documents d "
+                "LEFT JOIN document_revisions cr ON cr.document_id = d.id AND cr.is_current = 1 "
+                "WHERE d.running_no = ? ORDER BY d.code", (running_no,))]
     except sqlite3.OperationalError:
         return []
 

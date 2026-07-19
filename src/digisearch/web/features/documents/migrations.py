@@ -74,4 +74,29 @@ MIGRATIONS = [
         CREATE UNIQUE INDEX ux_docrev_current ON document_revisions(document_id) WHERE is_current = 1;
         """,
     ),
+    Migration(
+        version=2,
+        name="back-fill stub documents for existing document-class article numbers",
+        # Every existing document-class Article Register number (50–59 documents, 95 software) becomes
+        # a bare stub document (no revision yet — attach the file/link later), so it shows under the
+        # product's Documents section instead of only offering "Create document". This catches numbers
+        # allocated before the Documents feature existed; new families get their stubs at creation via
+        # article_register._create_stub_documents. Idempotent (skips codes that already have a doc) and
+        # matches _is_document_line (prefix category 'document', or prefix 95). 95 → link, else file.
+        # Active numbers only — retired ones stay "Create document" until restored. Runs after
+        # article_register (registered first), so article_numbers/_prefixes exist.
+        sql="""
+        INSERT INTO documents (code, running_no, prefix, title, storage_kind, created_by)
+        SELECT a.code, a.running_no, a.prefix,
+               COALESCE(NULLIF(TRIM(a.product), ''), a.code),
+               CASE WHEN a.prefix = '95' THEN 'link' ELSE 'file' END,
+               a.created_by
+        FROM article_numbers a
+        LEFT JOIN article_prefixes ap ON ap.code = a.prefix
+        WHERE a.code IS NOT NULL
+          AND a.retired = 0
+          AND (ap.category = 'document' OR a.prefix = '95')
+          AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.code = a.code);
+        """,
+    ),
 ]

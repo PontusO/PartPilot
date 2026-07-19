@@ -254,3 +254,19 @@ def test_article_register_detail_shows_documents_panel(tmp_path):
                                   (doc_id,)).fetchone()[0]
     page = client.get(f"/article-register/{running_no}").text
     assert "Board schematic" in page and f"/documents/{doc_id}" in page
+
+
+def test_catalog_refuses_document_class_part_numbers(tmp_path):
+    from digisearch.web.features.catalog import repo as crepo
+
+    app = _app(tmp_path)
+    client = _login(app, "buyer")
+    for code in ("54-00050-1", "95-00050-1"):
+        r = client.post("/catalog/new", data={"part_no": code, "value": "X"},
+                        follow_redirects=False)
+        assert r.status_code == 400 and "document-class" in r.text  # re-rendered with error
+        assert crepo.find_part_by_part_no(app.state.database, code) is None
+    # a normal component still creates fine
+    r = client.post("/catalog/new", data={"part_no": "99-00050-1", "value": "R"},
+                    follow_redirects=False)
+    assert r.status_code == 303

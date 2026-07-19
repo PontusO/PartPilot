@@ -221,15 +221,19 @@ def parts_by_supplier(request: Request, name: str | None = None):
 # ---- add ----
 
 @router.get("/new", response_class=HTMLResponse)
-def new_form(request: Request, part_no: str | None = None, value: str | None = None):
+def new_form(request: Request, part_no: str | None = None, value: str | None = None,
+             desc: str | None = None):
     require_role(request, CATALOG_WRITE_ROLES)
     # part_no / value may be prefilled when arriving from the Article Register (the entry's product
-    # description seeds the value/spec field).
+    # description seeds the value/spec field). `desc` is the allocator-bounce alias for the same
+    # thing (the param name the assemblies form uses), so every allocate-then-create path lands the
+    # name in the value field.
     values = {}
     if (part_no or "").strip():
         values["part_no"] = part_no.strip()
-    if (value or "").strip():
-        values["value"] = value.strip()
+    name = (value or "").strip() or (desc or "").strip()
+    if name:
+        values["value"] = name
     return _render_form(
         request, action="/catalog/new", heading="Add component", submit_label="Save component",
         stock_heading="Opening stock", back_url="/catalog", values=values,

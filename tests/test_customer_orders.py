@@ -317,3 +317,26 @@ def test_acknowledge_guards(db):
         conn.commit()
     with pytest.raises(ValueError):                              # not an open/unshipped status
         repo.acknowledge_order(db, shipped)
+
+
+def test_update_order_cannot_skip_lifecycle(db):
+    cust, part = _seed(db)
+    oid = repo.create_order(db, {"customer_id": cust})
+    base = {"customer_id": cust}
+    repo.update_order(db, oid, {**base, "status": "confirmed"})   # draft -> confirmed by hand: OK
+    repo.update_order(db, oid, {**base, "status": "draft"})       # and back: OK
+    with pytest.raises(ValueError, match="transition"):
+        repo.update_order(db, oid, {**base, "status": "shipped"})  # owned by despatch
+    with db.connect() as conn:
+        conn.execute("UPDATE customer_orders SET status = 'shipped' WHERE id = ?", (oid,))
+        conn.commit()
+    with pytest.raises(ValueError, match="transition"):
+        repo.update_order(db, oid, {**base, "status": "draft"})    # can't reverse a shipped order
+    repo.update_order(db, oid, {**base, "status": "shipped", "notes": "x"})  # same status: OK
+    assert repo.get_order(db, oid)["notes"] == "x"
+
+
+def test_create_order_ignores_action_owned_status(db):
+    cust, _ = _seed(db)
+    oid = repo.create_order(db, {"customer_id": cust, "status": "shipped"})
+    assert repo.get_order(db, oid)["status"] == "draft"  # demoted to a manual status

@@ -211,6 +211,39 @@
   {% endif %}
 </div>
 
+{# ---- Documents panel: zero-cost deliverables collected under this product (shared article number) ---- #}
+{% if family_no %}
+<div class="panel">
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <h2 style="font-size:1.05rem; margin:0;">Documents</h2>
+    {% if can_edit %}
+    <a class="act-btn secondary" href="/documents/new?running_no={{ family_no }}{% if a.value %}&title={{ a.value|urlencode }}{% endif %}">＋ New document</a>
+    {% endif %}
+  </div>
+  <p class="note">Controlled documents for this product (drawings, specs, software). Zero-cost
+    deliverables — they belong to the product but never count toward the BOM.</p>
+  {% if documents %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Number</th><th>Title</th><th>Kind</th><th>Rev</th></tr></thead>
+      <tbody>
+        {% for d in documents %}
+        <tr>
+          <td class="code"><a href="/documents/{{ d.id }}">{{ d.code }}</a></td>
+          <td>{{ d.title or '' }}</td>
+          <td><span class="badge {{ 'warn' if d.storage_kind == 'link' else 'stock' }}">{{ 'link' if d.storage_kind == 'link' else 'file' }}</span></td>
+          <td>{{ d.current_rev or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="note">No documents yet for this product.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ---- Device management (devmgmt) publish panel ---- #}
 <div class="panel">
   <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
@@ -219,7 +252,7 @@
       {% set st = sync.status if sync else none %}
       <span style="display:flex; gap:.5rem; align-items:baseline;">
         {% if product.variant.retired_at %}
-        <span class="flag" style="font-size:.85rem; color:var(--warn);">● Retired {{ product.variant.retired_at[:10] }}</span>
+        <span class="badge bad">Retired {{ product.variant.retired_at[:10] }}</span>
         {% endif %}
         <span class="flag" style="font-size:.85rem;
           {% if st == 'done' %}color:var(--ok);{% elif st == 'error' %}color:var(--bad);{% endif %}">

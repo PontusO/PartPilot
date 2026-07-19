@@ -226,11 +226,15 @@ def test_allocate_returns_to_create_page_with_code(tmp_path):
 
     nn = repo.next_running_no(db)
     r = client.post("/article-register/new",
-                    data={"mode": "new", "prefix": "99", "return_to": "/catalog/new"},
+                    data={"mode": "new", "prefix": "99", "product": "Blue widget",
+                          "return_to": "/catalog/new"},
                     follow_redirects=False)
-    assert r.headers["location"] == f"/catalog/new?part_no=99-{nn:05d}-1"
-    # …and the create-part page prefills that number.
-    assert f'value="99-{nn:05d}-1"' in client.get(r.headers["location"]).text
+    loc = r.headers["location"]
+    assert loc.startswith(f"/catalog/new?part_no=99-{nn:05d}-1")
+    assert "desc=Blue" in loc  # the typed product name rides along…
+    page = client.get(loc).text
+    assert f'value="99-{nn:05d}-1"' in page      # …and the create-part page prefills the number
+    assert 'value="Blue widget"' in page          # …and the value/spec field
 
     # New Product returns the assembly (98) code to the New-assembly page, carrying the product name
     # so the assembly form prefills it (consistent with the from-template flow).
@@ -261,7 +265,20 @@ def test_from_template_returns_assembly_code(tmp_path):
     loc = r.headers["location"]
     assert urlparse(loc).path == "/assemblies/new"
     assert parse_qs(urlparse(loc).query)["part_no"][0] == f"98-{rn:05d}-1"
-    assert f'value="98-{rn:05d}-1"' in client.get(loc).text
+    # The redirect carries the created document codes so the new-assembly screen can show them.
+    assert parse_qs(urlparse(loc).query)["docs"][0] == \
+        f"54-{rn:05d}-1,54-{rn:05d}-2,54-{rn:05d}-3"
+    page = client.get(loc).text
+    assert f'value="98-{rn:05d}-1"' in page
+    # The template's document-class (54) lines are materialised as documents (not catalog parts) AND
+    # surfaced on the new-assembly screen so the user can see they were created.
+    from digisearch.web.features.catalog import repo as catrepo
+    from digisearch.web.features.documents import repo as docrepo
+    for suffix in (1, 2, 3):
+        code = f"54-{rn:05d}-{suffix}"
+        assert docrepo.document_for_code(db, code) is not None, f"{code} should be a document"
+        assert catrepo.find_part_by_part_no(db, code) is None, f"{code} must not be a catalog part"
+        assert code in page, f"{code} should be shown on the new-assembly screen"
 
 
 def test_apply_template_link_carries_family_product(tmp_path):
@@ -315,10 +332,12 @@ def test_from_template_creates_stub_parts_and_dialog(tmp_path):
         doc = drepo.document_for_code(db, doc_code)
         assert doc is not None and doc["storage_kind"] == "file"
 
-    # The return page prefills part_no + name and raises the "created, edit before use" dialog.
+    # The return page prefills part_no + name and raises the "created" dialog listing BOTH the stub
+    # parts and the documents the template made.
     page = client.get(r.headers["location"]).text
     assert f'value="98-{rn:05d}-1"' in page and 'value="MiThings GW"' in page
-    assert "parts created" in page and created[0] in page
+    assert "Template created" in page and created[0] in page
+    assert f"54-{rn:05d}-1" in page  # documents are surfaced too, not silently created
 
     # Re-running the same template into the *same* family adds nothing: every group is already
     # present, so all lines are skipped and the form re-renders with an explanatory error (no
@@ -353,8 +372,46 @@ def test_from_template_parts_land_in_new_assembly_bom(tmp_path):
         rows = [dict(x) for x in conn.execute(
             "SELECT c.part_no, b.qty_per FROM bom_lines b JOIN parts c ON c.id = b.child_id "
             "WHERE b.parent_id = ? ORDER BY b.line_no", (asm_id,))]
-    assert {x["part_no"] for x in rows} == set(created)
+    assert {x["part_no"] for x in rows} == set(created)          # only the 99 parts are BOM lines
+    assert all(x["part_no"].startswith("99-") for x in rows)     # no 54 documents in the BOM
     assert all(x["qty_per"] == 1 for x in rows)
+
+    # The product's documents are collected under it: shown in a zero-cost Documents panel on the
+    # assembly page (linked by the shared article number), never as BOM lines.
+    rn = int(q["part_no"][0].split("-")[1])
+    page = client.get(f"/assemblies/{asm_id}").text
+    assert ">Documents<" in page and "never count toward the BOM" in page
+    assert f"/documents/new?running_no={rn}" in page             # add-document affordance
+    for i in (1, 2, 3):
+        assert f"54-{rn:05d}-{i}" in page
+
+
+def test_family_page_lists_documents_only_under_documents(tmp_path):
+    app, client = _client(tmp_path)
+    db = app.state.database
+    rn = repo.next_running_no(db)
+    # A product family: 98/99 parts + 54 documents (materialised by the from-template flow)…
+    client.post("/article-register/from-template",
+                data={"template_id": "1", "product": "GW", "mode": "new"}, follow_redirects=False)
+    # …plus a bare 54 number allocated with no document yet.
+    client.post("/article-register/new",
+                data={"mode": "existing", "running_no": str(rn), "prefix": "54"},
+                follow_redirects=False)
+
+    page = client.get(f"/article-register/{rn}").text
+    marker = '<h2 style="font-size:1.05rem; margin:0;">Documents</h2>'
+    assert marker in page
+    items, docs = page.split(marker, 1)
+    items = items.split("Parts &amp; assemblies", 1)[-1]  # the items table region
+
+    # Document-class numbers appear ONLY under Documents, never in the parts/assemblies table.
+    assert f"98-{rn:05d}-1" in items and f"99-{rn:05d}-1" in items
+    for i in (1, 2, 3, 4):
+        assert f"54-{rn:05d}-{i}" not in items, f"54-{rn:05d}-{i} must not be in the items table"
+        assert f"54-{rn:05d}-{i}" in docs, f"54-{rn:05d}-{i} should be under Documents"
+    # Materialised docs offer Edit, the bare one offers Create; management actions are present.
+    assert "Edit document" in docs and "Create document" in docs and "not created" in docs
+    assert "/retire" in docs and "Duplicate" in docs  # article-number management moved here too
 
 
 def test_allocate_rejects_offsite_return_to(tmp_path):
