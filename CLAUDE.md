@@ -18,7 +18,24 @@ Two products in one package (`src/digisearch/`):
 The README is unusually complete — read it for domain detail (how lines are classified, reel-vs-cut-tape
 rules, Digi-Key/Mouser credential setup, miniMRP stock checking). This file covers what the README doesn't.
 
-## Design work — read the design rules first
+## Development process — commit every iteration, flag big changes
+
+These are standing rules for how work is done in this repo (agreed 2026-07-20):
+
+1. **Commit after every iteration.** When you finish a discrete piece of work (a fix, a feature, a
+   refactor — anything you'd describe as "done"), create a git commit for it before moving on. Do not
+   batch several unrelated changes into one commit or leave finished work uncommitted. The point is a
+   granular history: we must be able to look back and see *what* changed and *when*. Use a clear
+   subject line describing the change. (Pushing/merging is still done on request, not automatically.)
+
+2. **Highlight big changes loudly in the terminal.** When you make a change that alters *how the
+   system behaves* — data model / migration changes, changed business logic, anything that affects
+   workflow, stock, costing, or how existing features work — call it out so it visibly pops out from
+   normal text. Use a bold, bright banner, e.g.:
+
+   > 🟥 **⚠ SYSTEM BEHAVIOUR CHANGE:** <one line on what changed and its impact>
+
+   Ordinary cosmetic/UI tweaks don't need this — reserve it for changes that matter operationally.
 
 **Before doing any GUI/UI work** (new or edited templates, buttons, tables, forms, colours, layout),
 **read [`docs/design-rules.md`](docs/design-rules.md)** and follow it. It is the source of truth for
