@@ -348,6 +348,9 @@ def create_part(
              1 if part.get("normally_stocked") else 0, part.get("markup"),
              *_doc_and_bom_flags(part)),
         ).lastrowid
+        # A brand-new part is the sole, released version of its own group (version_status defaults to
+        # 'released'). Versions are added later via catalog.versions.create_version.
+        conn.execute("UPDATE parts SET version_group_id = id WHERE id = ?", (part_id,))
 
         for s in supplier_lines:
             qpu = s.get("reel_qty") or 1

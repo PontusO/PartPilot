@@ -1,0 +1,55 @@
+{# Versions panel — shared by the catalog part detail and the assembly detail pages.
+   Context: `versions` (list from catalog.versions.list_versions), `part` (the row being viewed,
+   carries id + version_status), `version_base` ("/catalog" or "/assemblies"), `can_edit`.
+   A version IS a parts row: same number, distinct id, its own BOM/stock. Exactly one is the
+   current (released) default; others are draft (being prepared) or superseded (past releases). #}
+{% set vbadge = {'draft':'warn', 'released':'ok', 'superseded':'muted'} %}
+{% set vlabel = {'draft':'Draft', 'released':'Current', 'superseded':'Superseded'} %}
+<div class="panel">
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <h2 style="font-size:1.05rem; margin:0;">Versions</h2>
+    {% if can_edit %}
+    <form method="post" action="{{ version_base }}/{{ part.id }}/versions/new"
+          class="act-bar" style="margin:0;"
+          onsubmit="return confirm('Create a new draft version by cloning this one (BOM, suppliers and pricing are copied; stock starts empty)?');">
+      <input name="rev" type="text" maxlength="40" placeholder="New rev (e.g. B)" required
+             style="height:2.5rem; padding:0 .7rem; background:var(--panel); color:var(--fg);
+                    border:1px solid var(--line); border-radius:8px; width:9rem;">
+      <button type="submit" class="act-btn secondary">＋ New version</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="note">Multiple versions of <b>{{ part.part_no }}</b> can coexist. The
+    <span class="badge ok">Current</span> version is the default for new BOMs, orders and work orders;
+    a <span class="badge warn">Draft</span> is editable but not yet orderable; a
+    <span class="badge muted">Superseded</span> version stays available for spares and repairs.</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Rev</th><th>Status</th><th class="num">In stock</th><th>Updated</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for v in versions %}
+        <tr{% if v.id == part.id %} style="background:rgba(255,255,255,.03);"{% endif %}>
+          <td><b>{{ v.rev or '—' }}</b>{% if v.id == part.id %} <span class="note">(viewing)</span>{% endif %}</td>
+          <td><span class="badge {{ vbadge.get(v.version_status, 'muted') }}">{{ vlabel.get(v.version_status, v.version_status) }}</span></td>
+          <td class="num">{{ "%g"|format(v.total_qty or 0) }}</td>
+          <td class="note">{{ (v.updated_at or '')[:16] }}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            {% if v.id != part.id %}
+            <a class="ghost" href="{{ version_base }}/{{ v.id }}">Open</a>
+            {% endif %}
+            {% if can_edit and v.version_status != 'released' %}
+            <form method="post" action="{{ version_base }}/{{ v.id }}/versions/release"
+                  style="display:inline;"
+                  onsubmit="return confirm('Release rev {{ v.rev or v.id }} as the current version? The current release becomes superseded.');">
+              <button type="submit" class="ghost">Release</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

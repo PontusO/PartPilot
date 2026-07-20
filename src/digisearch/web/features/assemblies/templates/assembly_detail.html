@@ -211,6 +211,9 @@
   {% endif %}
 </div>
 
+{# ---- Versions panel: multiple versions of this assembly number can coexist (shared partial) ---- #}
+{% with part = a %}{% include "_versions_panel.html" %}{% endwith %}
+
 {# ---- Documents panel: zero-cost deliverables collected under this product (shared article number) ---- #}
 {% if family_no %}
 <div class="panel">

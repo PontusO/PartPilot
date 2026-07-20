@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from digisearch.devmgmt import DevmgmtConfig
 
 from ...core.deps import require_role, require_user
-from ..catalog import devmgmt_outbox, devmgmt_repo
+from ..catalog import devmgmt_outbox, devmgmt_repo, versions as catalog_versions
 from ..purchasing.service import resolve_bom_file
 from . import export_xlsx, repo
 from .import_bom import apply_import_plan, build_import_plan
@@ -259,6 +259,9 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             # software) — collected under the product, shown as a panel, never in the BOM total.
             "family_no": _family_no(assembly.get("part_no")),
             "documents": _family_documents(db, _family_no(assembly.get("part_no"))),
+            # Versions of this assembly (same number, distinct rows). Panel is shared with catalog.
+            "versions": catalog_versions.list_versions(
+                db, assembly.get("version_group_id") or part_id),
         },
         status_code=status,
     )
@@ -364,6 +367,34 @@ async def edit_line(request: Request, part_id: int, line_id: int):
 def delete_line(request: Request, part_id: int, line_id: int):
     require_role(request, ASSEMBLY_WRITE_ROLES)
     repo.delete_bom_line(request.app.state.database, part_id, line_id)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+# ---- versioning (a version IS a parts row; the write flows live in catalog.versions) ----
+
+@router.post("/{part_id}/versions/new")
+async def new_version(request: Request, part_id: int):
+    """Clone this assembly into a new draft version (BOM copied) and open it for editing."""
+    require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    if repo.get_assembly(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Assembly not found."}, status_code=404)
+    form = await request.form()
+    rev = (form.get("rev") or "").strip()
+    new_id = catalog_versions.create_version(db, part_id, rev=rev)
+    return RedirectResponse(f"/assemblies/{new_id}/edit", status_code=303)
+
+
+@router.post("/{part_id}/versions/release")
+def release_version(request: Request, part_id: int):
+    """Make this version the current released one; the previous release becomes superseded."""
+    require_role(request, ASSEMBLY_WRITE_ROLES)
+    db = request.app.state.database
+    if repo.get_assembly(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Assembly not found."}, status_code=404)
+    catalog_versions.release_version(db, part_id)
     return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
 
 

@@ -270,12 +270,16 @@ def parts_for_picker(db: Database, exclude_id: int) -> list[dict]:
 def create_assembly(db: Database, part: dict) -> int:
     """Create a new assembly (a part with kind=ASSY). Its BOM is built on the detail page."""
     with db.connect() as conn:
-        return conn.execute(
+        part_id = conn.execute(
             "INSERT INTO parts (part_no, value, description, category, rev, default_build_days, "
             "kind) VALUES (?, ?, ?, ?, ?, ?, 'ASSY')",
             (part["part_no"], part.get("value"), part.get("description"),
              part.get("category"), part.get("rev"), part.get("default_build_days")),
         ).lastrowid
+        # A brand-new assembly is the sole, released version of its own group (see catalog.versions).
+        conn.execute("UPDATE parts SET version_group_id = id WHERE id = ?", (part_id,))
+        conn.commit()
+        return part_id
 
 
 def update_assembly(db: Database, part_id: int, part: dict) -> None:

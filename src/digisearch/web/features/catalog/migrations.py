@@ -395,4 +395,28 @@ MIGRATIONS = [
         sql=r"UPDATE parts SET is_document = 1, exclude_from_bom_cost = 1 "
             r"WHERE part_no GLOB '95-[0-9][0-9][0-9][0-9][0-9]-*';",
     ),
+    Migration(
+        version=21,
+        name="part/assembly versioning",
+        # Multiple versions of the same part/assembly number can coexist. A version IS a `parts` row:
+        # versions share one part_no but are distinct ids, each with its own bom_lines, stock and
+        # suppliers. `version_group_id` ties the versions of one item together; `version_status` is the
+        # lifecycle (draft = editable, not orderable/buildable; released = the single current default;
+        # superseded = a past release, still selectable for new work only when explicitly chosen).
+        #
+        # Existing rows each become the sole, released member of their own group (group id = their own
+        # id) — invisible until someone creates a second version. version_group_id is nullable because
+        # SQLite can't ADD COLUMN NOT NULL with a per-row default; app code (create_part/create_version)
+        # always sets it, exactly like part_no uniqueness is app-enforced today. The back-fill MUST run
+        # before the partial unique index so the index builds cleanly (one released per singleton group).
+        sql="""
+        ALTER TABLE parts ADD COLUMN version_group_id INTEGER;
+        ALTER TABLE parts ADD COLUMN version_status TEXT NOT NULL DEFAULT 'released'
+            CHECK (version_status IN ('draft','released','superseded'));
+        UPDATE parts SET version_group_id = id WHERE version_group_id IS NULL;
+        CREATE UNIQUE INDEX ux_parts_released
+            ON parts(version_group_id) WHERE version_status = 'released';
+        CREATE INDEX ix_parts_group ON parts(version_group_id);
+        """,
+    ),
 ]

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ...core.deps import require_role, require_user
-from . import repo, stock
+from . import repo, stock, versions
 
 router = APIRouter(prefix="/catalog")
 
@@ -364,13 +364,44 @@ def part_detail(request: Request, part_id: int):
         return templates.TemplateResponse(
             request, "error.html", {"message": "Part not found."}, status_code=404
         )
+    group_id = part.get("version_group_id") or part_id
+    version_list = versions.list_versions(db, group_id)
     return templates.TemplateResponse(
         request, "part_detail.html",
         {"part": part, "can_edit": user.role in CATALOG_WRITE_ROLES,
          "can_move": user.role in STOCK_MOVE_ROLES,
          "movements": stock.movements_for_part(db, part_id),
-         "locations": repo.locations(db)},
+         "locations": repo.locations(db),
+         "versions": version_list, "version_base": "/catalog"},
     )
+
+
+# ---- versioning ----
+
+@router.post("/{part_id}/versions/new")
+async def new_version(request: Request, part_id: int):
+    """Clone this part into a new draft version and open it for editing."""
+    require_role(request, CATALOG_WRITE_ROLES)
+    db = request.app.state.database
+    if repo.get_part(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Part not found."}, status_code=404)
+    form = await request.form()
+    rev = (form.get("rev") or "").strip()
+    new_id = versions.create_version(db, part_id, rev=rev)
+    return RedirectResponse(f"/catalog/{new_id}/edit", status_code=303)
+
+
+@router.post("/{part_id}/versions/release")
+def release_version(request: Request, part_id: int):
+    """Make this version the current released one; the previous release becomes superseded."""
+    require_role(request, CATALOG_WRITE_ROLES)
+    db = request.app.state.database
+    if repo.get_part(db, part_id) is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Part not found."}, status_code=404)
+    versions.release_version(db, part_id)
+    return RedirectResponse(f"/catalog/{part_id}", status_code=303)
 
 
 # ---- stock movements (receive / issue / adjust) ----
