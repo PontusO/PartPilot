@@ -131,8 +131,13 @@ def assemblies(db: Database) -> list[dict]:
     """Assemblies that can be built (have at least one BOM line)."""
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
-            """SELECT id, part_no, value, default_build_days FROM parts WHERE kind = 'ASSY'
-               AND EXISTS (SELECT 1 FROM bom_lines b WHERE b.parent_id = parts.id)
+            # Only the current (released) version of an assembly is offered to build by default; a
+            # draft is not buildable and a superseded version is chosen explicitly, not from this list.
+            """SELECT id, part_no, value, default_build_days FROM parts p WHERE kind = 'ASSY'
+               AND EXISTS (SELECT 1 FROM bom_lines b WHERE b.parent_id = p.id)
+               AND p.id = (SELECT x.id FROM parts x
+                           WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id)
+                           ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1)
                ORDER BY part_no""")]
 
 

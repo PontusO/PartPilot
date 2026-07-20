@@ -141,7 +141,13 @@ def parts_for_picker(db: Database) -> list[dict]:
     overhead = setup_repo.get_default_markup(db)
     with db.connect() as conn:
         rows = [dict(r) for r in conn.execute(
-            "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts ORDER BY part_no"
+            # One entry per item — the current (released) version; a draft/superseded version is not
+            # offered as an orderable line by default.
+            "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts p "
+            "WHERE p.id = (SELECT x.id FROM parts x "
+            "              WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id) "
+            "              ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1) "
+            "ORDER BY part_no"
         )]
         prices = _all_loaded_prices(conn, overhead)
     for r in rows:

@@ -58,7 +58,7 @@
       <tbody>
         {% for p in parts %}
         <tr>
-          <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a></td>
+          <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a>{% if p.version_count and p.version_count > 1 %} <span class="badge muted" title="{{ p.version_count }} versions exist — showing the current one">+{{ p.version_count - 1 }} ver</span>{% endif %}</td>
           <td>{{ p.value or '' }}</td>
           <td>{{ p.category or '' }}</td>
           <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>

@@ -35,7 +35,7 @@
       <tbody>
         {% for a in assemblies %}
         <tr>
-          <td><a href="/assemblies/{{ a.id }}">{{ a.part_no }}</a></td>
+          <td><a href="/assemblies/{{ a.id }}">{{ a.part_no }}</a>{% if a.version_count and a.version_count > 1 %} <span class="badge muted" title="{{ a.version_count }} versions exist — showing the current one">+{{ a.version_count - 1 }} ver</span>{% endif %}</td>
           <td>{{ a.value or '' }}</td>
           <td>{{ a.rev or '' }}</td>
           <td class="num">{% if a.line_count %}{{ a.line_count }}{% else %}<span class="flag">0</span>{% endif %}</td>

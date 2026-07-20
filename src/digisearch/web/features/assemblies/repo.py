@@ -20,11 +20,19 @@ def list_assemblies(db: Database, search: str | None = None) -> list[dict]:
     like = f"%{search}%" if search else None
     with db.connect() as conn:
         rows = conn.execute(
-            """SELECT p.id, p.part_no, p.value, p.rev, p.total_qty, p.external_price,
+            # Collapse versions to one row per group: the current (released) version, or the lowest-id
+            # one if none released yet. Un-versioned assemblies (the common case) are unaffected.
+            """SELECT p.id, p.part_no, p.value, p.rev, p.total_qty, p.external_price, p.version_status,
+                      (SELECT COUNT(*) FROM parts g
+                       WHERE COALESCE(g.version_group_id, g.id) = COALESCE(p.version_group_id, p.id))
+                          AS version_count,
                       (SELECT COUNT(*) FROM bom_lines b WHERE b.parent_id = p.id) AS line_count,
                       (SELECT COUNT(*) FROM bom_lines b WHERE b.child_id = p.id) AS used_in
                FROM parts p
                WHERE p.kind = 'ASSY'
+                 AND p.id = (SELECT x.id FROM parts x
+                             WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id)
+                             ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1)
                  AND (:s IS NULL OR p.part_no LIKE :like OR p.value LIKE :like
                       OR p.description LIKE :like)
                ORDER BY p.part_no""",
@@ -259,10 +267,17 @@ def estimate_bom_cost(db: Database, part_id: int, build_qty: int,
 # ---- writes (add / delete BOM lines) ----
 
 def parts_for_picker(db: Database, exclude_id: int) -> list[dict]:
-    """All parts that can be added as a child (excludes the assembly itself)."""
+    """Parts that can be added as a BOM child (excludes the assembly itself). Shows one entry per
+    item — the current (released) version of each group — so a draft/superseded version isn't picked
+    into a BOM by accident. (Pinning an explicit older version is a Phase 3 UI addition.)"""
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT id, part_no, value, kind, total_qty FROM parts WHERE id != ? ORDER BY part_no",
+            "SELECT id, part_no, value, kind, total_qty FROM parts p "
+            "WHERE id != ? "
+            "AND p.id = (SELECT x.id FROM parts x "
+            "            WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id) "
+            "            ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1) "
+            "ORDER BY part_no",
             (exclude_id,),
         )]
 

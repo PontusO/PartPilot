@@ -12,6 +12,7 @@ from digisearch.web.features.assemblies import feature as assemblies_feature
 from digisearch.web.features.assemblies import repo as asm_repo
 from digisearch.web.features.catalog import feature as catalog_feature
 from digisearch.web.features.catalog import repo, versions
+from digisearch.web.features.catalog import stock_index
 
 
 @pytest.fixture
@@ -154,6 +155,55 @@ def test_current_version_for_part_no_prefers_released(db):
     versions.release_version(db, vid)
     got2 = versions.current_version_for_part_no(db, "98-00001-1")
     assert got2["id"] == vid                                  # now B is current
+
+
+# ---- phase 2: resolution correctness ----
+
+def test_list_parts_collapses_to_current_version(db):
+    pid = _mk_part(db, part_no="R-1", rev="A")
+    vid = versions.create_version(db, pid, rev="B")          # draft in same group
+    rows, total = repo.list_parts(db)
+    ids = [r["id"] for r in rows]
+    assert total == 1 and ids == [pid]                       # one row, the released one
+    versions.release_version(db, vid)                        # B now current
+    rows2, total2 = repo.list_parts(db)
+    assert total2 == 1 and [r["id"] for r in rows2] == [vid]
+    assert rows2[0]["version_count"] == 2
+
+
+def test_list_assemblies_collapses_to_current_version(db):
+    asm = asm_repo.create_assembly(db, {"part_no": "98-1", "value": "A", "rev": "A"})
+    v = versions.create_version(db, asm, rev="B")
+    rows = asm_repo.list_assemblies(db)
+    ids = [r["id"] for r in rows]
+    assert ids == [asm] and rows[0]["version_count"] == 2
+    versions.release_version(db, v)
+    assert [r["id"] for r in asm_repo.list_assemblies(db)] == [v]
+
+
+def test_find_by_part_no_and_mpn_prefer_released(db):
+    pid = _mk_part(db, part_no="M-1", rev="A")
+    vid = versions.create_version(db, pid, rev="B")
+    assert repo.find_part_by_part_no(db, "M-1")["id"] == pid  # released, not the draft
+    assert repo.find_part_id_by_mpn(db, "M-1") == pid
+    versions.release_version(db, vid)
+    assert repo.find_part_by_part_no(db, "M-1")["id"] == vid
+    assert repo.find_part_id_by_mpn(db, "M-1") == vid
+
+
+def test_stock_index_excludes_non_released_versions(db):
+    pid = _mk_part(db, part_no="GRM-1", rev="A", qty=100.0)
+    vid = versions.create_version(db, pid, rev="B")          # a draft, zero stock
+    all_ids = {it.item_id for it in stock_index.build_stock_index(db).items}
+    assert pid in all_ids and vid not in all_ids
+
+
+def test_pickers_show_only_current_version(db):
+    asm = asm_repo.create_assembly(db, {"part_no": "98-9", "value": "Board"})
+    child = _mk_part(db, part_no="C-1", rev="A")
+    cdraft = versions.create_version(db, child, rev="B")     # draft child
+    picker_ids = {p["id"] for p in asm_repo.parts_for_picker(db, asm)}
+    assert child in picker_ids and cdraft not in picker_ids
 
 
 # ---- web routes ----

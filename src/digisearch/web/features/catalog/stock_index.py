@@ -21,7 +21,10 @@ def build_stock_index(db: Database) -> StockIndex:
             "       COALESCE(description, '') AS description, COALESCE(category, '') AS category, "
             "       COALESCE(mfr_pno, '') AS mfr_pno, "
             "       COALESCE(total_qty, 0) AS total_qty, COALESCE(total_alloc, 0) AS total_alloc "
-            "FROM parts WHERE COALESCE(is_document, 0) = 0"
+            "FROM parts WHERE COALESCE(is_document, 0) = 0 "
+            # Cover BOM lines only from the current (released) version — a draft/superseded version
+            # carries its own separate (often zero/stale) stock that shouldn't satisfy a build.
+            "AND version_status = 'released'"
         ).fetchall()
     items: list[StockItem] = []
     for r in rows:

@@ -65,6 +65,19 @@ _DEFAULT_SUPPLIER = """
 """
 
 
+# Collapse a versioned item to one list row: the current (released) version of each group, or the
+# lowest-id version if a group has none released yet. Correlated on the outer `parts` alias `p`.
+# For an un-versioned catalog (every part is the sole released member of its own group) this is always
+# true, so lists are unchanged until a second version exists.
+# COALESCE(version_group_id, id): a row with no group (e.g. bulk-imported seed data) is treated as its
+# own group of one, so it's never dropped from a list. Production rows always have the group set.
+_CURRENT_VERSION = (
+    "p.id = (SELECT x.id FROM parts x "
+    "WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id) "
+    "ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1)"
+)
+
+
 def _unit_price(price_per_uom: float | None, qty_per_uom: float | None) -> float | None:
     if price_per_uom is None:
         return None
@@ -86,6 +99,7 @@ def list_parts(
     like = f"%{search}%" if search else None
     where = (
         "WHERE p.kind != 'ASSY' "
+        f"AND {_CURRENT_VERSION} "
         "AND (:search IS NULL OR p.part_no LIKE :like OR p.value LIKE :like "
         "OR p.mfr_pno LIKE :like OR p.description LIKE :like) "
         "AND (:category IS NULL OR p.category = :category) "
@@ -100,7 +114,10 @@ def list_parts(
         rows = conn.execute(
             f"""SELECT p.id, p.part_no, p.value, p.category, p.kind,
                        p.total_qty, p.total_alloc, p.min_qty, p.unit_cost, p.external_price,
-                       p.unlimited_stock, p.normally_stocked,
+                       p.unlimited_stock, p.normally_stocked, p.version_status,
+                       (SELECT COUNT(*) FROM parts g
+                        WHERE COALESCE(g.version_group_id, g.id) = COALESCE(p.version_group_id, p.id))
+                           AS version_count,
                        (p.total_qty - p.total_alloc) AS free,
                        s.name AS supplier, ps.supplier_pno AS supplier_pno,
                        ps.price_per_uom AS price_per_uom, ps.qty_per_uom AS qty_per_uom
@@ -223,7 +240,7 @@ def find_part_id_by_mpn(db: Database, mpn: str | None) -> int | None:
     with db.connect() as conn:
         row = conn.execute(
             "SELECT id FROM parts WHERE lower(part_no) = lower(?) OR lower(mfr_pno) = lower(?) "
-            "LIMIT 1",
+            "ORDER BY (version_status = 'released') DESC, id LIMIT 1",
             (mpn, mpn),
         ).fetchone()
     return row["id"] if row else None
@@ -237,7 +254,8 @@ def find_part_by_part_no(db: Database, part_no: str | None) -> dict | None:
         return None
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT * FROM parts WHERE lower(part_no) = lower(?) ORDER BY id LIMIT 1",
+            "SELECT * FROM parts WHERE lower(part_no) = lower(?) "
+            "ORDER BY (version_status = 'released') DESC, id LIMIT 1",
             (part_no.strip(),),
         ).fetchone()
     return dict(row) if row else None
