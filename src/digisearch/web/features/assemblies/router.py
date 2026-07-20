@@ -259,9 +259,11 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             # software) — collected under the product, shown as a panel, never in the BOM total.
             "family_no": _family_no(assembly.get("part_no")),
             "documents": _family_documents(db, _family_no(assembly.get("part_no"))),
-            # Versions of this assembly (same number, distinct rows). Panel is shared with catalog.
+            # Versions of this assembly (same number, distinct rows). Panel is shared with catalog;
+            # version_base prefixes the panel's form actions / links so they hit the assemblies routes.
             "versions": catalog_versions.list_versions(
                 db, assembly.get("version_group_id") or part_id),
+            "version_base": "/assemblies",
         },
         status_code=status,
     )

@@ -182,6 +182,26 @@ def test_part_detail_renders_versions_panel(app):
     assert "Versions" in r.text and "New version" in r.text
 
 
+def test_part_panel_form_action_is_catalog_prefixed(app):
+    pid = _mk_part(app.state.database)
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    r = client.get(f"/catalog/{pid}")
+    assert f'action="/catalog/{pid}/versions/new"' in r.text
+
+
+def test_assembly_panel_form_action_is_assemblies_prefixed(app):
+    # Regression: the assembly page must pass version_base so the shared panel's form action carries
+    # the /assemblies prefix — a missing base rendered "/{id}/versions/new" and 404'd.
+    asm = asm_repo.create_assembly(app.state.database, {"part_no": "06-00455-1", "value": "Board"})
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    r = client.get(f"/assemblies/{asm}")
+    assert r.status_code == 200
+    assert f'action="/assemblies/{asm}/versions/new"' in r.text
+    assert f'action="/{asm}/versions/new"' not in r.text        # the bug we fixed
+
+
 def test_new_version_route_redirects_to_draft_edit(app):
     pid = _mk_part(app.state.database)
     client = TestClient(app)

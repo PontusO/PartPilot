@@ -3,6 +3,9 @@
    carries id + version_status), `version_base` ("/catalog" or "/assemblies"), `can_edit`.
    A version IS a parts row: same number, distinct id, its own BOM/stock. Exactly one is the
    current (released) default; others are draft (being prepared) or superseded (past releases). #}
+{# version_base must be set by the including page ("/catalog" or "/assemblies"); fail loud in dev
+   rather than render a prefix-less action like "/490/versions/new" that 404s. #}
+{% set version_base = version_base or ('/assemblies' if part.kind == 'ASSY' else '/catalog') %}
 {% set vbadge = {'draft':'warn', 'released':'ok', 'superseded':'muted'} %}
 {% set vlabel = {'draft':'Draft', 'released':'Current', 'superseded':'Superseded'} %}
 <div class="panel">
