@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import digisearch.web.app as web_app
-import digisearch.web.features.purchasing.router as purchasing_router
-from digisearch.models import BomLine, Candidate, LineKind, ResolvedLine, Status
-from digisearch.web.features.purchasing.service import PurchaseResult
+import partpilot.web.app as web_app
+import partpilot.web.features.purchasing.router as purchasing_router
+from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+from partpilot.web.features.purchasing.service import PurchaseResult
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def test_home_shows_welcome_with_categories(app):
 
 
 def test_contacts_list_create_and_edit(app):
-    from digisearch.web.features.contacts import repo as crepo
+    from partpilot.web.features.contacts import repo as crepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")  # purchasing -> can edit
@@ -96,9 +96,9 @@ def test_contacts_list_create_and_edit(app):
 
 
 def test_refresh_cost_tiers_route_and_detail_section(app, monkeypatch):
-    from digisearch.models import Candidate
-    from digisearch.web.features.catalog import cost_refresh
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.models import Candidate
+    from partpilot.web.features.catalog import cost_refresh
+    from partpilot.web.features.catalog import repo as catrepo
 
     pid = catrepo.create_part(app.state.database, part={"part_no": "RTX-1"}, supplier_lines=[
         {"supplier_name": "Digi-Key", "supplier_pno": "RTX-1-ND", "unit_price": 0.1,
@@ -127,10 +127,10 @@ def test_refresh_cost_tiers_route_and_detail_section(app, monkeypatch):
 
 
 def test_assembly_estimate_route(app, monkeypatch):
-    from digisearch.models import Candidate
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import cost_refresh
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.models import Candidate
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import cost_refresh
+    from partpilot.web.features.catalog import repo as catrepo
 
     db = app.state.database
     leaf = catrepo.create_part(db, part={"part_no": "EST-L"}, supplier_lines=[{
@@ -162,8 +162,8 @@ def test_assembly_estimate_route(app, monkeypatch):
 def test_assembly_detail_build_qty_reprices_from_stored(app):
     """?build_qty=N re-prices the existing figures at that volume from stored prices — in place, no
     distributor query and no separate estimate cards."""
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     db = app.state.database
     leaf = catrepo.create_part(db, part={"part_no": "BQ-L"}, supplier_lines=[{
@@ -184,7 +184,7 @@ def test_assembly_detail_build_qty_reprices_from_stored(app):
 
 
 def test_setup_pricing_markup_screen(app):
-    from digisearch.web.features.setup import repo as setup_repo
+    from partpilot.web.features.setup import repo as setup_repo
 
     app.state.store.create_user("boss", "pw", role="admin")
     client = TestClient(app)
@@ -212,7 +212,7 @@ def test_setup_pricing_markup_screen(app):
 def test_per_part_markup_zero_is_clamped_to_none(app):
     """A per-part markup of 0 (or negative) would zero the part's sell prices — the form clamps it to
     None so it falls back to the Setup default."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
@@ -229,7 +229,7 @@ def test_per_part_markup_zero_is_clamped_to_none(app):
 def test_part_form_pricing_roundtrip_and_generate(app):
     """Create a part with a markup + sell tiers via the form; edit preserves cost tiers; the
     generate endpoint derives markup tiers from captured cost breaks."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")  # purchasing -> can edit
@@ -272,7 +272,7 @@ def test_part_form_pricing_roundtrip_and_generate(app):
 def test_supplier_contact_mirrors_into_catalog_suppliers(app):
     """A supplier added in Contacts must appear in the part-edit / PO supplier dropdown, which
     reads the catalog ``suppliers`` table (not ``contacts``)."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")  # purchasing -> can edit
@@ -293,7 +293,7 @@ def test_supplier_contact_mirrors_into_catalog_suppliers(app):
     assert not any(s["name"] == "Buyer Co" for s in catrepo.suppliers(db))
 
     # Editing the same-named supplier contact updates its mirror in place (no duplicate row).
-    from digisearch.web.features.contacts import repo as conrepo
+    from partpilot.web.features.contacts import repo as conrepo
     sup_cid = conrepo.list_contacts(db, search="Widget")[0]["id"]
     client.post(f"/contacts/{sup_cid}/edit",
                 data={"kind": "supplier", "name": "Widget Supply AB", "currency": "USD"},
@@ -303,11 +303,11 @@ def test_supplier_contact_mirrors_into_catalog_suppliers(app):
 
 
 def test_planning_calendar_events_and_reschedule(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     comp = catrepo.create_part(db, part={"part_no": "PLC-1"},
@@ -355,9 +355,9 @@ def test_planning_reschedule_requires_role(app):
 
 
 def test_work_order_flow(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     comp = catrepo.create_part(db, part={"part_no": "WC-1"},
@@ -386,11 +386,11 @@ def test_work_order_flow(app):
 
 
 def test_build_to_fulfil_from_customer_order(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     comp = catrepo.create_part(db, part={"part_no": "BC-1"},
@@ -432,10 +432,10 @@ def test_work_order_write_requires_role(app):
 
 
 def test_purchase_order_suggestions_and_receive(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchase_orders import repo as porepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     p = catrepo.create_part(db, part={"part_no": "PR-1"},
@@ -482,8 +482,8 @@ def test_purchase_order_suggestions_and_receive(app):
 
 
 def test_po_export_downloads(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchase_orders import repo as porepo
 
     db = app.state.database
     p = catrepo.create_part(db, part={"part_no": "WEXP-1", "mfr_pno": "M1"},
@@ -508,8 +508,8 @@ def test_po_export_downloads(app):
 
 
 def test_po_documents_archived_on_placement(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchase_orders import repo as porepo
 
     db = app.state.database
     p = catrepo.create_part(db, part={"part_no": "ARC-1"},
@@ -530,10 +530,10 @@ def test_po_documents_archived_on_placement(app):
 
 
 def test_production_spillage_setting_inflates_work_order(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.setup import repo as setuprepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.setup import repo as setuprepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     app.state.store.create_user("boss", "pw", role="admin")
@@ -560,7 +560,7 @@ def test_production_spillage_setting_inflates_work_order(app):
 
 
 def test_company_details_settings(app):
-    from digisearch.web.features.setup import repo as setuprepo
+    from partpilot.web.features.setup import repo as setuprepo
 
     app.state.store.create_user("boss", "pw", role="admin")
     client = TestClient(app)
@@ -577,10 +577,10 @@ def test_company_details_settings(app):
 
 
 def test_order_settings_toggle_acknowledge_confirm(app):
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.setup import repo as setuprepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.setup import repo as setuprepo
 
     db = app.state.database
     app.state.store.create_user("boss", "pw", role="admin")
@@ -619,8 +619,8 @@ def test_order_settings_toggle_acknowledge_confirm(app):
 
 
 def test_edit_po_line_before_placing(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchase_orders import repo as porepo
 
     db = app.state.database
     p = catrepo.create_part(db, part={"part_no": "EQ-1"},
@@ -649,10 +649,10 @@ def test_edit_po_line_before_placing(app):
 
 
 def test_delete_po_from_detail_page(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchase_orders import repo as porepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     client = TestClient(app)
@@ -699,7 +699,7 @@ def test_purchase_order_write_requires_role(app):
 
 
 def test_stock_move_via_part_page(app):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     db = app.state.database
     pid = catrepo.create_part(db, part={"part_no": "WPART"},
@@ -724,7 +724,7 @@ def test_stock_move_via_part_page(app):
 
 
 def test_stock_move_requires_role(app):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     app.state.store.create_user("ship1", "pw", role="shipping")  # not a stock-move role
     pid = catrepo.create_part(app.state.database, part={"part_no": "WPART2"},
@@ -738,9 +738,9 @@ def test_stock_move_requires_role(app):
 
 
 def test_customer_orders_flow(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme AB"})
@@ -778,9 +778,9 @@ def test_customer_orders_flow(app):
 
 
 def test_customer_order_acknowledgement_pdf(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     part = catrepo.create_part(db, part={"part_no": "ACK-1", "value": "thing"},
@@ -818,8 +818,8 @@ def test_customer_order_acknowledgement_pdf(app):
 
 
 def test_customer_order_acknowledge_requires_role(app):
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
@@ -830,9 +830,9 @@ def test_customer_order_acknowledge_requires_role(app):
 
 
 def test_despatch_flow(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     part = catrepo.create_part(db, part={"part_no": "SH-1"},
@@ -851,7 +851,7 @@ def test_despatch_flow(app):
     assert f"/despatch/from-order/{oid}" in client.get(f"/customer-orders/{oid}").text
     assert "SH-1" in client.get(f"/despatch/from-order/{oid}").text
 
-    from digisearch.web.features.despatch import repo as despatch_repo
+    from partpilot.web.features.despatch import repo as despatch_repo
 
     line_id = corepo.get_order(db, oid)["lines"][0]["id"]
     # 1) creating a packing list moves no stock yet
@@ -886,9 +886,9 @@ def test_despatch_flow(app):
 
 
 def test_customer_order_allocation(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     part = catrepo.create_part(db, part={"part_no": "AL-1"},
@@ -911,9 +911,9 @@ def test_customer_order_allocation(app):
 
 
 def test_cancel_customer_order_releases_allocation(app):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
 
     db = app.state.database
     part = catrepo.create_part(db, part={"part_no": "CC-1"},
@@ -938,12 +938,12 @@ def test_cancel_customer_order_releases_allocation(app):
 
 
 def test_cancelled_order_warns_about_downstream(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
-    from digisearch.web.features.purchase_orders import repo as porepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     db = app.state.database
     comp = catrepo.create_part(db, part={"part_no": "DS-1"},
@@ -996,8 +996,8 @@ def test_customer_orders_write_requires_role(app):
 def test_contacts_supplier_parts_link(app):
     import re
 
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as crepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as crepo
 
     db = app.state.database
     crepo.create_contact(db, {"kind": "supplier", "name": "Digikey"})
@@ -1018,7 +1018,7 @@ def test_contacts_supplier_parts_link(app):
 
 
 def test_contact_addresses_management(app):
-    from digisearch.web.features.contacts import repo as crepo
+    from partpilot.web.features.contacts import repo as crepo
 
     db = app.state.database
     cid = crepo.create_contact(db, {"kind": "customer", "name": "Acme"})
@@ -1050,7 +1050,7 @@ def test_contact_addresses_management(app):
 
 
 def test_contact_address_write_requires_role(app):
-    from digisearch.web.features.contacts import repo as crepo
+    from partpilot.web.features.contacts import repo as crepo
 
     cid = crepo.create_contact(app.state.database, {"kind": "customer", "name": "Acme"})
     ware = TestClient(app)
@@ -1070,7 +1070,7 @@ def test_contacts_write_requires_role(app):
 
 
 def test_reports_index_and_stock_ledger(app):
-    from digisearch.web.features.catalog import repo, stock
+    from partpilot.web.features.catalog import repo, stock
 
     db = app.state.database
     repo.create_part(db, part={"part_no": "99-001", "value": "10uF", "description": "cap"},
@@ -1173,7 +1173,7 @@ def test_download_path_traversal_blocked(app):
 
 
 def test_catalog_pages_render(app):
-    from digisearch.web.features.catalog import importer
+    from partpilot.web.features.catalog import importer
 
     importer.import_tables(
         app.state.database,
@@ -1247,7 +1247,7 @@ def _create_part(client, part_no="EDITME"):
 
 
 def test_edit_component_flow(app):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
@@ -1278,8 +1278,8 @@ def test_edit_component_flow(app):
 
 
 def test_assemblies_pages_and_parts_split(app):
-    from digisearch.web.features.assemblies import importer as asmimp
-    from digisearch.web.features.catalog import importer as catimp
+    from partpilot.web.features.assemblies import importer as asmimp
+    from partpilot.web.features.catalog import importer as catimp
 
     db = app.state.database
     catimp.import_tables(
@@ -1334,8 +1334,8 @@ def _seed_suspect_part(app, part_no="123-4567-ND", supplier="Digikey"):
 
 
 def test_part_cleanup_lookup_and_apply(app, monkeypatch):
-    import digisearch.web.features.setup.router as setup_router
-    from digisearch.web.features.setup.part_cleanup import Recovery
+    import partpilot.web.features.setup.router as setup_router
+    from partpilot.web.features.setup.part_cleanup import Recovery
 
     app.state.store.create_user("admin9", "pw", role="admin")
     pid = _seed_suspect_part(app)
@@ -1396,7 +1396,7 @@ def test_part_cleanup_skips_collision(app):
 
 
 def _setup_assembly(app):
-    from digisearch.web.features.catalog import importer as catimp
+    from partpilot.web.features.catalog import importer as catimp
     db = app.state.database
     catimp.import_tables(
         db, suppliers=[],
@@ -1453,7 +1453,7 @@ def test_assembly_bom_add_and_delete(app):
 
 def test_assembly_bom_line_inline_edit(app):
     import re
-    from digisearch.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
 
     asm, comp = _setup_assembly(app)
     db = app.state.database
@@ -1484,7 +1484,7 @@ def test_assembly_bom_line_inline_edit(app):
 
 
 def test_assembly_bom_line_edit_requires_write_role(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
 
     asm, comp = _setup_assembly(app)
     db = app.state.database
@@ -1540,7 +1540,7 @@ def test_assembly_bom_edit_requires_write_role(app):
 
 
 def test_edit_assembly_fields_flow(app):
-    from digisearch.web.features.assemblies import repo as arepo
+    from partpilot.web.features.assemblies import repo as arepo
 
     client = TestClient(app)
     _login(client, "buyer1", "pw")
@@ -1559,8 +1559,8 @@ def test_edit_assembly_fields_flow(app):
 
 
 def test_work_order_bom_divergence_and_regenerate(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     asm, comp = _setup_assembly(app)                 # ASM-100 assembly, RES-1 component
     db = app.state.database
@@ -1591,8 +1591,8 @@ def test_work_order_bom_divergence_and_regenerate(app):
 
 
 def test_regenerate_bom_requires_work_order_role(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.work_orders import repo as worepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.work_orders import repo as worepo
 
     asm, comp = _setup_assembly(app)
     db = app.state.database
@@ -1609,9 +1609,9 @@ def test_regenerate_bom_requires_work_order_role(app):
 def test_assembly_csv_import_flow(app, monkeypatch):
     import re
 
-    import digisearch.web.features.assemblies.router as ar
-    from digisearch.models import BomLine, Candidate, LineKind, ResolvedLine, Status
-    from digisearch.web.features.purchasing.service import ResolvedRun
+    import partpilot.web.features.assemblies.router as ar
+    from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+    from partpilot.web.features.purchasing.service import ResolvedRun
 
     asm, comp = _setup_assembly(app)  # catalog already has component "RES-1"
 
@@ -1683,7 +1683,7 @@ class _FakeWoo:
 
 
 def test_webshop_settings_admin_only_and_roundtrip(app):
-    from digisearch.web.features.setup import repo as setuprepo
+    from partpilot.web.features.setup import repo as setuprepo
     app.state.store.create_user("boss", "pw", role="admin")
 
     buyer = TestClient(app)
@@ -1701,10 +1701,10 @@ def test_webshop_settings_admin_only_and_roundtrip(app):
 
 
 def test_webshop_sync_preview_and_apply(app, monkeypatch):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.setup import repo as setuprepo
-    from digisearch.web.features.setup import router as setup_router
-    from digisearch.woocommerce import WooProduct
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.setup import repo as setuprepo
+    from partpilot.web.features.setup import router as setup_router
+    from partpilot.woocommerce import WooProduct
 
     db = app.state.database
     app.state.store.create_user("boss", "pw", role="admin")
@@ -1741,10 +1741,10 @@ def test_webshop_sync_preview_and_apply(app, monkeypatch):
 
 
 def test_webshop_sync_pushes_builds_back(app, monkeypatch):
-    from digisearch.web.features.catalog import repo as catrepo, stock
-    from digisearch.web.features.setup import repo as setuprepo
-    from digisearch.web.features.setup import router as setup_router
-    from digisearch.woocommerce import WooProduct
+    from partpilot.web.features.catalog import repo as catrepo, stock
+    from partpilot.web.features.setup import repo as setuprepo
+    from partpilot.web.features.setup import router as setup_router
+    from partpilot.woocommerce import WooProduct
 
     db = app.state.database
     app.state.store.create_user("boss", "pw", role="admin")
@@ -1786,10 +1786,10 @@ class _FakeFortnox:
 
 
 def _ship_order(db, *, linked=False, org_no="556-1"):
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import repo as corepo
-    from digisearch.web.features.despatch import repo as despatch_repo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.despatch import repo as despatch_repo
     cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme AB", "org_no": org_no})
     if linked:
         with db.connect() as conn:
@@ -1807,7 +1807,7 @@ def _ship_order(db, *, linked=False, org_no="556-1"):
 
 def _pack_confirm_dispatch(client, db, oid, qty=2):
     """Drive the web flow: open a packing list, pack+confirm it, dispatch it. Returns despatch id."""
-    from digisearch.web.features.despatch import repo as despatch_repo
+    from partpilot.web.features.despatch import repo as despatch_repo
     line_id = despatch_repo.shippable_lines(db, oid)[0]["line_id"]
     r = client.post(f"/despatch/from-order/{oid}",
                     data={"ship": str(line_id), f"qty_{line_id}": str(qty)}, follow_redirects=False)
@@ -1839,7 +1839,7 @@ def test_fortnox_settings_admin_only_and_connect_needs_config(app):
 
 
 def test_contact_org_no_round_trips_through_form(app):
-    from digisearch.web.features.contacts import repo as conrepo
+    from partpilot.web.features.contacts import repo as conrepo
     client = TestClient(app)
     _login(client, "buyer1", "pw")
     r = client.post("/contacts/new", data={"kind": "customer", "name": "Globex",
@@ -1850,8 +1850,8 @@ def test_contact_org_no_round_trips_through_form(app):
 
 
 def test_despatch_auto_invoices_when_fortnox_connected(app, monkeypatch):
-    from digisearch.web.features.despatch import fortnox_invoice as fi
-    from digisearch.web.features.despatch import repo as despatch_repo
+    from partpilot.web.features.despatch import fortnox_invoice as fi
+    from partpilot.web.features.despatch import repo as despatch_repo
     db = app.state.database
     cust, oid = _ship_order(db, linked=True)            # already linked → no confirmation needed
     fake = _FakeFortnox(invoice_no="9001")
@@ -1865,8 +1865,8 @@ def test_despatch_auto_invoices_when_fortnox_connected(app, monkeypatch):
 
 
 def test_despatch_needs_customer_confirmation_then_confirm(app, monkeypatch):
-    from digisearch.web.features.despatch import fortnox_invoice as fi
-    from digisearch.web.features.despatch import repo as despatch_repo
+    from partpilot.web.features.despatch import fortnox_invoice as fi
+    from partpilot.web.features.despatch import repo as despatch_repo
     db = app.state.database
     cust, oid = _ship_order(db, linked=False)           # not linked, no Fortnox match → confirm first
     fake = _FakeFortnox(new_customer="777", invoice_no="9100")
@@ -1888,8 +1888,8 @@ def test_despatch_needs_customer_confirmation_then_confirm(app, monkeypatch):
 
 
 def test_external_price_shows_on_list_pages(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database
     pid = catrepo.create_part(db, part={"part_no": "99-LIST"}, supplier_lines=[])
     aid = asmrepo.create_assembly(db, {"part_no": "98-LIST"})
@@ -1916,8 +1916,8 @@ def test_webshop_sync_blocked_when_unconfigured(app):
 # ----- convert an assembly to a component (fix mis-entered parts) -----
 
 def test_convert_assembly_to_component_route(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database
     aid = asmrepo.create_assembly(db, {"part_no": "98-OOPS", "value": "really a part"})
 
@@ -1929,8 +1929,8 @@ def test_convert_assembly_to_component_route(app):
 
 
 def test_convert_blocked_by_work_order(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database
     aid = asmrepo.create_assembly(db, {"part_no": "98-WO"})
     with db.connect() as conn:
@@ -1945,7 +1945,7 @@ def test_convert_blocked_by_work_order(app):
 
 
 def test_convert_requires_write_role(app):
-    from digisearch.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.assemblies import repo as asmrepo
     db = app.state.database
     aid = asmrepo.create_assembly(db, {"part_no": "98-GATED"})
     ware = TestClient(app)

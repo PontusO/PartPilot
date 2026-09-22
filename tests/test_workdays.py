@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from digisearch.web.core import add_workdays, iso, parse_date, sub_workdays, workdays_between
+from partpilot.web.core import add_workdays, iso, parse_date, sub_workdays, workdays_between
 
 
 def _weekday_on_or_after(d, wd):  # wd: 0=Mon .. 4=Fri

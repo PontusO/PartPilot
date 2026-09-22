@@ -1,18 +1,18 @@
 import pytest
 
-from digisearch.fortnox import FortnoxError
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo as catrepo
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.contacts import repo as conrepo
-from digisearch.web.features.customer_orders import feature as customer_orders_feature
-from digisearch.web.features.customer_orders import repo as corepo
-from digisearch.web.features.despatch import feature as despatch_feature
-from digisearch.web.features.despatch import fortnox_invoice as fi
-from digisearch.web.features.despatch import repo as despatch_repo
-from digisearch.web.features.setup import feature as setup_feature
+from partpilot.fortnox import FortnoxError
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo as catrepo
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.contacts import repo as conrepo
+from partpilot.web.features.customer_orders import feature as customer_orders_feature
+from partpilot.web.features.customer_orders import repo as corepo
+from partpilot.web.features.despatch import feature as despatch_feature
+from partpilot.web.features.despatch import fortnox_invoice as fi
+from partpilot.web.features.despatch import repo as despatch_repo
+from partpilot.web.features.setup import feature as setup_feature
 
 
 @pytest.fixture
@@ -133,7 +133,7 @@ def test_invoice_payload_is_free_text_with_default_vat(db):
 
 
 def test_default_vat_and_account_from_settings(db):
-    from digisearch.web.features.setup import repo as setuprepo
+    from partpilot.web.features.setup import repo as setuprepo
     setuprepo.save_fortnox(db, {"client_id": "c", "client_secret": "s",
                                 "redirect_uri": "r", "default_vat": "6", "default_account": "3011"})
     _, desp = _despatch(db, org_no="1")

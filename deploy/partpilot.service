@@ -15,7 +15,7 @@ EnvironmentFile=/home/service1/partpilot/.env
 
 # Run the venv console script directly (more robust under systemd than `uv run`).
 # Production binds all interfaces on port 8000 and uses the real database under data/.
-ExecStart=/home/service1/partpilot/.venv/bin/digisearch serve --host 0.0.0.0 --port 8000
+ExecStart=/home/service1/partpilot/.venv/bin/partpilot serve --host 0.0.0.0 --port 8000
 
 Restart=on-failure
 RestartSec=3

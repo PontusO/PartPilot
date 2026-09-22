@@ -1,5 +1,5 @@
-from digisearch.web.core import Feature, FeatureRegistry, Migration
-from digisearch.web.core.db import Database
+from partpilot.web.core import Feature, FeatureRegistry, Migration
+from partpilot.web.core.db import Database
 
 
 def _registry_with_table():
@@ -55,7 +55,7 @@ def test_duplicate_feature_rejected():
 
 
 def test_nav_filtered_by_role():
-    from digisearch.web.core import NavItem
+    from partpilot.web.core import NavItem
 
     reg = FeatureRegistry()
     reg.register(

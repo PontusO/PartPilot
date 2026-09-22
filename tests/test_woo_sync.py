@@ -1,11 +1,11 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import repo as assemblies_repo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo, stock, woo_sync
-from digisearch.woocommerce import WooProduct
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import repo as assemblies_repo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo, stock, woo_sync
+from partpilot.woocommerce import WooProduct
 
 
 @pytest.fixture

@@ -1,16 +1,16 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import repo as asmrepo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo as catrepo
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.contacts import repo as conrepo
-from digisearch.web.features.customer_orders import feature as co_feature
-from digisearch.web.features.customer_orders import repo
-from digisearch.web.features.setup import feature as setup_feature
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import repo as asmrepo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo as catrepo
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.contacts import repo as conrepo
+from partpilot.web.features.customer_orders import feature as co_feature
+from partpilot.web.features.customer_orders import repo
+from partpilot.web.features.setup import feature as setup_feature
 
 
 @pytest.fixture
@@ -168,7 +168,7 @@ def test_picker_prices_show_loaded_cost(db):
 
 
 def test_allocate_and_release(db):
-    from digisearch.web.features.catalog import stock as cstock
+    from partpilot.web.features.catalog import stock as cstock
 
     cust, part = _seed(db)
     cstock.adjust_stock(db, part, delta=30, mtype=cstock.RECEIVE)  # 30 on hand
@@ -187,7 +187,7 @@ def test_allocate_and_release(db):
 
 
 def test_cancel_order_releases_allocations(db):
-    from digisearch.web.features.catalog import stock as cstock
+    from partpilot.web.features.catalog import stock as cstock
 
     cust, part = _seed(db)
     cstock.adjust_stock(db, part, delta=30, mtype=cstock.RECEIVE)
@@ -213,7 +213,7 @@ def test_cannot_cancel_shipped_order(db):
 
 
 def test_allocate_limited_by_free_stock(db):
-    from digisearch.web.features.catalog import stock as cstock
+    from partpilot.web.features.catalog import stock as cstock
 
     cust, part = _seed(db)
     cstock.adjust_stock(db, part, delta=8, mtype=cstock.RECEIVE)  # only 8 in stock
@@ -261,7 +261,7 @@ def test_acknowledge_stores_pdf_and_confirms(db):
 
 
 def test_order_defaults_and_resolves_addresses(db):
-    from digisearch.web.features.contacts import repo as conrepo
+    from partpilot.web.features.contacts import repo as conrepo
 
     cust, _ = _seed(db)
     inv = conrepo.create_address(db, cust, {"company": "Acme Billing AB", "line1": "1 Rd",
@@ -286,8 +286,8 @@ def test_order_defaults_and_resolves_addresses(db):
 
 
 def test_acknowledgement_pdf_uses_invoice_and_delivery(db):
-    from digisearch.web.features.contacts import repo as conrepo
-    from digisearch.web.features.customer_orders import export
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import export
 
     cust, part = _seed(db)
     conrepo.create_address(db, cust, {"company": "Acme Billing AB", "line1": "1 Rd",

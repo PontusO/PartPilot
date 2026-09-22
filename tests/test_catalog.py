@@ -1,9 +1,9 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import importer, pricing, repo, stock
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import importer, pricing, repo, stock
 
 
 @pytest.fixture
@@ -436,7 +436,7 @@ def test_recalc_sell_tiers_no_cost_tiers_is_noop(db):
 
 def test_leaf_and_rolled_sell_price(db):
     """rolled_sell_price is volume-aware over a 2-level BOM (needs the assemblies feature)."""
-    from digisearch.web.features.assemblies import feature as asm_feature
+    from partpilot.web.features.assemblies import feature as asm_feature
 
     database = db
     # Rebuild with assemblies registered so bom_lines exists.
@@ -465,8 +465,8 @@ def test_leaf_and_rolled_sell_price(db):
 
 
 def test_refresh_cost_tiers_from_distributor(db, monkeypatch):
-    from digisearch.models import Candidate
-    from digisearch.web.features.catalog import cost_refresh
+    from partpilot.models import Candidate
+    from partpilot.web.features.catalog import cost_refresh
 
     pid = repo.create_part(db, part={"part_no": "RF-1"}, supplier_lines=[
         {"supplier_name": "Digi-Key", "supplier_pno": "DK-XYZ-ND", "unit_price": 0.1,
@@ -502,7 +502,7 @@ def test_refresh_cost_tiers_from_distributor(db, monkeypatch):
 
 
 def test_refresh_cost_tiers_reports_unconfigured(db, monkeypatch):
-    from digisearch.web.features.catalog import cost_refresh
+    from partpilot.web.features.catalog import cost_refresh
 
     pid = repo.create_part(db, part={"part_no": "RF-2"}, supplier_lines=[
         {"supplier_name": "Mouser", "supplier_pno": "81-ABC", "unit_price": 0.1,
@@ -548,7 +548,7 @@ def test_importer_flags_document_class_parts(db):
 
 
 def test_opening_stock_and_part_edit_go_through_the_ledger(db):
-    from digisearch.web.features.catalog import stock as cstock
+    from partpilot.web.features.catalog import stock as cstock
 
     pid = repo.create_part(db, part={"part_no": "L-1"}, supplier_lines=[],
                            opening={"qty": 30, "bin": "A1"})
@@ -570,9 +570,9 @@ def test_opening_stock_and_part_edit_go_through_the_ledger(db):
 def test_catalog_stock_index_matches_and_excludes_documents(db):
     """The stock pre-check reads our own catalog: match by MPN or generic value+package, with free
     stock = on-hand − allocated; document-class parts are never stock."""
-    from digisearch.models import CompType
-    from digisearch.spec.units import parse_rkm_value
-    from digisearch.web.features.catalog.stock_index import build_stock_index
+    from partpilot.models import CompType
+    from partpilot.spec.units import parse_rkm_value
+    from partpilot.web.features.catalog.stock_index import build_stock_index
 
     repo.create_part(db, part={"part_no": "MBR120LSF", "value": "Schottky", "mfr_pno": "MBR120LSF"},
                      supplier_lines=[], opening={"qty": 300})

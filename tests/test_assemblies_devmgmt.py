@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import digisearch.web.app as web_app
-from digisearch.web.features.assemblies import repo as asmrepo
-from digisearch.web.features.catalog import devmgmt_outbox, devmgmt_repo
+import partpilot.web.app as web_app
+from partpilot.web.features.assemblies import repo as asmrepo
+from partpilot.web.features.catalog import devmgmt_outbox, devmgmt_repo
 
 
 @pytest.fixture

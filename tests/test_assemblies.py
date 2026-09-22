@@ -1,10 +1,10 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import importer, repo
-from digisearch.web.features.catalog import feature as catalog_feature
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import importer, repo
+from partpilot.web.features.catalog import feature as catalog_feature
 
 
 @pytest.fixture
@@ -127,7 +127,7 @@ def test_parts_for_picker_excludes_self(db):
 
 
 def _component(db, part_no, unit_price):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
     lines = ([{"supplier_name": "DK", "unit_price": unit_price, "reel_qty": 1, "is_default": True}]
              if unit_price is not None else [])
     return catrepo.create_part(db, part={"part_no": part_no}, supplier_lines=lines)
@@ -145,7 +145,7 @@ def test_get_assembly_reports_material_and_loaded(db):
 
 
 def test_exclude_from_bom_cost_omits_line_from_totals(db):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     asm = repo.create_assembly(db, {"part_no": "EX-ASM"})
     repo.add_bom_line(db, asm, _component(db, "R-1", 0.10), 4, "R1")   # 0.40 material, counted
@@ -168,8 +168,8 @@ def test_exclude_from_bom_cost_omits_line_from_totals(db):
 
 
 def test_rolled_cost_at_is_volume_aware(db):
-    from digisearch.web.features.catalog import pricing
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import pricing
+    from partpilot.web.features.catalog import repo as catrepo
 
     leaf = catrepo.create_part(db, part={"part_no": "LC-1"}, supplier_lines=[{
         "supplier_name": "Digi-Key", "supplier_pno": "LC-1-ND", "unit_price": 0.10, "reel_qty": 1,
@@ -193,16 +193,16 @@ def test_rolled_cost_at_is_volume_aware(db):
 
 
 def test_rolled_cost_at_falls_back_to_unit_cost(db):
-    from digisearch.web.features.catalog import pricing
+    from partpilot.web.features.catalog import pricing
     leaf = _component(db, "LC-2", 0.7)                   # flat unit_cost 0.7, no cost tiers
     with db.connect() as conn:
         assert pricing.rolled_cost_at(conn, leaf, 1000) == pytest.approx(0.7)
 
 
 def test_refresh_bom_for_estimate_skips_in_stock_and_non_distributor(db, monkeypatch):
-    from digisearch.models import Candidate
-    from digisearch.web.features.catalog import cost_refresh
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.models import Candidate
+    from partpilot.web.features.catalog import cost_refresh
+    from partpilot.web.features.catalog import repo as catrepo
 
     short = catrepo.create_part(db, part={"part_no": "SH-1"}, supplier_lines=[{
         "supplier_name": "Digi-Key", "supplier_pno": "SH-1-ND", "unit_price": 0.10, "reel_qty": 1,
@@ -267,7 +267,7 @@ def test_subassembly_cost_rolls_up(db):
 # ---- normally_stocked seed (from 90-/98- products) ----
 
 def test_seed_normally_stocked_marks_product_bom_tree(db):
-    from digisearch.web.features.assemblies.migrations import SEED_NORMALLY_STOCKED_SQL
+    from partpilot.web.features.assemblies.migrations import SEED_NORMALLY_STOCKED_SQL
 
     prod90 = repo.create_assembly(db, {"part_no": "90-00999-1"})   # our product
     prod98 = repo.create_assembly(db, {"part_no": "98-00888-1"})   # our product (other level)
@@ -301,7 +301,7 @@ def test_seed_normally_stocked_marks_product_bom_tree(db):
 # ---- xlsx export ----
 
 def test_export_enriches_lines_with_mfr_and_supplier_price(db):
-    from digisearch.web.features.assemblies import export_xlsx
+    from partpilot.web.features.assemblies import export_xlsx
 
     asm = repo.create_assembly(db, {"part_no": "EXP-ASM", "value": "Widget", "rev": "B",
                                     "description": "A test product"})
@@ -346,7 +346,7 @@ def test_export_enriches_lines_with_mfr_and_supplier_price(db):
 def test_export_sell_price_is_volume_aware(db):
     """A component's loaded cost tier is picked by (qty_per x build volume); the export charges that
     loaded cost (material × overhead) for the parts — no manufacturing margin."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     asm = repo.create_assembly(db, {"part_no": "VOL-ASM"})
     leaf = _component(db, "LEAF", 1.0)
@@ -368,7 +368,7 @@ def test_export_sell_price_is_volume_aware(db):
 def test_export_material_uses_cost_tiers_like_page(db):
     """Export material is priced from cost tiers at the build volume (same basis as the BOM page),
     not a flat unit_cost — so it stays proportional to the sell column (overhead × mfg margin)."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     leaf = catrepo.create_part(db, part={"part_no": "EXP-CT"}, supplier_lines=[{
         "supplier_name": "X", "unit_price": 2.0, "reel_qty": 1, "is_default": True,
@@ -394,7 +394,7 @@ def test_export_route_downloads_xlsx(tmp_path):
     from fastapi.testclient import TestClient
     from openpyxl import load_workbook
 
-    import digisearch.web.app as web_app
+    import partpilot.web.app as web_app
 
     app = web_app.create_app(db_path=tmp_path / "p.db", data_dir=tmp_path / "data",
                              secret_key="test-secret")
@@ -420,7 +420,7 @@ def test_export_route_downloads_xlsx(tmp_path):
 # ---- CSV BOM import (reuses purchasing resolution) ----
 
 def _rline(refdes, qty, value, *, chosen=None, status=None, stock_match=None):
-    from digisearch.models import BomLine, LineKind, ResolvedLine, Status
+    from partpilot.models import BomLine, LineKind, ResolvedLine, Status
     return ResolvedLine(
         line=BomLine(refdes=[refdes], qty=qty, value=value), kind=LineKind.MPN,
         chosen=chosen, status=status or Status.RESOLVED, stock_match=stock_match,
@@ -428,17 +428,17 @@ def _rline(refdes, qty, value, *, chosen=None, status=None, stock_match=None):
 
 
 def _cand(mpn, supplier="Digi-Key"):
-    from digisearch.models import Candidate
+    from partpilot.models import Candidate
     return Candidate(supplier=supplier, mpn=mpn, manufacturer="ACME",
                      dk_part_number=mpn + "-ND", unit_price=0.1, reel_qty=5000,
                      product_url=f"https://www.digikey.com/{mpn}")
 
 
 def test_build_import_plan_classifies(db):
-    from digisearch.models import Status
-    from digisearch.web.features.assemblies import import_bom
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchasing.service import ResolvedRun
+    from partpilot.models import Status
+    from partpilot.web.features.assemblies import import_bom
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchasing.service import ResolvedRun
 
     existing = catrepo.create_part(db, part={"part_no": "EXIST-MPN", "value": "10k"},
                                    supplier_lines=[])
@@ -462,10 +462,10 @@ def test_build_import_plan_classifies(db):
 
 def test_build_import_plan_builds_ilabs_value(db):
     """A resolved passive gets the iLabs slash notation; a missing field is flagged for review."""
-    from digisearch.models import (BomLine, Candidate, CompType, LineKind, PartSpec,
+    from partpilot.models import (BomLine, Candidate, CompType, LineKind, PartSpec,
                                    ResolvedLine, Status)
-    from digisearch.web.features.assemblies import import_bom
-    from digisearch.web.features.purchasing.service import ResolvedRun
+    from partpilot.web.features.assemblies import import_bom
+    from partpilot.web.features.purchasing.service import ResolvedRun
 
     # Resistor: BOM has value+tol+package; power comes from the distributor parametric.
     r_spec = PartSpec(comp_type=CompType.RESISTOR, value_si=1e3, tolerance="5%",
@@ -498,8 +498,8 @@ def test_build_import_plan_builds_ilabs_value(db):
 
 
 def test_apply_import_plan_creates_and_links(db):
-    from digisearch.web.features.assemblies import import_bom
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.assemblies import import_bom
+    from partpilot.web.features.catalog import repo as catrepo
 
     asm = repo.create_assembly(db, {"part_no": "ASM-IMP"})
     existing = catrepo.create_part(db, part={"part_no": "EXIST-MPN"}, supplier_lines=[])
@@ -521,10 +521,10 @@ def test_apply_import_plan_creates_and_links(db):
 
 def test_import_captures_supplier_cost_tiers(db):
     """A resolved new part's Digi-Key price breaks become auto-captured cost tiers on create."""
-    from digisearch.models import Candidate
-    from digisearch.web.features.assemblies import import_bom
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.purchasing.service import ResolvedRun
+    from partpilot.models import Candidate
+    from partpilot.web.features.assemblies import import_bom
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.purchasing.service import ResolvedRun
 
     cand = Candidate(supplier="Digi-Key", mpn="BRK-1", dk_part_number="BRK-1-ND",
                      unit_price=0.10, reel_qty=5000,
@@ -550,7 +550,7 @@ def test_import_captures_supplier_cost_tiers(db):
 
 
 def test_convert_to_component_reclassifies_empty_assembly(db):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     # A part mis-entered as an assembly, with stock but no BOM.
     aid = repo.create_assembly(db, {"part_no": "WAS-ASSY", "value": "really a part",
@@ -577,7 +577,7 @@ def test_convert_blocked_when_bom_present(db):
 
 
 def test_convert_rejects_non_assembly(db):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
     pid = catrepo.create_part(db, part={"part_no": "PLAIN"}, supplier_lines=[])
     with pytest.raises(ValueError, match="not an assembly"):
         repo.convert_to_component(db, pid)

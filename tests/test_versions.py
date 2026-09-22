@@ -5,14 +5,14 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-import digisearch.web.app as web_app
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import repo as asm_repo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo, versions
-from digisearch.web.features.catalog import stock_index
+import partpilot.web.app as web_app
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import repo as asm_repo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo, versions
+from partpilot.web.features.catalog import stock_index
 
 
 @pytest.fixture

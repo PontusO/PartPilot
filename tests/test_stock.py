@@ -1,10 +1,10 @@
-from digisearch.config import Settings
-from digisearch.stock import StockIndex, StockItem, parse_value
-from digisearch.models import BomLine, CompType, Status
-from digisearch.pipeline import resolve_line
+from partpilot.config import Settings
+from partpilot.stock import StockIndex, StockItem, parse_value
+from partpilot.models import BomLine, CompType, Status
+from partpilot.pipeline import resolve_line
 
 from conftest import CAP_PARAMS, FakeSearcher, make_product
-from digisearch.digikey.client import product_to_candidate
+from partpilot.digikey.client import product_to_candidate
 
 S = Settings()
 

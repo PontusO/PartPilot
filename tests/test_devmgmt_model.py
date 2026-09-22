@@ -1,11 +1,11 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import devmgmt_outbox
-from digisearch.web.features.catalog import devmgmt_push as push
-from digisearch.web.features.catalog import devmgmt_repo as repo
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import devmgmt_outbox
+from partpilot.web.features.catalog import devmgmt_push as push
+from partpilot.web.features.catalog import devmgmt_repo as repo
 
 
 @pytest.fixture

@@ -1,10 +1,10 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.contacts import importer, repo
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.contacts import importer, repo
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_default_flag_is_exclusive_per_usage(db):
 
 
 def test_upsert_supplier_matches_and_never_wipes(db):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     sid = catrepo.upsert_supplier(db, name="Acme Parts", short_name="ACM", currency="SEK",
                                   url="https://acme.example")
@@ -132,7 +132,7 @@ def test_upsert_supplier_matches_and_never_wipes(db):
 
 
 def test_upsert_supplier_matches_by_minimrp_id_across_rename(db):
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     sid = catrepo.upsert_supplier(db, name="Old Name", minimrp_id=42)
     # Same miniMRP id but a new name -> same row is updated (renamed), not a new one.
@@ -144,7 +144,7 @@ def test_upsert_supplier_matches_by_minimrp_id_across_rename(db):
 def test_backfill_migration_seeds_suppliers_from_supplier_contacts(db):
     """The v4 contacts migration bridges pre-existing supplier contacts into `suppliers`.
     Re-running its exact SQL is a no-op (idempotent) and ignores non-supplier contacts."""
-    from digisearch.web.features.catalog import repo as catrepo
+    from partpilot.web.features.catalog import repo as catrepo
 
     repo.create_contact(db, {"kind": "supplier", "name": "Legacy Sup", "website": "https://x"})
     repo.create_contact(db, {"kind": "customer", "name": "Some Customer"})

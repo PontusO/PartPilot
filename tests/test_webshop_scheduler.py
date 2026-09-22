@@ -2,11 +2,11 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.setup import feature as setup_feature
-from digisearch.web.features.setup import repo
-from digisearch.web.features.setup.scheduler import _is_due
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.setup import feature as setup_feature
+from partpilot.web.features.setup import repo
+from partpilot.web.features.setup.scheduler import _is_due
 
 
 @pytest.fixture

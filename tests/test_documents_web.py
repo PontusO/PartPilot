@@ -2,10 +2,10 @@ import re
 
 from fastapi.testclient import TestClient
 
-import digisearch.web.app as web_app
-from digisearch.web.features.article_register import repo as ar_repo
-from digisearch.web.features.article_register.codes import article_code
-from digisearch.web.features.documents import repo as doc_repo
+import partpilot.web.app as web_app
+from partpilot.web.features.article_register import repo as ar_repo
+from partpilot.web.features.article_register.codes import article_code
+from partpilot.web.features.documents import repo as doc_repo
 
 
 def _app(tmp_path):
@@ -227,7 +227,7 @@ def test_create_links_carry_product_description(tmp_path):
 
 
 def test_from_template_creates_document_items_for_document_lines(tmp_path):
-    from digisearch.web.features.catalog import repo as crepo
+    from partpilot.web.features.catalog import repo as crepo
 
     app = _app(tmp_path)
     db = app.state.database
@@ -257,7 +257,7 @@ def test_article_register_detail_shows_documents_panel(tmp_path):
 
 
 def test_catalog_refuses_document_class_part_numbers(tmp_path):
-    from digisearch.web.features.catalog import repo as crepo
+    from partpilot.web.features.catalog import repo as crepo
 
     app = _app(tmp_path)
     client = _login(app, "buyer")

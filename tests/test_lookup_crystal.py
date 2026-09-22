@@ -1,11 +1,11 @@
-from digisearch.config import Settings
-from digisearch.models import BomLine, CompType, LineKind, Status
-from digisearch.pipeline import plan_line, resolve_line
-from digisearch.spec.lookup import LookupRule, load_lookup, match_lookup, render
-from digisearch.spec.parse_spec import build_spec, format_dimension_code
+from partpilot.config import Settings
+from partpilot.models import BomLine, CompType, LineKind, Status
+from partpilot.pipeline import plan_line, resolve_line
+from partpilot.spec.lookup import LookupRule, load_lookup, match_lookup, render
+from partpilot.spec.parse_spec import build_spec, format_dimension_code
 
 from conftest import FakeSearcher, make_product
-from digisearch.digikey.client import product_to_candidate
+from partpilot.digikey.client import product_to_candidate
 
 S = Settings()
 

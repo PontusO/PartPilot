@@ -1,8 +1,8 @@
 import csv
 from pathlib import Path
 
-from digisearch.cart import purchasable_lines, review_lines, write_carts
-from digisearch.models import BomLine, Candidate, ResolvedLine, LineKind, Status
+from partpilot.cart import purchasable_lines, review_lines, write_carts
+from partpilot.models import BomLine, Candidate, ResolvedLine, LineKind, Status
 
 
 def _line(refdes, supplier, dkpn, mpn, qty, status=Status.RESOLVED, packaging="Cut tape",

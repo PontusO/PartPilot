@@ -1,7 +1,7 @@
-from digisearch.config import Settings
-from digisearch.models import BomLine, CompType, LineKind
-from digisearch.spec.classify import classify, looks_like_mpn
-from digisearch.spec.parse_spec import build_query, build_spec, extract_package
+from partpilot.config import Settings
+from partpilot.models import BomLine, CompType, LineKind
+from partpilot.spec.classify import classify, looks_like_mpn
+from partpilot.spec.parse_spec import build_query, build_spec, extract_package
 
 S = Settings()
 
@@ -75,7 +75,7 @@ def test_build_spec_parses_rkm_cap_and_inductor_notation():
 
 
 def test_resistor_query_is_ascii_no_ohm_symbol():
-    from digisearch.spec.parse_spec import resistance_query_token
+    from partpilot.spec.parse_spec import resistance_query_token
 
     assert resistance_query_token(0) == "0 ohm"
     assert resistance_query_token(100) == "100R"
@@ -93,7 +93,7 @@ def test_capacitor_query_uses_ascii_micro():
 
 
 def test_relaxed_mpn_queries():
-    from digisearch.spec.parse_spec import relaxed_mpn_queries
+    from partpilot.spec.parse_spec import relaxed_mpn_queries
 
     assert relaxed_mpn_queries("SL3401A-TP") == ["SL3401A", "SL3401"]
     assert relaxed_mpn_queries("ADV7513BSWZ") == ["ADV7513"]

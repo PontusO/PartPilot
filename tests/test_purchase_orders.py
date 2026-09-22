@@ -1,18 +1,18 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import repo as asmrepo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo as catrepo
-from digisearch.web.features.catalog import stock
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.customer_orders import feature as co_feature
-from digisearch.web.features.purchase_orders import feature as po_feature
-from digisearch.web.features.purchase_orders import repo
-from digisearch.web.features.work_orders import feature as wo_feature
-from digisearch.web.features.work_orders import repo as worepo
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import repo as asmrepo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo as catrepo
+from partpilot.web.features.catalog import stock
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.customer_orders import feature as co_feature
+from partpilot.web.features.purchase_orders import feature as po_feature
+from partpilot.web.features.purchase_orders import repo
+from partpilot.web.features.work_orders import feature as wo_feature
+from partpilot.web.features.work_orders import repo as worepo
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ def test_receive_creates_goods_receipt(db):
     receipts = repo.receipts_for_po(db, po_id)
     assert len(receipts) == 1 and receipts[0]["advice_no"] == "ADV-7"
 
-    from digisearch.web.features.goods_receipts import repo as grnrepo
+    from partpilot.web.features.goods_receipts import repo as grnrepo
     g = grnrepo.get_receipt(db, grn_id)
     assert g["po_no"] == f"PO-{po_id:05d}" and g["lines"][0]["qty"] == 30
 
@@ -125,8 +125,8 @@ def test_grn_csv_and_pdf_export(db):
     line_id = repo.get_po(db, po_id)["lines"][0]["id"]
     grn_id = repo.receive_po(db, po_id, {line_id: 30}, "u", advice_no="ADV-7")
 
-    from digisearch.web.features.goods_receipts import export as grn_export
-    from digisearch.web.features.goods_receipts import repo as grnrepo
+    from partpilot.web.features.goods_receipts import export as grn_export
+    from partpilot.web.features.goods_receipts import repo as grnrepo
     g = grnrepo.get_receipt(db, grn_id)
 
     csv_text = grn_export.grn_csv(g)
@@ -272,7 +272,7 @@ def test_receive_records_last_purchase_price(db):
     assert acme["unit_price"] == pytest.approx(0.30)   # offer price = last purchase price
     assert part["unit_cost"] == pytest.approx(0.5)     # unit_cost deliberately unchanged
 
-    from digisearch.web.features.goods_receipts import repo as grnrepo
+    from partpilot.web.features.goods_receipts import repo as grnrepo
     g = grnrepo.get_receipt(db, grn_id)
     assert g["lines"][0]["unit_price"] == pytest.approx(0.30)   # per-receipt history
     assert g["lines"][0]["line_value"] == pytest.approx(9.0)    # 30 * 0.30
@@ -297,7 +297,7 @@ def test_second_purchase_overwrites_offer_but_keeps_history(db):
                 if s["supplier_name"] == "Acme Supplies")
     assert acme["unit_price"] == pytest.approx(0.20)   # latest purchase wins
 
-    from digisearch.web.features.goods_receipts import repo as grnrepo
+    from partpilot.web.features.goods_receipts import repo as grnrepo
     assert grnrepo.get_receipt(db, grn1)["lines"][0]["unit_price"] == pytest.approx(0.30)  # history intact
 
 
@@ -319,7 +319,7 @@ def test_receive_no_offer_for_supplier_skips_price(db):
     assert len(part["suppliers"]) == 1                        # no Beta offer was fabricated
     assert part["suppliers"][0]["unit_price"] == pytest.approx(0.5)   # Acme offer untouched
     assert part["total_qty"] == 5                            # stock still moved
-    from digisearch.web.features.goods_receipts import repo as grnrepo
+    from partpilot.web.features.goods_receipts import repo as grnrepo
     assert grnrepo.get_receipt(db, grn_id)["lines"][0]["unit_price"] == pytest.approx(0.90)
 
 
@@ -377,7 +377,7 @@ def test_cannot_change_line_after_placing(db):
 
 
 def test_po_csv_and_pdf_export(db):
-    from digisearch.web.features.purchase_orders import export
+    from partpilot.web.features.purchase_orders import export
 
     p = catrepo.create_part(
         db, part={"part_no": "EXP-1", "mfr_pno": "MFR-1", "description": "a blue widget"},

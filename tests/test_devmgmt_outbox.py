@@ -1,17 +1,17 @@
 import pytest
 
-from digisearch.devmgmt import DevmgmtPayloadError, DevmgmtReferentialError
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import repo as asmrepo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import devmgmt_outbox as outbox
-from digisearch.web.features.catalog import devmgmt_repo as repo
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.customer_orders import feature as co_feature
-from digisearch.web.features.work_orders import feature as wo_feature
-from digisearch.web.features.work_orders import repo as wo_repo
+from partpilot.devmgmt import DevmgmtPayloadError, DevmgmtReferentialError
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import repo as asmrepo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import devmgmt_outbox as outbox
+from partpilot.web.features.catalog import devmgmt_repo as repo
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.customer_orders import feature as co_feature
+from partpilot.web.features.work_orders import feature as wo_feature
+from partpilot.web.features.work_orders import repo as wo_repo
 
 
 @pytest.fixture
@@ -265,7 +265,7 @@ def test_flush_delete_variant_calls_client_and_marks_done(db):
 
 
 def test_flush_delete_conflict_is_terminal(db):
-    from digisearch.devmgmt import DevmgmtConflictError
+    from partpilot.devmgmt import DevmgmtConflictError
     with db.connect() as conn:
         outbox.enqueue(conn, "delete-variant", "SKU-X")
         conn.commit()

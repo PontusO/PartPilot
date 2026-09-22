@@ -1,6 +1,6 @@
 import pytest
 
-from digisearch.web.auth import UserStore
+from partpilot.web.auth import UserStore
 
 
 def test_create_and_verify(tmp_path):

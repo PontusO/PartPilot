@@ -1,18 +1,18 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.assemblies import feature as assemblies_feature
-from digisearch.web.features.assemblies import repo as asmrepo
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.catalog import repo as catrepo
-from digisearch.web.features.catalog import stock
-from digisearch.web.features.contacts import feature as contacts_feature
-from digisearch.web.features.contacts import repo as conrepo
-from digisearch.web.features.customer_orders import feature as co_feature
-from digisearch.web.features.customer_orders import repo as corepo
-from digisearch.web.features.work_orders import feature as wo_feature
-from digisearch.web.features.work_orders import repo
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.assemblies import feature as assemblies_feature
+from partpilot.web.features.assemblies import repo as asmrepo
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.catalog import repo as catrepo
+from partpilot.web.features.catalog import stock
+from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.contacts import repo as conrepo
+from partpilot.web.features.customer_orders import feature as co_feature
+from partpilot.web.features.customer_orders import repo as corepo
+from partpilot.web.features.work_orders import feature as wo_feature
+from partpilot.web.features.work_orders import repo
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ def test_fulfilment_proposals_and_linked_wo(db):
 
 
 def test_build_to_fulfil_auto_plans_schedule(db):
-    from digisearch.web.core import iso, sub_workdays
+    from partpilot.web.core import iso, sub_workdays
 
     _, _, _, top = _setup(db)
     with db.connect() as conn:
@@ -153,7 +153,7 @@ def test_build_to_fulfil_auto_plans_schedule(db):
 
 
 def test_reschedule_move_and_resize(db):
-    from digisearch.web.core import add_workdays, iso, workdays_between
+    from partpilot.web.core import add_workdays, iso, workdays_between
 
     _, _, _, top = _setup(db)
     wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 1,
@@ -172,7 +172,7 @@ def test_reschedule_move_and_resize(db):
 
 
 def test_reschedule_is_due_driven(db):
-    from digisearch.web.core import iso, sub_workdays
+    from partpilot.web.core import iso, sub_workdays
 
     _, _, _, top = _setup(db)
     wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 1,
@@ -205,7 +205,7 @@ def test_rescheduling_retains_customer_requested_date(db):
 
 
 def test_default_build_days_is_five(db):
-    from digisearch.web.core import iso, sub_workdays
+    from partpilot.web.core import iso, sub_workdays
 
     _, _, _, top = _setup(db)  # TOP-1 has no default_build_days
     wo_id = repo.create_work_order(db, {"assembly_id": top, "qty": 1, "due_date": "2026-07-31"})
@@ -215,7 +215,7 @@ def test_default_build_days_is_five(db):
 
 
 def test_purchase_by_auto_set_and_draggable(db):
-    from digisearch.web.core import iso, sub_workdays
+    from partpilot.web.core import iso, sub_workdays
 
     a, _, _, top = _setup(db)
     with db.connect() as conn:
@@ -235,7 +235,7 @@ def test_purchase_by_auto_set_and_draggable(db):
 
 
 def test_buy_by_uses_component_lead_time(db):
-    from digisearch.web.core import iso, sub_workdays
+    from partpilot.web.core import iso, sub_workdays
 
     a, _, _, top = _setup(db)
     with db.connect() as conn:

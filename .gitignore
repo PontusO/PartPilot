@@ -7,8 +7,8 @@ certs/
 # Editor/backup droppings
 *.bak
 
-# DigiSearch on-disk cache (API responses + token)
-.digisearch_cache/
+# PartPilot on-disk cache (API responses + token)
+.partpilot_cache/
 
 # Local settings override
 config/settings.yaml

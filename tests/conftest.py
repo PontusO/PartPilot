@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from digisearch.digikey.client import product_to_candidate
-from digisearch.models import Candidate
+from partpilot.digikey.client import product_to_candidate
+from partpilot.models import Candidate
 
 
 def make_product(

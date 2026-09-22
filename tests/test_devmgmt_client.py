@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from digisearch.devmgmt import (
+from partpilot.devmgmt import (
     BearerAuth,
     DevmgmtAuthError,
     DevmgmtClient,
@@ -14,7 +14,7 @@ from digisearch.devmgmt import (
     MutualTLSAuth,
     NoAuth,
 )
-from digisearch.devmgmt.client import DEVICES_PATH, MODELS_PATH, VARIANTS_PATH
+from partpilot.devmgmt.client import DEVICES_PATH, MODELS_PATH, VARIANTS_PATH
 
 BASE = "https://devmgmt.example.com"
 
@@ -22,7 +22,7 @@ BASE = "https://devmgmt.example.com"
 @pytest.fixture(autouse=True)
 def _no_backoff_sleep(monkeypatch):
     # The client backs off with time.sleep between retries; skip the real waits in tests.
-    monkeypatch.setattr("digisearch.devmgmt.client.time.sleep", lambda *_: None)
+    monkeypatch.setattr("partpilot.devmgmt.client.time.sleep", lambda *_: None)
 
 
 def _client(**kw) -> DevmgmtClient:

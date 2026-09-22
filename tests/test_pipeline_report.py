@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from digisearch.config import Settings
-from digisearch.models import BomLine, LineKind, Status
-from digisearch.pipeline import resolve_bom, resolve_line
-from digisearch.report.excel import write_report
+from partpilot.config import Settings
+from partpilot.models import BomLine, LineKind, Status
+from partpilot.pipeline import resolve_bom, resolve_line
+from partpilot.report.excel import write_report
 
 from conftest import CAP_PARAMS, FakeSearcher, make_product
-from digisearch.digikey.client import product_to_candidate
+from partpilot.digikey.client import product_to_candidate
 
 S = Settings()
 

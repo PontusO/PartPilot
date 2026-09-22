@@ -1,7 +1,7 @@
 """Tests for the iLabs value-notation formatter (spec + distributor params -> slash string)."""
 
-from digisearch.models import Candidate, CompType, PartSpec
-from digisearch.spec.ilabs_value import build_value_string, format_resistance_rkm
+from partpilot.models import Candidate, CompType, PartSpec
+from partpilot.spec.ilabs_value import build_value_string, format_resistance_rkm
 
 
 def _cand(**params):

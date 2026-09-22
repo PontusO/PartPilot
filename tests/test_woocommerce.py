@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from digisearch.woocommerce import WooClient, WooError
+from partpilot.woocommerce import WooClient, WooError
 
 BASE = "https://shop.example.com"
 PRODUCTS = f"{BASE}/wp-json/wc/v3/products"

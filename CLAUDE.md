@@ -4,19 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Two products in one package (`src/digisearch/`):
+**PartPilot** — one package (`src/partpilot/`) with two faces:
 
-1. **DigiSearch CLI** — resolves *deliberately under-specified* BOMs (generic passives like
-   `0.1uF 0402`, preferred-but-substitutable MPNs) into orderable parts by matching each line to a
-   real Digi-Key part (Mouser as fallback), with stock, lifecycle, pricing and packaging. Outputs
-   an Excel report + distributor cart CSVs.
-2. **PartPilot web app** — an internal, LAN-hosted FastAPI tool (modular monolith) that wraps the
-   purchasing engine in a browser UI and is growing into a full MRP (catalog, assemblies, orders,
-   work orders, despatch, planning). The package name is still `digisearch`; the product is
-   PartPilot.
+1. **The web app** — an internal, LAN-hosted FastAPI tool (modular monolith) that is the company's
+   MRP: parts catalog, assemblies/BOMs with versioning, customer orders, work orders, planning,
+   purchase orders, goods receipts, despatch, documents, reports. This is the product.
+2. **The BOM resolver / CLI** — the engine the product grew from (originally a standalone tool named
+   *DigiSearch*, renamed 2026-09-22). It resolves *deliberately under-specified* BOMs (generic
+   passives like `0.1uF 0402`, preferred-but-substitutable MPNs) into orderable parts by matching
+   each line to a real Digi-Key part (Mouser as fallback), with stock, lifecycle, pricing and
+   packaging. The web Purchasing screen and the assemblies BOM importer both use it; `partpilot
+   resolve` exposes it on the command line. (`digisearch` remains as a legacy alias for the CLI.)
 
-The README is unusually complete — read it for domain detail (how lines are classified, reel-vs-cut-tape
-rules, Digi-Key/Mouser credential setup, miniMRP stock checking). This file covers what the README doesn't.
+The README is the user-facing overview — read it for domain detail (features per screen, how lines
+are classified, reel-vs-cut-tape rules, Digi-Key/Mouser credential setup). This file covers what the
+README doesn't.
 
 ## Development process — commit every iteration, flag big changes
 
@@ -54,10 +56,10 @@ uv run pytest tests/test_pipeline_report.py            # one test file
 uv run pytest tests/test_pipeline_report.py::test_name # one test
 uv run pytest -k "mouser"                  # tests matching a keyword
 
-uv run digisearch auth-test                # verify Digi-Key credentials
-uv run digisearch resolve slice-vb.csv --build-qty 100 -o out.xlsx   # CLI resolve
-uv run digisearch resolve slice-vb.csv --dry-run         # classify + build queries, no API calls
-uv run digisearch serve --reload           # web app at http://127.0.0.1:8000 (dev auto-reload)
+uv run partpilot auth-test                # verify Digi-Key credentials
+uv run partpilot resolve slice-vb.csv --build-qty 100 -o out.xlsx   # CLI resolve
+uv run partpilot resolve slice-vb.csv --dry-run         # classify + build queries, no API calls
+uv run partpilot serve --reload           # web app at http://127.0.0.1:8000 (dev auto-reload)
 ```
 
 There is no linter/formatter configured. `requirements.txt` exists but `pyproject.toml` + `uv.lock`
@@ -67,7 +69,7 @@ are the source of truth for dependencies.
 
 Production runs the web app as a **systemd service** `partpilot.service` (unit at
 `/etc/systemd/system/partpilot.service`): `WorkingDirectory=/home/service1/partpilot`,
-`EnvironmentFile=…/.env`, `ExecStart=…/.venv/bin/digisearch serve --host 0.0.0.0 --port 8000`.
+`EnvironmentFile=…/.env`, `ExecStart=…/.venv/bin/partpilot serve --host 0.0.0.0 --port 8000`.
 
 **After changing server-side Python (routers, repos, `app.py`, etc.) or `.env`, restart the
 service** — the process imports modules once at startup, so code and env changes are NOT picked up
@@ -104,7 +106,7 @@ This is the heart of both products. `resolve_bom()` → `resolve_line()` per lin
    `--dry-run` path.
 2. Lines too under-specified to resolve (no parseable value/MPN) short-circuit to `Status.MANUAL`.
 3. **Own-stock pre-check** (web flows only): the resolver builds a stock index from PartPilot's own
-   catalog (`catalog/stock_index.py` → generic matcher in `digisearch/stock.py`) and, if free stock
+   catalog (`catalog/stock_index.py` → generic matcher in `partpilot/stock.py`) and, if free stock
    covers the build, marks `IN_STOCK` and skips the API entirely. A bare CLI run has no DB → skipped.
 4. Search Digi-Key (`Searcher` protocol). **Mouser is consulted only when Digi-Key is weak**
    (no/low-confidence match, or DK best is out of stock) and wins only if it out-scores DK.
@@ -121,7 +123,7 @@ the `Searcher` protocol — keep that protocol boundary clean so the engine stay
 The web app reuses this engine via `resolve_bom_file()` — resolution improvements flow to both the
 purchasing screen and the assemblies BOM importer. Don't fork resolution logic into the web layer.
 
-### The web app (PartPilot — `src/digisearch/web/`)
+### The web app (PartPilot — `src/partpilot/web/`)
 
 **Modular monolith.** A thin **core** (`web/core/`) owns auth, nav, the SQLite DB + migration
 runner, and the shared Jinja template environment. Everything else is a **feature module** under
@@ -150,7 +152,7 @@ runner, and the shared Jinja template environment. Everything else is a **featur
 
 PartPilot's SQLite was originally seeded from [miniMRP](https://minimrp.com/) (a Microsoft Access DB
 read via `mdbtools`), but miniMRP has been **retired (2026-07-19)** and PartPilot is now
-authoritative. All runtime ties are gone: the mdb reader (`digisearch/minimrp/`), the
+authoritative. All runtime ties are gone: the mdb reader (`partpilot/minimrp/`), the
 `import-catalog` command, the Setup → Import screen, and the per-feature mdb wrappers were removed.
 What remains is inert: the `minimrp_id` columns (kept as idempotency keys / historical source ids)
 and the pure bulk-load helpers (`catalog/importer.py:import_tables`,
@@ -179,4 +181,4 @@ via the **Setup & Tools** feature (admin only) and `.env`. Tests mock them.
   `PARTPILOT_DATA_DIR` / `PARTPILOT_DB` env overrides.
 - Web env: `PARTPILOT_SECRET_KEY` (session signing — set it so logins survive restarts),
   `PARTPILOT_ADMIN_USER/PASSWORD` (initial admin, generated + printed on first run if unset).
-- Digi-Key responses are cached on disk in `.digisearch_cache/` (free tier ~1000 calls/day).
+- Digi-Key responses are cached on disk in `.partpilot_cache/` (free tier ~1000 calls/day).

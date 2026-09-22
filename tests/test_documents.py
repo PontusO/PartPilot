@@ -1,13 +1,13 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.article_register import feature as article_register_feature
-from digisearch.web.features.article_register import repo as ar_repo
-from digisearch.web.features.article_register.codes import article_code
-from digisearch.web.features.catalog import feature as catalog_feature
-from digisearch.web.features.documents import feature as documents_feature
-from digisearch.web.features.documents import repo
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.article_register import feature as article_register_feature
+from partpilot.web.features.article_register import repo as ar_repo
+from partpilot.web.features.article_register.codes import article_code
+from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.documents import feature as documents_feature
+from partpilot.web.features.documents import repo
 
 
 @pytest.fixture

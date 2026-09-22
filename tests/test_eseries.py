@@ -1,12 +1,12 @@
 import pytest
 
-from digisearch.config import Settings
-from digisearch.models import BomLine, LineKind
-from digisearch.spec.eseries import (
+from partpilot.config import Settings
+from partpilot.models import BomLine, LineKind
+from partpilot.spec.eseries import (
     is_standard_resistance,
     nearest_standard_resistance,
 )
-from digisearch.spec.parse_spec import build_spec
+from partpilot.spec.parse_spec import build_spec
 
 S = Settings()
 

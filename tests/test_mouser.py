@@ -1,12 +1,12 @@
 import pytest
 
-from digisearch.config import Settings
-from digisearch.models import BomLine, Status
-from digisearch.mouser.client import parse_availability, parse_price, part_to_candidate
-from digisearch.pipeline import resolve_line
+from partpilot.config import Settings
+from partpilot.models import BomLine, Status
+from partpilot.mouser.client import parse_availability, parse_price, part_to_candidate
+from partpilot.pipeline import resolve_line
 
 from conftest import FakeSearcher, make_mouser_part, make_product
-from digisearch.digikey.client import product_to_candidate
+from partpilot.digikey.client import product_to_candidate
 
 S = Settings()
 

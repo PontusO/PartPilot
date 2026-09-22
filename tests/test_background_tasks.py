@@ -1,11 +1,11 @@
 """The Feature.background_tasks seam: features declare their loops, the core spawns whatever is
 declared (app.py's lifespan iterates the registry instead of importing feature internals)."""
 
-from digisearch.web.app import FEATURES
-from digisearch.web.features.catalog.devmgmt_sync import devmgmt_sync_loop
-from digisearch.web.features.catalog.feature import feature as catalog_feature
-from digisearch.web.features.setup.feature import feature as setup_feature
-from digisearch.web.features.setup.scheduler import webshop_sync_loop
+from partpilot.web.app import FEATURES
+from partpilot.web.features.catalog.devmgmt_sync import devmgmt_sync_loop
+from partpilot.web.features.catalog.feature import feature as catalog_feature
+from partpilot.web.features.setup.feature import feature as setup_feature
+from partpilot.web.features.setup.scheduler import webshop_sync_loop
 
 
 def test_features_declare_their_background_loops():

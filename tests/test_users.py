@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import digisearch.web.app as web_app
+import partpilot.web.app as web_app
 
 
 @pytest.fixture

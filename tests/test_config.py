@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from digisearch.config import Settings
+from partpilot.config import Settings
 
 
 def test_settings_defaults():
@@ -35,7 +35,7 @@ def test_scratch_db_copies_live_db_and_isolates_writes(tmp_path, monkeypatch):
     import shutil
     import sqlite3
 
-    from digisearch.cli import _make_scratch_db
+    from partpilot.cli import _make_scratch_db
 
     live = tmp_path / "data" / "partpilot.db"
     live.parent.mkdir()

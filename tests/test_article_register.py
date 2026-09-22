@@ -1,12 +1,12 @@
 import pytest
 
-from digisearch.web.core import FeatureRegistry
-from digisearch.web.core.db import Database
-from digisearch.web.features.article_register import feature as article_register_feature
-from digisearch.web.features.article_register import importer, repo
-from digisearch.web.features.article_register.codes import article_code
-from digisearch.web.features.article_register.repo import DuplicateNumber
-from digisearch.web.features.catalog import feature as catalog_feature
+from partpilot.web.core import FeatureRegistry
+from partpilot.web.core.db import Database
+from partpilot.web.features.article_register import feature as article_register_feature
+from partpilot.web.features.article_register import importer, repo
+from partpilot.web.features.article_register.codes import article_code
+from partpilot.web.features.article_register.repo import DuplicateNumber
+from partpilot.web.features.catalog import feature as catalog_feature
 
 
 @pytest.fixture
@@ -206,7 +206,7 @@ def test_list_filters_and_retired_visibility(db):
 def _client(tmp_path):
     from fastapi.testclient import TestClient
 
-    import digisearch.web.app as web_app
+    import partpilot.web.app as web_app
     app = web_app.create_app(db_path=tmp_path / "p.db", data_dir=tmp_path / "data",
                              secret_key="test-secret")
     app.state.store.create_user("buyer1", "pw", role="purchasing")
@@ -245,7 +245,7 @@ def test_allocate_returns_to_create_page_with_code(tmp_path):
     assert r.headers["location"] == f"/assemblies/new?part_no=98-{rn:05d}-1&desc=GW"
     assert f'value="98-{rn:05d}-1"' in client.get(r.headers["location"]).text
     # the document-class (54) line is materialised as a document, same as the from-template flow
-    from digisearch.web.features.documents import repo as docrepo
+    from partpilot.web.features.documents import repo as docrepo
     assert docrepo.document_for_code(db, f"54-{rn:05d}-1") is not None
 
 
@@ -272,8 +272,8 @@ def test_from_template_returns_assembly_code(tmp_path):
     assert f'value="98-{rn:05d}-1"' in page
     # The template's document-class (54) lines are materialised as documents (not catalog parts) AND
     # surfaced on the new-assembly screen so the user can see they were created.
-    from digisearch.web.features.catalog import repo as catrepo
-    from digisearch.web.features.documents import repo as docrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.documents import repo as docrepo
     for suffix in (1, 2, 3):
         code = f"54-{rn:05d}-{suffix}"
         assert docrepo.document_for_code(db, code) is not None, f"{code} should be a document"
@@ -302,8 +302,8 @@ def test_apply_template_link_carries_family_product(tmp_path):
 def test_from_template_creates_stub_parts_and_dialog(tmp_path):
     from urllib.parse import parse_qs, urlparse
 
-    from digisearch.web.features.catalog import repo as crepo
-    from digisearch.web.features.documents import repo as drepo
+    from partpilot.web.features.catalog import repo as crepo
+    from partpilot.web.features.documents import repo as drepo
 
     app, client = _client(tmp_path)
     db = app.state.database

@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from digisearch.spec.units import (
+from partpilot.spec.units import (
     format_capacitance,
     format_resistance,
     parse_capacitance,
@@ -10,7 +10,7 @@ from digisearch.spec.units import (
     parse_inductance,
     parse_resistance,
 )
-from digisearch.util.refdes import expand_refdes, refdes_count
+from partpilot.util.refdes import expand_refdes, refdes_count
 
 
 @pytest.mark.parametrize(

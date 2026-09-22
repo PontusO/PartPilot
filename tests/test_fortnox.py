@@ -4,8 +4,8 @@ import httpx
 import pytest
 import respx
 
-from digisearch.fortnox import FortnoxClient, FortnoxError, FortnoxTokens
-from digisearch.fortnox.client import (
+from partpilot.fortnox import FortnoxClient, FortnoxError, FortnoxTokens
+from partpilot.fortnox.client import (
     AUTH_URL, TOKEN_URL, FortnoxAuthError, authorize_url, exchange_code,
 )
 
