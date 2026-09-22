@@ -264,3 +264,8 @@ uv run pytest -k mouser           # by keyword
 
 HTTP is mocked with `respx`; `tests/conftest.py` provides Digi-Key / Mouser response builders and a
 `FakeSearcher` for resolution logic. Web tests build an app against a temp database.
+
+## License
+
+PartPilot is released under the [MIT License](LICENSE). Digi-Key, Mouser, devmgmt, WooCommerce
+and Fortnox are third-party services with their own terms; you need your own credentials for each.
