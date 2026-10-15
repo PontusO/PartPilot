@@ -47,7 +47,7 @@ _CORE_TEMPLATES = Path(__file__).parent / "core" / "templates"
 # built are placeholders (greyed "soon" nav entries) so the app structure is visible up front.
 FEATURES = [
     catalog_feature,                                                         # Parts (order 10)
-    article_register_feature,                                                # Article Register (order 15); soft-joins parts by code
+    article_register_feature,                                                # Article Register (nav order 62, below Contacts); soft-joins parts by code
     documents_feature,                                                       # Documents (order 16); soft-joins article_numbers/parts by code
     assemblies_feature,                                                      # order 20
     purchasing_feature,                                                      # order 50

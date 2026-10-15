@@ -12,7 +12,7 @@ feature = Feature(
     name="article_register",
     router=router,
     nav=NavItem(label="Article Register", url="/article-register",
-                roles=None, icon="🔖", order=15),  # between Parts (10) and Assemblies (20)
+                roles=None, icon="🔖", order=62),  # support function: just below Contacts (60), above Reports (70)
     migrations=MIGRATIONS,
     template_dir=Path(__file__).parent / "templates",
 )
