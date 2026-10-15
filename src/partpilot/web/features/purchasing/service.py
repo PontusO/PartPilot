@@ -69,6 +69,7 @@ def resolve_bom_file(
     sandbox: bool = False,
     settings_path: str | Path | None = None,
     database: Database | None = None,
+    mappings: dict | None = None,
 ) -> ResolvedRun:
     """Load and resolve a BOM file against our own stock + Digi-Key/Mouser.
 
@@ -76,11 +77,13 @@ def resolve_bom_file(
     assembly BOM import call it, so resolution changes propagate to both. Blocking and
     network-bound — run it in a threadpool from async routes. Pass ``database`` to check
     PartPilot's own catalog stock first (a line covered by free stock skips the distributor
-    lookup); omit it to always query the distributors.
+    lookup); omit it to always query the distributors. Pass ``mappings`` (``{field: [header, ...]}``)
+    to override the yaml column aliases for this run — only the given fields are detected, so an
+    omitted field is never fuzzy-matched onto a column the user chose to ignore.
     """
     bom_path = Path(bom_path)
     settings = Settings.load(settings_path)
-    mappings = load_column_mappings(None)
+    mappings = mappings if mappings is not None else load_column_mappings(None)
     lookup = load_lookup(None)
     lines = load_bom(bom_path, mappings)
 
