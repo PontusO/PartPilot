@@ -501,7 +501,8 @@ def _ip_map_page(request: Request, *, job_id: str, meta: dict, samples: list[lis
         request, "import_parts_map.html",
         {"job_id": job_id, "source": meta["source"], "headers": meta["headers"],
          "samples": samples, "selected": selected, "targets": ip.TARGETS,
-         "build_qty": meta.get("build_qty"), "error": error}, status_code=status)
+         "build_qty": meta.get("build_qty"), "check_stock": meta.get("check_stock", True),
+         "error": error}, status_code=status)
 
 
 def _ip_selected_from_mapping(mapping: dict[str, str], headers: list[str]) -> list[str]:
@@ -547,6 +548,9 @@ async def import_parts_upload(request: Request):
         return _ip_upload_page(request, "Choose a CSV or Excel file.", 400)
     raw_qty = (form.get("build_qty") or "").strip()
     build_qty = int(raw_qty) if raw_qty.isdigit() and int(raw_qty) > 0 else None
+    # "Ignore our own stock": buying for a customer who won't use our stocked parts, so every row
+    # must go to the distributors instead of short-circuiting to IN_STOCK.
+    check_stock = form.get("ignore_stock") is None
 
     job_id = uuid4().hex
     suffix = Path(upload.filename).suffix.lower()
@@ -558,7 +562,7 @@ async def import_parts_upload(request: Request):
         bom_path.unlink(missing_ok=True)
         return _ip_upload_page(request, f"Could not read {meta_source(upload)}: {exc}", 400)
     meta = {"source": Path(upload.filename).name, "headers": headers, "build_qty": build_qty,
-            "suffix": suffix}
+            "suffix": suffix, "check_stock": check_stock}
     meta_path.write_text(json.dumps(meta))
     return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
                         selected=_ip_selected_from_mapping(ip.prefill_mapping(db, headers), headers))
@@ -589,7 +593,7 @@ async def import_parts_resolve(request: Request):
     try:
         run = await run_in_threadpool(
             resolve_bom_file, bom_path, build_qty=meta.get("build_qty"), database=db,
-            mappings=ip.run_mappings(mapping))
+            check_stock=meta.get("check_stock", True), mappings=ip.run_mappings(mapping))
     except Exception as exc:  # missing creds, network, bad rows
         # The upload is kept so the user can fix the mapping and retry without re-uploading.
         return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
@@ -597,9 +601,12 @@ async def import_parts_resolve(request: Request):
 
     plan = build_import_plan(db, run)
     plan_path.write_text(json.dumps(plan))
+    meta["stock_checked"] = run.stock_checked   # what actually happened, shown on the result page
+    meta_path.write_text(json.dumps(meta))
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_review.html",
-        {"plan": plan, "job_id": job_id, "warnings": run.warnings, "source": meta["source"]})
+        {"plan": plan, "job_id": job_id, "warnings": run.warnings, "source": meta["source"],
+         "stock_checked": run.stock_checked})
 
 
 @router.post("/import-parts/apply")
@@ -621,6 +628,7 @@ async def import_parts_apply(request: Request):
     rows = _ip_outcome_rows(plan, result, accepted)
     (jobs_dir / f"piresult-{job_id}.json").write_text(json.dumps({
         "source": meta["source"], "rows": rows,
+        "stock_checked": meta.get("stock_checked", True),
         "counts": {"created": result["created"], "linked": result["linked"],
                    "skipped": result["skipped"]},
         "review": result["review"],
@@ -671,6 +679,7 @@ def _ip_result_page(request: Request, job_id: str, data: dict, *, values: dict |
         request, "import_parts_result.html",
         {"job_id": job_id, "source": data["source"], "result": data["counts"],
          "review": data["review"], "rows": rows,
+         "stock_checked": data.get("stock_checked", True),
          "created": [r for r in rows if r["outcome"] == CREATED],
          "not_found": [r for r in rows if r["unfound"]],
          "bom_rows": [r for r in rows if r["part_id"] is not None],

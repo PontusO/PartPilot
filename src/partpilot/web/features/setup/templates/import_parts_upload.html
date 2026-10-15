@@ -14,6 +14,11 @@
     <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
     <label for="build_qty">Build quantity for the stock / pricing check (optional)</label>
     <input id="build_qty" name="build_qty" type="number" min="1" step="1" placeholder="settings default">
+    <div class="check">
+      <input id="ignore_stock" name="ignore_stock" type="checkbox" value="1">
+      <label for="ignore_stock" style="margin:0; color:inherit;">Ignore our own stock — resolve every
+        row at the distributors (e.g. buying for a customer who won't use stocked parts)</label>
+    </div>
     <button type="submit">Next: map columns</button>
   </form>
 </div>

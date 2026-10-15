@@ -71,7 +71,7 @@ Routes (all `require_role(request, {"admin"})`), under the setup router prefix:
 
 | Method | Path | Does |
 |---|---|---|
-| GET | `/setup/import-parts` | Upload form. |
+| GET | `/setup/import-parts` | Upload form: file, optional build quantity, and an **Ignore our own stock** checkbox (added 2026-10-15). Ticked, the run passes `check_stock=False` to the resolver so no row short-circuits to IN_STOCK; every row is resolved and priced at Digi-Key/Mouser. Rows whose MPN is already in the catalog still link to that part — only the stock pre-check is skipped. The map, review and result pages show an *own stock ignored* badge. |
 | POST | `/setup/import-parts` | Save upload to `jobs_dir/pimp-<job>-<name>`, read headers + up to 3 sample rows, compute pre-fill, render mapping screen. |
 | POST | `/setup/import-parts/resolve` | Validate mapping, remember it, resolve in threadpool, build plan, save `jobs_dir/piplan-<job>.json`, render review. |
 | POST | `/setup/import-parts/apply` | Load plan by job id (hex-guarded), `apply_parts_plan`, delete plan + upload, render result. |
