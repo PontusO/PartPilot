@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Map columns · PartPilot{% endblock %}
+{% block content %}
+<style>
+  #colmap td, #colmap th { padding:.4rem .5rem; vertical-align:top; }
+  #colmap select { margin:0; min-width:11rem; }
+  #colmap .sample { color:var(--muted); font-size:.82rem; }
+</style>
+<div class="panel">
+  <p class="note"><a href="/setup/import-parts">← Import parts</a></p>
+  <h1>Map columns <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <p class="note">Each column of the file is listed with a few sample values. Choose which
+    PartPilot field it feeds, or leave it as <b>ignore</b>. At least <b>Value</b> or
+    <b>Device / MPN</b> must be mapped. The mapping is remembered for files with this header
+    layout.</p>
+  <form method="post" action="/setup/import-parts/resolve" onsubmit="showOverlay()">
+    <input type="hidden" name="job_id" value="{{ job_id }}">
+    {% set rev = {} %}
+    {% for f, h in mapping.items() %}{% set _ = rev.update({h: f}) %}{% endfor %}
+    <div style="overflow-x:auto;">
+      <table id="colmap">
+        <thead><tr><th>File column</th><th>Sample values</th><th>PartPilot field</th></tr></thead>
+        <tbody>
+          {% for h in headers %}
+          {% set cur = rev.get(h) %}
+          <tr>
+            <td><b>{{ h }}</b></td>
+            <td class="sample">{% for s in samples[loop.index0] %}<code>{{ s }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td>
+            <td>
+              <select name="map_{{ loop.index0 }}">
+                <option value="ignore" {{ 'selected' if not cur else '' }}>— ignore —</option>
+                {% for f, label in targets %}
+                <option value="{{ f }}" {{ 'selected' if cur == f else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit" style="margin-top:0;">Resolve rows</button>
+      <button type="button" class="quiet" onclick="window.location.href='/setup/import-parts'">Cancel</button>
+      {% if build_qty %}<span class="note">Build qty {{ build_qty }}</span>{% endif %}
+    </div>
+  </form>
+</div>
+<div id="overlay">
+  <div class="spin"></div>
+  <div>Resolving against Digi-Key/Mouser… this can take a minute.</div>
+</div>
+<script>function showOverlay(){ document.getElementById('overlay').style.display = 'flex'; }</script>
+{% endblock %}

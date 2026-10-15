@@ -6,6 +6,8 @@ here and add its route. All routes are admin-only.
 
 from __future__ import annotations
 
+import json
+import re
 import secrets
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,9 @@ from partpilot.woocommerce import WooClient, WooError
 from ...auth import ROLES
 from ...core.deps import require_role
 from ..catalog import woo_sync
+from ..catalog.import_parts import apply_parts_plan, build_import_plan
+from ..purchasing.service import resolve_bom_file
+from . import import_parts as ip
 from . import repo
 from .part_cleanup import build_clients, recover
 
@@ -35,6 +40,10 @@ router = APIRouter(prefix="/setup")
 
 # Tools shown on the Setup & Tools page — append here to add more later.
 TOOLS = [
+    {"label": "Import parts from BOM", "url": "/setup/import-parts", "icon": "📥",
+     "description": "Upload any CSV/Excel BOM or part list, map its columns to PartPilot fields, "
+                    "resolve each row against stock and Digi-Key/Mouser, and tick the parts to "
+                    "create in the catalog. Mappings are remembered per file layout."},
     {"label": "Part-number cleanup", "url": "/setup/part-cleanup", "icon": "🧹",
      "description": "Find parts whose part number is really a distributor order code (no "
                     "manufacturer P/N captured), look up the manufacturer P/N at Digi-Key/Mouser, "
@@ -449,6 +458,143 @@ def _cleanup_page(request: Request, *, proposals=None, form_values=None,
     return request.app.state.templates.TemplateResponse(
         request, "part_cleanup.html",
         {"suspects": suspects, "summary": summary, "error": error}, status_code=status)
+
+
+# ---- Import parts from any BOM ------------------------------------------------------------
+# upload -> map columns -> resolve (shared engine) -> review -> create. Files live in jobs_dir
+# between steps: pimp-<job><suffix> (the upload), pimeta-<job>.json (source name, headers,
+# build qty), piplan-<job>.json (the review plan). All three are removed at apply.
+
+_JOB_RE = re.compile(r"[0-9a-f]+")
+
+
+def _ip_paths(jobs_dir: Path, job_id: str, suffix: str = "") -> tuple[Path, Path, Path]:
+    return (jobs_dir / f"pimp-{job_id}{suffix}", jobs_dir / f"pimeta-{job_id}.json",
+            jobs_dir / f"piplan-{job_id}.json")
+
+
+def _ip_upload_page(request: Request, error: str | None = None, status: int = 200):
+    return request.app.state.templates.TemplateResponse(
+        request, "import_parts_upload.html", {"error": error}, status_code=status)
+
+
+def _ip_map_page(request: Request, *, job_id: str, meta: dict, samples: list[list[str]],
+                 mapping: dict[str, str], error: str | None = None, status: int = 200):
+    return request.app.state.templates.TemplateResponse(
+        request, "import_parts_map.html",
+        {"job_id": job_id, "source": meta["source"], "headers": meta["headers"],
+         "samples": samples, "mapping": mapping, "targets": ip.TARGETS,
+         "build_qty": meta.get("build_qty"), "error": error}, status_code=status)
+
+
+def _ip_load_job(jobs_dir: Path, job_id: str):
+    """(bom_path, meta_path, plan_path, meta) or None if the job is unknown/expired."""
+    if not _JOB_RE.fullmatch(job_id or ""):
+        return None
+    _, meta_path, plan_path = _ip_paths(jobs_dir, job_id)
+    if not meta_path.exists():
+        return None
+    meta = json.loads(meta_path.read_text())
+    bom_path = _ip_paths(jobs_dir, job_id, meta.get("suffix", ""))[0]
+    return bom_path, meta_path, plan_path, meta
+
+
+@router.get("/import-parts", response_class=HTMLResponse)
+def import_parts_form(request: Request):
+    require_role(request, SETUP_ROLES)
+    return _ip_upload_page(request)
+
+
+@router.post("/import-parts", response_class=HTMLResponse)
+async def import_parts_upload(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    jobs_dir: Path = request.app.state.jobs_dir
+    form = await request.form()
+    upload = form.get("file")
+    if not upload or not getattr(upload, "filename", ""):
+        return _ip_upload_page(request, "Choose a CSV or Excel file.", 400)
+    raw_qty = (form.get("build_qty") or "").strip()
+    build_qty = int(raw_qty) if raw_qty.isdigit() and int(raw_qty) > 0 else None
+
+    job_id = uuid4().hex
+    suffix = Path(upload.filename).suffix.lower()
+    bom_path, meta_path, _ = _ip_paths(jobs_dir, job_id, suffix)
+    bom_path.write_bytes(await upload.read())
+    try:
+        headers, samples = ip.read_headers(bom_path)
+    except ValueError as exc:
+        bom_path.unlink(missing_ok=True)
+        return _ip_upload_page(request, str(exc), 400)
+    meta = {"source": Path(upload.filename).name, "headers": headers, "build_qty": build_qty,
+            "suffix": suffix}
+    meta_path.write_text(json.dumps(meta))
+    return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
+                        mapping=ip.prefill_mapping(db, headers))
+
+
+@router.post("/import-parts/resolve", response_class=HTMLResponse)
+async def import_parts_resolve(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    jobs_dir: Path = request.app.state.jobs_dir
+    form = await request.form()
+    job_id = (form.get("job_id") or "").strip()
+    job = _ip_load_job(jobs_dir, job_id)
+    if job is None or not job[0].exists():
+        return _ip_upload_page(request, "Upload expired — please upload the file again.", 400)
+    bom_path, meta_path, plan_path, meta = job
+    headers = meta["headers"]
+    _, samples = ip.read_headers(bom_path)
+    chosen = {k: str(v) for k, v in form.items() if k.startswith("map_")}
+    # What the user picked, as {field: header}, so the screen re-renders with their choices.
+    picked = {v: headers[int(k[4:])] for k, v in chosen.items()
+              if k[4:].isdigit() and int(k[4:]) < len(headers) and v in ip.TARGET_FIELDS}
+    try:
+        mapping = ip.parse_mapping(chosen, headers)
+    except ValueError as exc:
+        return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
+                            mapping=picked, error=str(exc), status=400)
+    ip.remember_mapping(db, headers, mapping)
+
+    try:
+        run = await run_in_threadpool(
+            resolve_bom_file, bom_path, build_qty=meta.get("build_qty"), database=db,
+            mappings=ip.run_mappings(mapping))
+    except Exception as exc:  # missing creds, network, bad rows
+        # The upload is kept so the user can fix the mapping and retry without re-uploading.
+        return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
+                            mapping=mapping, error=f"Resolve failed: {exc}", status=500)
+
+    plan = build_import_plan(db, run)
+    plan_path.write_text(json.dumps(plan))
+    return request.app.state.templates.TemplateResponse(
+        request, "import_parts_review.html",
+        {"plan": plan, "job_id": job_id, "warnings": run.warnings, "source": meta["source"]})
+
+
+@router.post("/import-parts/apply")
+async def import_parts_apply(request: Request):
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    jobs_dir: Path = request.app.state.jobs_dir
+    form = await request.form()
+    job_id = (form.get("job_id") or "").strip()
+    accepted = {int(v) for v in form.getlist("accept") if str(v).isdigit()}
+    job = _ip_load_job(jobs_dir, job_id)
+    if job is None or not job[2].exists():
+        return RedirectResponse("/setup/import-parts", status_code=303)
+    bom_path, meta_path, plan_path, meta = job
+    plan = json.loads(plan_path.read_text())
+    result = apply_parts_plan(db, plan, accepted)
+    for p in (bom_path, meta_path, plan_path):
+        p.unlink(missing_ok=True)
+    created = [{"part_id": pid, "part_no": it.get("part_no"), "value": it.get("value")}
+               for it, pid in zip(plan, result["part_ids"])
+               if pid is not None and it.get("status") != "in_inventory"]
+    return request.app.state.templates.TemplateResponse(
+        request, "import_parts_result.html",
+        {"result": result, "created": created, "source": meta["source"]})
 
 
 @router.get("/part-cleanup", response_class=HTMLResponse)

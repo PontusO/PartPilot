@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Import parts · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Import parts from BOM</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <p class="note">Upload any CSV or Excel BOM / part list. You'll map its columns to PartPilot
+    fields next; the rows are then resolved against stock and Digi-Key/Mouser (the same engine the
+    purchasing tool uses) and you choose which parts to create in the catalog. Nothing is attached
+    to an assembly — use an assembly's <b>Import BOM</b> for that.</p>
+  <form method="post" action="/setup/import-parts" enctype="multipart/form-data">
+    <label for="file">BOM file (.csv / .tsv / Excel)</label>
+    <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
+    <label for="build_qty">Build quantity for the stock / pricing check (optional)</label>
+    <input id="build_qty" name="build_qty" type="number" min="1" step="1" placeholder="settings default">
+    <button type="submit">Next: map columns</button>
+  </form>
+</div>
+{% endblock %}

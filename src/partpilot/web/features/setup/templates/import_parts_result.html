@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Import done · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Imported parts <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
+
+  <div class="cards">
+    <div class="card"><b>{{ result.created }}</b><small>parts created</small></div>
+    <div class="card"><b>{{ result.linked }}</b><small>already in catalog</small></div>
+    <div class="card"><b>{{ result.skipped }}</b><small>skipped</small></div>
+  </div>
+
+  {% if created %}
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Created parts ({{ created|length }})</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Part</th><th>Value</th><th></th></tr></thead>
+      <tbody>
+        {% for p in created %}
+        <tr>
+          <td><a href="/catalog/{{ p.part_id }}">{{ p.part_no or '#' ~ p.part_id }}</a></td>
+          <td>{% if p.value %}<code>{{ p.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
+          <td><button type="button" class="ghost" onclick="window.open('/catalog/{{ p.part_id }}/edit', '_blank', 'noopener')">Edit ↗</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if result.review %}
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Needs checking ({{ result.review|length }})</h2>
+  <p class="note">These parts were created but their iLabs <code>value</code> couldn't be fully built —
+    the distributor didn't expose every field. Open each one (new tab), confirm the value and fill
+    the missing detail.</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Part</th><th>Value so far</th><th>Missing</th><th></th></tr></thead>
+      <tbody>
+        {% for r in result.review %}
+        <tr>
+          <td>{{ r.part_no or '#' ~ r.part_id }}</td>
+          <td>{% if r.value %}<code>{{ r.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
+          <td>{% for m in r.missing %}<span class="badge warn">{{ m }}</span> {% endfor %}</td>
+          <td><button type="button" class="ghost" onclick="window.open('/catalog/{{ r.part_id }}/edit', '_blank', 'noopener')">Edit ↗</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:1.2rem; display:flex; gap:.8rem;">
+    <button type="button" style="margin-top:0;" onclick="window.location.href='/setup/import-parts'">Import another file</button>
+    <button type="button" class="quiet" onclick="window.location.href='/setup'">Back to Setup &amp; Tools</button>
+  </div>
+</div>
+{% endblock %}
