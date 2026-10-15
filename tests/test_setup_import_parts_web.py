@@ -106,16 +106,72 @@ def test_full_flow_maps_resolves_reviews_and_applies(app, monkeypatch):
     assert 'value="value" selected' in _select(r2.text, "map_1")
     assert 'value="ignore" selected' in _select(r2.text, "map_2")
 
-    # Apply: accept only the new row (index 0 in plan order R1, U1, X1, L1).
-    r = c.post("/setup/import-parts/apply", data={"job_id": job_id, "accept": ["0"]})
-    assert r.status_code == 200
+    # Apply: accept only the new row (index 0 in plan order R1, U1, X1, L1) -> result page.
+    r = c.post("/setup/import-parts/apply", data={"job_id": job_id, "accept": ["0"]},
+               follow_redirects=False)
+    assert r.status_code == 303
+    result_url = r.headers["location"]
+    assert result_url == f"/setup/import-parts/{job_id}/result"
     assert catrepo.find_part_id_by_mpn(app.state.database, "RES-10K") is not None
     assert catrepo.find_part_id_by_mpn(app.state.database, "odd") is None
+
+    r = c.get(result_url)
+    assert r.status_code == 200
     flat = r.text.replace("\n", "")
     assert "<b>1</b><small>parts created" in flat
     assert "<b>1</b><small>already in catalog" in flat
-    assert "RES-10K" in r.text
-    assert "Created parts (1)" in r.text and "EXIST</a>" not in r.text   # linked rows aren't listed as created
+    assert "Created parts (1)" in r.text and "EXIST</a>" not in r.text.split("Created parts")[1].split("</table>")[0]
+    # Detailed per-row table: every row with its outcome.
+    detail = r.text.split('id="detail"')[1].split("</table>")[0]
+    for cell in ("R1", "U1", "X1", "L1", "created", "already in catalog", "not found", "manual"):
+        assert cell in detail, cell
+    # Rows the resolver could not find, listed separately with the BOM text and the reason.
+    nf = r.text.split("Could not find")[1].split("</table>")[0]
+    assert "odd" in nf and "L1" in nf and "RES-10K" not in nf
+    # Wrap-up form is offered, with the allocator buttons returning to this page.
+    assert 'action="/setup/import-parts/%s/assembly"' % job_id in r.text
+    assert f"return_to=/setup/import-parts/{job_id}/result" in r.text
+
+    # Allocator bounce-back prefills the part number + description.
+    r = c.get(result_url + "?part_no=98-00400-1&desc=Imported+board")
+    assert 'value="98-00400-1"' in r.text and 'value="Imported board"' in r.text
+
+    # Create the assembly: one BOM line per row with a part, created AND pre-existing, qty + refdes.
+    r = c.post(f"/setup/import-parts/{job_id}/assembly",
+               data={"part_no": "98-00400-1", "description": "Imported board"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/assemblies/")
+    asm_id = int(r.headers["location"].rsplit("/", 1)[1])
+    from partpilot.web.features.assemblies import repo as asmrepo
+    a = asmrepo.get_assembly(app.state.database, asm_id)
+    assert a["part_no"] == "98-00400-1" and a["description"] == "Imported board"
+    lines = {ln["child_part_no"]: ln for ln in a["lines"]}
+    assert set(lines) == {"RES-10K", "EXIST"}
+    assert lines["RES-10K"]["refdes"] == "R1" and lines["RES-10K"]["qty_per"] == 1
+    assert lines["EXIST"]["refdes"] == "U1"
+    # Job files are gone; the result page is no longer available.
+    assert not list(app.state.jobs_dir.glob(f"*{job_id}*"))
+    assert c.get(result_url, follow_redirects=False).status_code == 303
+
+
+def test_assembly_step_validates_part_number(app, monkeypatch):
+    monkeypatch.setattr(setup_router, "resolve_bom_file", _fake_resolve)
+    from partpilot.web.features.catalog import repo as catrepo
+    catrepo.create_part(app.state.database, part={"part_no": "TAKEN"}, supplier_lines=[])
+    c = _admin(app)
+    r = c.post("/setup/import-parts", files={"file": ("bom.csv", CSV, "text/csv")})
+    job_id = _job_id(r.text)
+    c.post("/setup/import-parts/resolve", data={"job_id": job_id, "map_0": "refdes", "map_1": "value"})
+    c.post("/setup/import-parts/apply", data={"job_id": job_id, "accept": ["0"]})
+    r = c.post(f"/setup/import-parts/{job_id}/assembly", data={"part_no": "  "})
+    assert r.status_code == 400 and "Part number is required" in r.text
+    r = c.post(f"/setup/import-parts/{job_id}/assembly", data={"part_no": "taken"})
+    assert r.status_code == 400 and "already exists" in r.text
+    # Still on the result page with the import detail intact.
+    assert 'id="detail"' in r.text
+    # Done discards the job without creating anything.
+    r = c.post(f"/setup/import-parts/{job_id}/done", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/setup/import-parts"
+    assert not list(app.state.jobs_dir.glob(f"*{job_id}*"))
 
 
 def test_mapping_validation_round_trips(app):
@@ -168,6 +224,10 @@ def test_expired_job_handled(app):
     r = c.post("/setup/import-parts/apply", data={"job_id": "deadbeef"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/setup/import-parts"
     r = c.post("/setup/import-parts/apply", data={"job_id": "../etc"}, follow_redirects=False)
+    assert r.status_code == 303
+    r = c.get("/setup/import-parts/deadbeef/result", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/setup/import-parts"
+    r = c.post("/setup/import-parts/deadbeef/assembly", data={"part_no": "X"}, follow_redirects=False)
     assert r.status_code == 303
 
 

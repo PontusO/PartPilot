@@ -1,18 +1,61 @@
 {% extends "base.html" %}
 {% block title %}Import done · PartPilot{% endblock %}
 {% block content %}
+<style>
+  #detail td, #detail th, #notfound td, #notfound th { padding:.4rem .5rem; vertical-align:top; }
+  #wrap .row { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
+  #wrap .row input[type=text] { flex:1; min-width:12rem; margin:0; }
+  #wrap label { display:block; margin-top:.8rem; }
+</style>
 <div class="panel">
   <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
   <h1>Imported parts <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
   <div class="cards">
     <div class="card"><b>{{ result.created }}</b><small>parts created</small></div>
     <div class="card"><b>{{ result.linked }}</b><small>already in catalog</small></div>
+    <div class="card"><b>{{ not_found|length }}</b><small>not found</small></div>
     <div class="card"><b>{{ result.skipped }}</b><small>skipped</small></div>
   </div>
 
+  {# ---- Wrap into an assembly -------------------------------------------------------- #}
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Wrap into an assembly</h2>
+  {% if bom_rows %}
+  <p class="note">Create a new assembly whose BOM is the <b>{{ bom_rows|length }}</b> imported rows that
+    have a catalog part — the ones created just now <i>and</i> the ones that already existed — each
+    with its quantity and reference designators. Rows without a part are left out.</p>
+  <form id="wrap" method="post" action="/setup/import-parts/{{ job_id }}/assembly">
+    <label for="part_no">Assembly part number</label>
+    <div class="row">
+      <input id="part_no" name="part_no" type="text" value="{{ values.get('part_no','') }}"
+             placeholder="e.g. 98-00400-1" required>
+      <button type="button" class="ghost" title="Allocate a new product family, then return here"
+              style="white-space:nowrap;"
+              onclick="location.href='/article-register/product?return_to=/setup/import-parts/{{ job_id }}/result'">
+        ＋ New product
+      </button>
+      <button type="button" class="ghost" title="Allocate a product family from a template, then return here"
+              style="white-space:nowrap;"
+              onclick="location.href='/article-register/from-template?return_to=/setup/import-parts/{{ job_id }}/result'">
+        ＋ From template
+      </button>
+    </div>
+    <label for="description">Description (optional)</label>
+    <input id="description" name="description" type="text" value="{{ values.get('description','') }}">
+    <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center;">
+      <button type="submit" class="ghost">Create assembly from imported parts</button>
+      <button type="submit" class="quiet" form="done">Done without an assembly</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="note">No imported row has a catalog part, so there is nothing to wrap into an assembly.</p>
+  {% endif %}
+  <form id="done" method="post" action="/setup/import-parts/{{ job_id }}/done" style="display:none;"></form>
+
+  {# ---- Created parts ---------------------------------------------------------------- #}
   {% if created %}
-  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Created parts ({{ created|length }})</h2>
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Created parts ({{ created|length }})</h2>
   <div style="overflow-x:auto;">
     <table>
       <thead><tr><th>Part</th><th>Value</th><th></th></tr></thead>
@@ -29,8 +72,9 @@
   </div>
   {% endif %}
 
-  {% if result.review %}
-  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Needs checking ({{ result.review|length }})</h2>
+  {# ---- Needs checking (incomplete iLabs value) --------------------------------------- #}
+  {% if review %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Needs checking ({{ review|length }})</h2>
   <p class="note">These parts were created but their iLabs <code>value</code> couldn't be fully built —
     the distributor didn't expose every field. Open each one (new tab), confirm the value and fill
     the missing detail.</p>
@@ -38,7 +82,7 @@
     <table>
       <thead><tr><th>Part</th><th>Value so far</th><th>Missing</th><th></th></tr></thead>
       <tbody>
-        {% for r in result.review %}
+        {% for r in review %}
         <tr>
           <td>{{ r.part_no or '#' ~ r.part_id }}</td>
           <td>{% if r.value %}<code>{{ r.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
@@ -50,6 +94,67 @@
     </table>
   </div>
   {% endif %}
+
+  {# ---- Could not find ---------------------------------------------------------------- #}
+  {% if not_found %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Could not find ({{ not_found|length }})</h2>
+  <p class="note">Rows the resolver could not match at a distributor or that were too under-specified
+    to search. <b>Manual</b> rows need a human to identify the part; <b>unresolved</b> rows were
+    either left out or created bare from the BOM text (marked below) and should be completed by hand.</p>
+  <div style="overflow-x:auto;">
+    <table id="notfound">
+      <thead><tr><th>RefDes</th><th class="num">Qty</th><th>BOM text</th><th>Why</th><th>Outcome</th></tr></thead>
+      <tbody>
+        {% for r in not_found %}
+        <tr>
+          <td>{{ r.refdes }}</td>
+          <td class="num">{{ r.qty }}</td>
+          <td><code>{{ r.orig }}</code></td>
+          <td class="flag">{{ r.note }}</td>
+          <td>
+            {% if r.outcome == 'created' %}<span class="badge warn">created bare</span>
+              <a href="/catalog/{{ r.part_id }}">{{ r.part_no }}</a>
+            {% elif r.outcome == 'manual' %}<span class="badge bad">manual</span>
+            {% else %}<span class="badge bad">not found</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {# ---- Full detail ------------------------------------------------------------------- #}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">All rows ({{ rows|length }})</h2>
+  <div style="overflow-x:auto;">
+    <table id="detail">
+      <thead>
+        <tr><th>RefDes</th><th class="num">Qty</th><th>BOM text</th><th>Part</th><th>iLabs value</th>
+            <th>Outcome</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.refdes }}</td>
+          <td class="num">{{ r.qty }}</td>
+          <td>{{ r.orig }}</td>
+          <td>{% if r.part_id %}<a href="/catalog/{{ r.part_id }}">{{ r.part_no or '#' ~ r.part_id }}</a>
+              {% else %}{{ r.part_no or '' }}{% endif %}</td>
+          <td>{% if r.value %}<code>{{ r.value }}</code>{% else %}<span class="flag">—</span>{% endif %}</td>
+          <td>
+            {% if r.outcome == 'created' %}<span class="badge ok">created</span>
+            {% elif r.outcome == 'already in catalog' %}<span class="badge stock">already in catalog</span>
+            {% elif r.outcome == 'not ticked' %}<span class="badge muted">not ticked</span>
+            {% elif r.outcome == 'not found' %}<span class="badge bad">not found</span>
+            {% elif r.outcome == 'manual' %}<span class="badge bad">manual</span>
+            {% else %}<span class="badge muted">skipped</span>{% endif %}
+          </td>
+          <td class="flag">{{ r.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
   <div style="margin-top:1.2rem; display:flex; gap:.8rem;">
     <button type="button" class="ghost" onclick="window.location.href='/setup/import-parts'">Import another file</button>

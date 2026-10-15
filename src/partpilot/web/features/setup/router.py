@@ -28,6 +28,8 @@ from partpilot.woocommerce import WooClient, WooError
 from ...auth import ROLES
 from ...core.deps import require_role
 from ..catalog import woo_sync
+from ..assemblies import repo as asm_repo
+from ..catalog import repo as catalog_repo
 from ..catalog.import_parts import apply_parts_plan, build_import_plan
 from ..purchasing.service import resolve_bom_file
 from . import import_parts as ip
@@ -463,7 +465,9 @@ def _cleanup_page(request: Request, *, proposals=None, form_values=None,
 # ---- Import parts from any BOM ------------------------------------------------------------
 # upload -> map columns -> resolve (shared engine) -> review -> create. Files live in jobs_dir
 # between steps: pimp-<job><suffix> (the upload), pimeta-<job>.json (source name, headers,
-# build qty), piplan-<job>.json (the review plan). All three are removed at apply.
+# build qty), piplan-<job>.json (the review plan). Apply replaces all three with
+# piresult-<job>.json (rows + outcome), which backs the result page and the optional "wrap into
+# an assembly" step, and is removed when the assembly is created or the admin clicks Done.
 
 _JOB_RE = re.compile(r"[0-9a-f]+")
 
@@ -471,6 +475,14 @@ _JOB_RE = re.compile(r"[0-9a-f]+")
 def _ip_paths(jobs_dir: Path, job_id: str, suffix: str = "") -> tuple[Path, Path, Path]:
     return (jobs_dir / f"pimp-{job_id}{suffix}", jobs_dir / f"pimeta-{job_id}.json",
             jobs_dir / f"piplan-{job_id}.json")
+
+
+def _ip_result_path(jobs_dir: Path, job_id: str) -> Path | None:
+    """The applied-import record (plan rows + outcome), or None for an unknown/expired job."""
+    if not _JOB_RE.fullmatch(job_id or ""):
+        return None
+    p = jobs_dir / f"piresult-{job_id}.json"
+    return p if p.exists() else None
 
 
 def meta_source(upload) -> str:
@@ -606,12 +618,112 @@ async def import_parts_apply(request: Request):
     result = apply_parts_plan(db, plan, accepted)
     for p in (bom_path, meta_path, plan_path):
         p.unlink(missing_ok=True)
-    created = [{"part_id": result["part_ids"][i], "part_no": plan[i].get("part_no"),
-                "value": plan[i].get("value")} for i in result["created_rows"]]
+    rows = _ip_outcome_rows(plan, result, accepted)
+    (jobs_dir / f"piresult-{job_id}.json").write_text(json.dumps({
+        "source": meta["source"], "rows": rows,
+        "counts": {"created": result["created"], "linked": result["linked"],
+                   "skipped": result["skipped"]},
+        "review": result["review"],
+    }))
+    return RedirectResponse(f"/setup/import-parts/{job_id}/result", status_code=303)
+
+
+# Per-row outcome labels on the result page.
+CREATED = "created"                 # new catalog part made by this import
+LINKED = "already in catalog"       # row points at a pre-existing part
+NOT_TICKED = "not ticked"           # could have been created, admin left it out
+NOT_FOUND = "not found"             # no distributor match and not created
+MANUAL_ROW = "manual"               # too under-specified to import
+SKIPPED = "skipped"                 # DNP / non-orderable
+
+
+def _ip_outcome_rows(plan: list[dict], result: dict, accepted: set[int]) -> list[dict]:
+    created_rows = set(result["created_rows"])
+    rows = []
+    for i, (it, pid) in enumerate(zip(plan, result["part_ids"])):
+        status = it.get("status")
+        if i in created_rows:
+            outcome = CREATED
+        elif pid is not None:
+            outcome = LINKED
+        elif status == "manual":
+            outcome = MANUAL_ROW
+        elif status == "skip":
+            outcome = SKIPPED
+        elif status == "unresolved" and i not in accepted:
+            outcome = NOT_FOUND
+        else:
+            outcome = NOT_TICKED
+        rows.append({
+            "refdes": it.get("refdes"), "qty": it.get("qty"), "orig": it.get("orig"),
+            "status": status, "outcome": outcome, "part_id": pid, "part_no": it.get("part_no"),
+            "value": it.get("value"), "note": it.get("note"),
+            # Unresolved rows that were created anyway are still "not found at a distributor".
+            "unfound": status in ("unresolved", "manual"),
+        })
+    return rows
+
+
+def _ip_result_page(request: Request, job_id: str, data: dict, *, values: dict | None = None,
+                    error: str | None = None, status: int = 200):
+    rows = data["rows"]
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_result.html",
-        {"result": result, "created": created, "source": meta["source"]})
+        {"job_id": job_id, "source": data["source"], "result": data["counts"],
+         "review": data["review"], "rows": rows,
+         "created": [r for r in rows if r["outcome"] == CREATED],
+         "not_found": [r for r in rows if r["unfound"]],
+         "bom_rows": [r for r in rows if r["part_id"] is not None],
+         "values": values or {}, "error": error}, status_code=status)
 
+
+@router.get("/import-parts/{job_id}/result", response_class=HTMLResponse)
+def import_parts_result(request: Request, job_id: str, part_no: str | None = None,
+                        desc: str | None = None):
+    require_role(request, SETUP_ROLES)
+    path = _ip_result_path(request.app.state.jobs_dir, job_id)
+    if path is None:
+        return RedirectResponse("/setup/import-parts", status_code=303)
+    # part_no / desc arrive when bouncing back from an Article Register allocator.
+    values = {"part_no": (part_no or "").strip(), "description": (desc or "").strip()}
+    return _ip_result_page(request, job_id, json.loads(path.read_text()), values=values)
+
+
+@router.post("/import-parts/{job_id}/assembly")
+async def import_parts_assembly(request: Request, job_id: str):
+    """Wrap every imported row that has a part — created or pre-existing — into a new assembly."""
+    require_role(request, SETUP_ROLES)
+    db = request.app.state.database
+    path = _ip_result_path(request.app.state.jobs_dir, job_id)
+    if path is None:
+        return RedirectResponse("/setup/import-parts", status_code=303)
+    data = json.loads(path.read_text())
+    form = await request.form()
+    values = {"part_no": (form.get("part_no") or "").strip(),
+              "description": (form.get("description") or "").strip()}
+    if not values["part_no"]:
+        return _ip_result_page(request, job_id, data, values=values,
+                               error="Part number is required.", status=400)
+    if catalog_repo.find_part_by_part_no(db, values["part_no"]) is not None:
+        return _ip_result_page(request, job_id, data, values=values,
+                               error=f"A part or assembly numbered {values['part_no']} already exists.",
+                               status=400)
+    asm_id = asm_repo.create_assembly(db, {"part_no": values["part_no"],
+                                           "description": values["description"] or None})
+    for r in data["rows"]:
+        if r["part_id"] is not None:
+            asm_repo.add_bom_line(db, asm_id, r["part_id"], r.get("qty") or 1, r.get("refdes"))
+    path.unlink(missing_ok=True)
+    return RedirectResponse(f"/assemblies/{asm_id}", status_code=303)
+
+
+@router.post("/import-parts/{job_id}/done")
+def import_parts_done(request: Request, job_id: str):
+    require_role(request, SETUP_ROLES)
+    path = _ip_result_path(request.app.state.jobs_dir, job_id)
+    if path is not None:
+        path.unlink(missing_ok=True)
+    return RedirectResponse("/setup/import-parts", status_code=303)
 
 @router.get("/part-cleanup", response_class=HTMLResponse)
 def part_cleanup_page(request: Request):

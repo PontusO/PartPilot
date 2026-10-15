@@ -122,6 +122,26 @@ Setup & Tools index gets a card/row for the tool next to Part-number cleanup, fo
 existing index markup and `docs/design-rules.md` (act-bar buttons, real buttons in rows, status
 badges for the five statuses).
 
+### Result page and wrap-up into an assembly (added 2026-10-15, second iteration)
+
+Apply writes `piresult-<job>.json` (per-row outcome + counts) and redirects to
+`GET /setup/import-parts/<job>/result`, a real page so the Article Register allocator can bounce
+back to it (`?part_no=&desc=`). The page shows:
+
+- stat cards: created / already in catalog / not found / skipped;
+- **Wrap into an assembly**: part number (with the New-product and From-template allocator
+  buttons, `return_to` this page) + optional description. `POST .../assembly` creates an ASSY part
+  and adds one BOM line per row that has a part — created *and* pre-existing — with the row's qty
+  and refdes; rows without a part are left out. Redirects to the new assembly. Rejects an empty or
+  already-used part number (400, page re-rendered with the error).
+- created parts, needs-checking (incomplete iLabs value), **Could not find** (every unresolved
+  and manual row with BOM text, reason, and whether it was created bare), and an **All rows**
+  table with each row's outcome: created / already in catalog / not ticked / not found / manual /
+  skipped.
+- `POST .../done` discards the job record without creating an assembly.
+
+The result record is deleted when the assembly is created or Done is clicked.
+
 ## Data flow
 
 ```

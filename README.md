@@ -134,7 +134,7 @@ Stock-movement ledger, filterable by date range and movement type.
 ### Setup & Tools (admin)
 **Import parts from BOM** (upload any CSV/Excel part list, map its columns to PartPilot fields —
 the mapping is remembered per header layout — resolve rows against stock and Digi-Key/Mouser,
-tick the parts to create; catalog only, use an assembly's Import BOM to build a BOM);
+tick the parts to create; the summary lists every row's outcome and the parts it could not find, and can wrap all rows with a part — new and pre-existing — into a new assembly);
 Users (roles, activation, password reset — with guardrails against locking yourself out);
 Company details (used on PO PDFs); Production settings (spillage %, minimum margin);
 Order and Pricing settings (default overhead factor); **Part-number cleanup** (find parts whose
