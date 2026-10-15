@@ -76,8 +76,8 @@ Routes (all `require_role(request, {"admin"})`), under the setup router prefix:
 | POST | `/setup/import-parts/resolve` | Validate mapping, remember it, resolve in threadpool, build plan, save `jobs_dir/piplan-<job>.json`, render review. |
 | POST | `/setup/import-parts/apply` | Load plan by job id (hex-guarded), `apply_parts_plan`, delete plan + upload, render result. |
 
-The uploaded file is kept on disk between the mapping POST and the resolve POST (the resolver
-needs it), and deleted after resolve succeeds or fails. The plan JSON is kept between review
+The uploaded file is kept on disk from the mapping POST until apply (the resolver needs it,
+and a failed resolve can be retried from the mapping screen without re-uploading). The plan JSON is kept between review
 and apply, as the assembly importer does.
 
 Header reading reuses `partpilot.bom.readers.read_table` (header-row detection, delimiter
@@ -138,7 +138,7 @@ upload ─► read_table ─► headers + samples ─► pre-fill (remembered | 
 | `read_table` raises / no header row / zero columns | Upload screen, 400, the reader's message. |
 | Mapping validation fails | Mapping screen, 400, error + retained choices. |
 | Upload file missing at resolve (expired, restart) | Upload screen, 400, "Upload expired, please upload again." |
-| Resolver raises (credentials, network) | Mapping screen, 500, "Resolve failed: …", mapping retained; upload file deleted. |
+| Resolver raises (credentials, network) | Mapping screen, 500, "Resolve failed: …", mapping retained; upload file kept so the user can retry from the mapping screen. All job files are deleted at apply. |
 | Plan missing at apply | Redirect to upload screen. |
 | Same MPN twice in one file | Second occurrence links to the part created by the first (`find_part_id_by_mpn` before create, as today). |
 

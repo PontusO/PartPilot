@@ -216,3 +216,11 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   create page with `?part_no=<code>` prefilled. Return paths are same-site only (`_safe_return`
   rejects scheme/host/`//`). Reuse `return_to` + a `part_no` prefill param for any allocate-elsewhere
   flow rather than opening a second window.
+- **2026-10-15** — Setup → **Import parts from BOM**: a four-screen wizard (upload → map → review →
+  result). New **column-mapping table** pattern (`import_parts_map.html`): one row per source
+  column, the header in bold, sample values as `<code>` separated by `·` in `--muted`, and a
+  `<select>` per row whose first option is `— ignore —`. Validation errors re-render the same
+  screen with the user's choices retained. Review/result screens reuse the assembly-import badge
+  set (`ok` in inventory, `warn` new, `bad` unresolved/manual, `muted` skip) and the stat `.cards`
+  row; in-catalog rows link to the part. Reuse this mapping table for any "map external columns to
+  our fields" step rather than inventing a new layout.

@@ -132,6 +132,9 @@ part-edit and PO forms read.
 Stock-movement ledger, filterable by date range and movement type.
 
 ### Setup & Tools (admin)
+**Import parts from BOM** (upload any CSV/Excel part list, map its columns to PartPilot fields —
+the mapping is remembered per header layout — resolve rows against stock and Digi-Key/Mouser,
+tick the parts to create; catalog only, use an assembly's Import BOM to build a BOM);
 Users (roles, activation, password reset — with guardrails against locking yourself out);
 Company details (used on PO PDFs); Production settings (spillage %, minimum margin);
 Order and Pricing settings (default overhead factor); **Part-number cleanup** (find parts whose
@@ -140,7 +143,7 @@ and sync; Fortnox connection.
 
 ## The BOM resolver
 
-The engine behind Purchasing, the assemblies BOM importer and `partpilot resolve`. Per line:
+The engine behind Purchasing, the assemblies BOM importer, Setup → Import parts and `partpilot resolve`. Per line:
 
 | Line kind | Detected by | Action |
 |-----------|-------------|--------|
