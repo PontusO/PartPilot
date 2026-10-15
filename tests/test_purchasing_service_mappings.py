@@ -43,3 +43,19 @@ def test_resolve_bom_file_defaults_to_yaml_mappings(tmp_path, monkeypatch):
     bom.write_text("Designator,Value,Qty\nR1,10k,1\n")
     service.resolve_bom_file(bom, build_qty=1, check_stock=False)
     assert captured["lines"][0].refdes == ["R1"]
+
+
+def test_duplicate_headers_map_to_the_chosen_column(tmp_path, monkeypatch):
+    """Two 'Description' columns: the deduped name lets the user pick the second one."""
+    _stub_clients(monkeypatch)
+    captured = {}
+
+    def fake_resolve_bom(lines, *a):
+        captured["lines"] = lines
+        return []
+    monkeypatch.setattr(service, "resolve_bom", fake_resolve_bom)
+    bom = tmp_path / "b.csv"
+    bom.write_text("Designator,Value,Description,Description\nR1,10k,first,second\n")
+    service.resolve_bom_file(bom, build_qty=1, check_stock=False,
+                             mappings={"value": ["Value"], "description": ["Description (2)"]})
+    assert captured["lines"][0].description == "second"

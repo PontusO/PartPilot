@@ -120,11 +120,13 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
 
     Returns counts plus ``review`` (created passives with an incomplete iLabs value) and
     ``part_ids``: one entry per plan row, the catalog part id that row now points at, or None
-    for rows that were skipped / not accepted / manual.
+    for rows that were skipped / not accepted / manual. ``created_rows`` lists the plan indexes
+    whose part was created by this call (the rest of the non-None rows were linked).
     """
     created = linked = skipped = 0
     review: list[dict] = []
     part_ids: list[int | None] = []
+    created_rows: list[int] = []
     for i, item in enumerate(plan):
         status = item.get("status")
         if status == IN_INVENTORY:
@@ -138,6 +140,7 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
             if pid is None:
                 pid = create_part_from_item(db, item)
                 created += 1
+                created_rows.append(i)
                 if item.get("value_missing"):
                     review.append({"part_id": pid, "part_no": item.get("part_no"),
                                    "value": item.get("value"), "missing": item["value_missing"]})
@@ -148,4 +151,4 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
         skipped += 1          # SKIP, MANUAL, or not accepted
         part_ids.append(None)
     return {"created": created, "linked": linked, "skipped": skipped,
-            "review": review, "part_ids": part_ids}
+            "review": review, "part_ids": part_ids, "created_rows": created_rows}

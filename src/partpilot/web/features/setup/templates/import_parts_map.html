@@ -16,20 +16,18 @@
     layout.</p>
   <form method="post" action="/setup/import-parts/resolve" onsubmit="showOverlay()">
     <input type="hidden" name="job_id" value="{{ job_id }}">
-    {% set rev = {} %}
-    {% for f, h in mapping.items() %}{% set _ = rev.update({h: f}) %}{% endfor %}
     <div style="overflow-x:auto;">
       <table id="colmap">
         <thead><tr><th>File column</th><th>Sample values</th><th>PartPilot field</th></tr></thead>
         <tbody>
           {% for h in headers %}
-          {% set cur = rev.get(h) %}
+          {% set cur = selected[loop.index0] %}
           <tr>
             <td><b>{{ h }}</b></td>
             <td class="sample">{% for s in samples[loop.index0] %}<code>{{ s }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td>
             <td>
               <select name="map_{{ loop.index0 }}">
-                <option value="ignore" {{ 'selected' if not cur else '' }}>— ignore —</option>
+                <option value="ignore" {{ 'selected' if cur == 'ignore' else '' }}>— ignore —</option>
                 {% for f, label in targets %}
                 <option value="{{ f }}" {{ 'selected' if cur == f else '' }}>{{ label }}</option>
                 {% endfor %}
@@ -41,7 +39,7 @@
       </table>
     </div>
     <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:center;">
-      <button type="submit" style="margin-top:0;">Resolve rows</button>
+      <button type="submit" class="ghost">Resolve rows</button>
       <button type="button" class="quiet" onclick="window.location.href='/setup/import-parts'">Cancel</button>
       {% if build_qty %}<span class="note">Build qty {{ build_qty }}</span>{% endif %}
     </div>

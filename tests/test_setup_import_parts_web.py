@@ -115,6 +115,7 @@ def test_full_flow_maps_resolves_reviews_and_applies(app, monkeypatch):
     assert "<b>1</b><small>parts created" in flat
     assert "<b>1</b><small>already in catalog" in flat
     assert "RES-10K" in r.text
+    assert "Created parts (1)" in r.text and "EXIST</a>" not in r.text   # linked rows aren't listed as created
 
 
 def test_mapping_validation_round_trips(app):
@@ -126,6 +127,10 @@ def test_mapping_validation_round_trips(app):
     assert r.status_code == 400
     assert "more than once" in r.text
     assert 'name="map_1"' in r.text          # back on the mapping screen, file still there
+    # Both duplicate choices are retained so the user can see and fix the clash.
+    assert 'value="value" selected' in _select(r.text, "map_0")
+    assert 'value="value" selected' in _select(r.text, "map_1")
+    assert 'value="qty" selected' in _select(r.text, "map_3")
     r = c.post("/setup/import-parts/resolve", data={
         "job_id": job_id, "map_0": "refdes", "map_1": "ignore", "map_2": "ignore", "map_3": "qty"})
     assert r.status_code == 400 and "Value or Device" in r.text
@@ -150,6 +155,10 @@ def test_bad_upload_rejected(app):
     assert r.status_code == 400 and "Unsupported" in r.text
     r = c.post("/setup/import-parts", data={"build_qty": "5"})
     assert r.status_code == 400
+    # A corrupt Excel file is a 400 with the reader's message, and leaves nothing in jobs_dir.
+    r = c.post("/setup/import-parts", files={"file": ("bad.xlsx", b"not a zip", "application/octet-stream")})
+    assert r.status_code == 400 and "bad.xlsx" in r.text or r.status_code == 400
+    assert not list(app.state.jobs_dir.glob("pimp-*"))
 
 
 def test_expired_job_handled(app):

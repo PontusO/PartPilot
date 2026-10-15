@@ -473,18 +473,37 @@ def _ip_paths(jobs_dir: Path, job_id: str, suffix: str = "") -> tuple[Path, Path
             jobs_dir / f"piplan-{job_id}.json")
 
 
+def meta_source(upload) -> str:
+    return Path(getattr(upload, "filename", "") or "file").name
+
+
 def _ip_upload_page(request: Request, error: str | None = None, status: int = 200):
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_upload.html", {"error": error}, status_code=status)
 
 
 def _ip_map_page(request: Request, *, job_id: str, meta: dict, samples: list[list[str]],
-                 mapping: dict[str, str], error: str | None = None, status: int = 200):
+                 selected: list[str], error: str | None = None, status: int = 200):
+    """``selected`` is the target per column (parallel to headers), ``"ignore"`` for none."""
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_map.html",
         {"job_id": job_id, "source": meta["source"], "headers": meta["headers"],
-         "samples": samples, "mapping": mapping, "targets": ip.TARGETS,
+         "samples": samples, "selected": selected, "targets": ip.TARGETS,
          "build_qty": meta.get("build_qty"), "error": error}, status_code=status)
+
+
+def _ip_selected_from_mapping(mapping: dict[str, str], headers: list[str]) -> list[str]:
+    by_header = {h: f for f, h in mapping.items()}
+    return [by_header.get(h, ip.IGNORE) for h in headers]
+
+
+def _ip_selected_from_form(chosen: dict[str, str], headers: list[str]) -> list[str]:
+    """Exactly what the user picked per column — duplicates included — for re-rendering."""
+    selected = [ip.IGNORE] * len(headers)
+    for k, v in chosen.items():
+        if k[4:].isdigit() and int(k[4:]) < len(headers) and v in ip.TARGET_FIELDS:
+            selected[int(k[4:])] = v
+    return selected
 
 
 def _ip_load_job(jobs_dir: Path, job_id: str):
@@ -523,14 +542,14 @@ async def import_parts_upload(request: Request):
     bom_path.write_bytes(await upload.read())
     try:
         headers, samples = ip.read_headers(bom_path)
-    except ValueError as exc:
+    except Exception as exc:  # unsupported suffix, no header row, corrupt/not-really-Excel, ...
         bom_path.unlink(missing_ok=True)
-        return _ip_upload_page(request, str(exc), 400)
+        return _ip_upload_page(request, f"Could not read {meta_source(upload)}: {exc}", 400)
     meta = {"source": Path(upload.filename).name, "headers": headers, "build_qty": build_qty,
             "suffix": suffix}
     meta_path.write_text(json.dumps(meta))
     return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
-                        mapping=ip.prefill_mapping(db, headers))
+                        selected=_ip_selected_from_mapping(ip.prefill_mapping(db, headers), headers))
 
 
 @router.post("/import-parts/resolve", response_class=HTMLResponse)
@@ -547,14 +566,12 @@ async def import_parts_resolve(request: Request):
     headers = meta["headers"]
     _, samples = ip.read_headers(bom_path)
     chosen = {k: str(v) for k, v in form.items() if k.startswith("map_")}
-    # What the user picked, as {field: header}, so the screen re-renders with their choices.
-    picked = {v: headers[int(k[4:])] for k, v in chosen.items()
-              if k[4:].isdigit() and int(k[4:]) < len(headers) and v in ip.TARGET_FIELDS}
+    selected = _ip_selected_from_form(chosen, headers)
     try:
         mapping = ip.parse_mapping(chosen, headers)
     except ValueError as exc:
         return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
-                            mapping=picked, error=str(exc), status=400)
+                            selected=selected, error=str(exc), status=400)
     ip.remember_mapping(db, headers, mapping)
 
     try:
@@ -564,7 +581,7 @@ async def import_parts_resolve(request: Request):
     except Exception as exc:  # missing creds, network, bad rows
         # The upload is kept so the user can fix the mapping and retry without re-uploading.
         return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
-                            mapping=mapping, error=f"Resolve failed: {exc}", status=500)
+                            selected=selected, error=f"Resolve failed: {exc}", status=500)
 
     plan = build_import_plan(db, run)
     plan_path.write_text(json.dumps(plan))
@@ -589,9 +606,8 @@ async def import_parts_apply(request: Request):
     result = apply_parts_plan(db, plan, accepted)
     for p in (bom_path, meta_path, plan_path):
         p.unlink(missing_ok=True)
-    created = [{"part_id": pid, "part_no": it.get("part_no"), "value": it.get("value")}
-               for it, pid in zip(plan, result["part_ids"])
-               if pid is not None and it.get("status") != "in_inventory"]
+    created = [{"part_id": result["part_ids"][i], "part_no": plan[i].get("part_no"),
+                "value": plan[i].get("value")} for i in result["created_rows"]]
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_result.html",
         {"result": result, "created": created, "source": meta["source"]})

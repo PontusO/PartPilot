@@ -59,3 +59,16 @@ def test_assembly_wrapper_still_exposes_engine_names():
     from partpilot.web.features.assemblies import import_bom
     assert import_bom.build_import_plan is import_parts.build_import_plan
     assert import_bom.NEW == "new"
+
+
+def test_apply_parts_plan_reports_which_rows_were_created(db):
+    existing = catrepo.create_part(db, part={"part_no": "EXIST-MPN"}, supplier_lines=[])
+    plan = [
+        {"status": "new", "part_no": "DUP-1", "qty": 1, "refdes": "C1"},
+        {"status": "new", "part_no": "DUP-1", "qty": 1, "refdes": "C2"},        # links to row 0's part
+        {"status": "new", "part_no": "EXIST-MPN", "qty": 1, "refdes": "C3"},    # links to pre-existing
+        {"status": "in_inventory", "part_id": existing, "qty": 1, "refdes": "C4"},
+    ]
+    res = import_parts.apply_parts_plan(db, plan, accepted={0, 1, 2})
+    assert res["created_rows"] == [0]
+    assert res["created"] == 1 and res["linked"] == 3

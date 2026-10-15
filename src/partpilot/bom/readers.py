@@ -40,12 +40,24 @@ def _find_header_row(rows: list[list[str]]) -> int:
     return best_idx
 
 
+def _unique_headers(header: list[str]) -> list[str]:
+    """Make duplicate header names unique ("Description", "Description (2)", ...) so a column can
+    be addressed by name downstream — pandas would otherwise return a 2-D slice for df[name]."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for h in header:
+        n = seen.get(h, 0) + 1
+        seen[h] = n
+        out.append(h if n == 1 or not h else f"{h} ({n})")
+    return out
+
+
 def _frame_from_rows(rows: list[list[str]]) -> pd.DataFrame:
     rows = [r for r in rows if any(str(c).strip() for c in r)]  # drop blank rows
     if not rows:
         return pd.DataFrame()
     header_idx = _find_header_row(rows)
-    header = [str(c).strip() for c in rows[header_idx]]
+    header = _unique_headers([str(c).strip() for c in rows[header_idx]])
     body = rows[header_idx + 1 :]
     width = len(header)
     norm = [(r + [""] * width)[:width] for r in body]

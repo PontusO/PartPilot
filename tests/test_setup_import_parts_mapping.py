@@ -74,3 +74,11 @@ def test_parse_mapping_requires_value_or_device():
 def test_parse_mapping_ignores_unknown_targets_and_indexes():
     m = ip.parse_mapping({"map_0": "device", "map_1": "bogus", "map_9": "value", "x": "y"}, ["A", "B"])
     assert m == {"device": "A"}
+
+
+def test_read_headers_dedupes_duplicate_names(tmp_path):
+    p = tmp_path / "dup.csv"
+    p.write_text("Qty,Value,Description,Description\n1,10k,res,extra\n")
+    headers, samples = ip.read_headers(p)
+    assert headers == ["Qty", "Value", "Description", "Description (2)"]
+    assert samples[3] == ["extra"]
