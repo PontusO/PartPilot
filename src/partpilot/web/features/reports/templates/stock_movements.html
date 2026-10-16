@@ -28,8 +28,16 @@
         {% for t in types %}<option value="{{ t }}" {{ 'selected' if t == mtype else '' }}>{{ type_label.get(t, t) }}</option>{% endfor %}
       </select>
     </div>
+    <div>
+      <label style="margin:0 0 .3rem;">Shelf</label>
+      <select name="location_id"
+              style="padding:.5rem .6rem; background:#0d1219; color:var(--fg); border:1px solid var(--line); border-radius:7px;">
+        <option value="">All shelves</option>
+        {% for s in shelves %}<option value="{{ s.id }}" {{ 'selected' if location_id == s.id else '' }}>{% if s.kind == 'customer' %}Customer: {% endif %}{{ s.name }}{% if s.retired_at %} (retired){% endif %}</option>{% endfor %}
+      </select>
+    </div>
     <button type="submit" class="ghost">Apply</button>
-    {% if mtype or start or end %}<a href="/reports/stock-movements" style="align-self:center;">reset</a>{% endif %}
+    {% if mtype or start or end or location_id %}<a href="/reports/stock-movements" style="align-self:center;">reset</a>{% endif %}
   </form>
 
   <div class="cards">
@@ -48,7 +56,7 @@
       <thead><tr>
         <th>When</th><th>Part</th><th>Value</th><th>Type</th>
         <th class="num">Change</th><th class="num">Balance</th>
-        <th>Location</th><th>Reference</th><th>Note</th><th>User</th>
+        <th>Shelf</th><th>Reference</th><th>Note</th><th>User</th>
       </tr></thead>
       <tbody>
         {% for m in rows %}
@@ -59,7 +67,7 @@
           <td><span class="badge {{ badge.get(m.mtype, 'muted') }}">{{ type_label.get(m.mtype, m.mtype) }}</span></td>
           <td class="num">{{ "+%g"|format(m.qty_delta) if m.qty_delta > 0 else "%g"|format(m.qty_delta) }}</td>
           <td class="num">{{ "%g"|format(m.qty_after) }}</td>
-          <td>{{ m.location_name or '' }}</td>
+          <td>{{ m.location_name or '' }}{% if m.location_kind == 'customer' %} <span class="badge warn">customer</span>{% endif %}</td>
           <td>{{ m.reference or '' }}</td>
           <td>{{ m.note or '' }}</td>
           <td>{{ m.user or '' }}</td>

@@ -1,7 +1,7 @@
 # Customer-owned stock ("shelves") — design
 
 **Date:** 2026-10-16
-**Status:** approved in conversation (sections 1–8), written up for implementation
+**Status:** implemented 2026-10-16 (plan `docs/superpowers/plans/2026-10-16-customer-owned-stock.md`)
 **Supersedes:** the "Ignore our own stock" checkbox on Setup → Import parts (commit 963678b), which
 is removed by this work.
 

@@ -224,3 +224,11 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   set (`ok` in inventory, `warn` new, `bad` unresolved/manual, `muted` skip) and the stat `.cards`
   row; in-catalog rows link to the part. Reuse this mapping table for any "map external columns to
   our fields" step rather than inventing a new layout.
+- **2026-10-16** — **Stock shelves** (customer-owned stock). Shelf kind badges: `.badge stock` =
+  ours, `.badge warn` = customer (also "customer-owned parts" on a WO, "customer shelf" on a PO,
+  "ships from customer shelf" on despatch lines). One shared picker partial
+  `web/core/templates/_shelf_select.html` (`shelves`, `shelf_selected`, `shelf_field`, `shelf_none`)
+  is used by every shelf/"check stock on shelf" selector — never hand-roll a location `<select>`.
+  Shelf pages (`shelves.html`, `shelf.html`) follow the list/detail pattern with real row buttons;
+  the PO suggestions table gains a shelf header row above each supplier header row. Create-shelf
+  errors bounce back to the origin page via `?shelf_error=` and render as `.err`.

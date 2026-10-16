@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from ...core.deps import require_user
+from ..catalog import repo as catalog_repo
 from . import repo
 
 router = APIRouter(prefix="/reports")
@@ -27,7 +28,7 @@ def reports_index(request: Request):
 
 @router.get("/stock-movements", response_class=HTMLResponse)
 def stock_movements(request: Request, start: str | None = None, end: str | None = None,
-                    mtype: str | None = None):
+                    mtype: str | None = None, location_id: int | None = None):
     require_user(request)
     db = request.app.state.database
     # Default to the last 30 days so the page opens on something useful, not the whole ledger.
@@ -36,10 +37,11 @@ def stock_movements(request: Request, start: str | None = None, end: str | None 
     end = (end or "").strip() or today.isoformat()
     mtype = (mtype or "").strip() or None
 
-    rows = repo.stock_movements(db, start=start, end=end, mtype=mtype, limit=LIMIT)
-    summary = repo.stock_movement_summary(db, start=start, end=end, mtype=mtype)
+    rows = repo.stock_movements(db, start=start, end=end, mtype=mtype, location_id=location_id, limit=LIMIT)
+    summary = repo.stock_movement_summary(db, start=start, end=end, mtype=mtype, location_id=location_id)
     return request.app.state.templates.TemplateResponse(
         request, "stock_movements.html",
         {"rows": rows, "summary": summary, "start": start, "end": end, "mtype": mtype or "",
+         "location_id": location_id, "shelves": catalog_repo.locations(db, include_retired=True),
          "types": repo.MOVEMENT_TYPES, "limit": LIMIT, "truncated": len(rows) >= LIMIT},
     )

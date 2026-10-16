@@ -51,7 +51,15 @@ offers, stock, movement history and locations. Add/edit components with multiple
 (one default), flags (`unlimited_stock`, `normally_stocked`, `exclude_from_bom_cost`) and a
 per-part overhead factor. **Costing is two-layer:** captured supplier *cost* tiers → *loaded* cost
 tiers (cost × overhead), either generated from the default supplier's breaks or refreshed live from
-Digi-Key/Mouser. Stock movements (receive / issue / adjust) are posted from here.
+Digi-Key/Mouser. Stock movements (receive / issue / adjust) are posted from here, per shelf.
+
+**Stock shelves (customer-owned stock).** A *shelf* is a stock location with an owner: **ours**
+("Main", plus any others you add) or a **customer's**. Customer shelves hold parts the customer paid
+for up front — only their work orders draw from them, and they never count in our totals,
+valuation or the webshop (`parts.total_qty` is *our* stock; `parts.customer_qty` is theirs). Create
+a per-customer shelf from the customer's contact page, or a per-job shelf from a customer order;
+browse all shelves under Setup & Tools → **Stock shelves**. The part page shows stock by shelf.
+Leftovers stay on the customer's shelf; there is no automatic transfer.
 
 ### Article Register
 The internal part-number allocator, replacing the old Excel *Artikelregister*. Numbers are
@@ -93,7 +101,11 @@ Statuses beyond `confirmed` are set by the system: `shipped` by despatch, `compl
 
 ### Work Orders
 Build an assembly: creating a WO explodes its BOM and snapshots required quantities with the
-configured spillage % / minimum margin applied. Lifecycle: **allocated → issued → finished**.
+configured spillage % / minimum margin applied. Every WO builds from **one shelf** (pre-set to the
+customer's job/customer shelf when raised from their order): availability, issue and the finished
+boards all stay on that shelf — a customer build is short on their shelf even when Main has the
+part, and never consumes our stock. On a customer shelf the material is customer-supplied: the WO
+shows zero charged with the reference value alongside. Lifecycle: **allocated → issued → finished**.
 *Issue* posts ISSUE stock movements for every component (except `unlimited_stock` cost-only lines
 such as SMT assembly); *Finish* posts the built assembly into stock and queues a devmgmt push;
 *Flush* does both. *Regenerate BOM* re-explodes an allocated WO whose assembly BOM has drifted (the
@@ -104,16 +116,19 @@ A calendar of work orders. Drag to move the build window, resize to change the d
 the *purchase-by* marker on its own.
 
 ### Purchase Orders
-**Suggestions** computes what allocated work orders need beyond free stock and open POs, grouped by
-supplier — tick and confirm to create POs, tier-priced by a live distributor lookup. Manual POs
-too. **Placing** a PO freezes its supplier CSV + PDF as immutable records; **receiving** posts
+**Suggestions** computes what allocated work orders need beyond free stock and open POs, **per
+shelf**, grouped by shelf then supplier — tick and confirm to create one draft PO per supplier per
+shelf, tier-priced by a live distributor lookup. Every PO has a *receive-into shelf* (shown on the
+PDF); receiving posts the goods onto that shelf. Manual POs too. **Placing** a PO freezes its supplier CSV + PDF as immutable records; **receiving** posts
 RECEIVE movements and creates a goods receipt. Delete is refused once anything has been received.
 
 ### Goods Receipts
 Read-only register of GRNs created by the PO receive flow, with PDF/CSV downloads.
 
 ### Purchasing (the BOM resolver)
-Upload a BOM (`.csv/.tsv/.txt/.xlsx/.xlsm/.xls`), give a build quantity, and get every line
+Upload a BOM (`.csv/.tsv/.txt/.xlsx/.xlsm/.xls`), give a build quantity, pick the **shelf to check
+stock on** (Main, a customer's shelf, or none — the same selector appears on the assembly BOM
+importer and the Setup parts importer), and get every line
 resolved to an orderable part with status colouring, an Excel report and one cart CSV per
 distributor. How it works is described in [The BOM resolver](#the-bom-resolver) below.
 
@@ -134,10 +149,11 @@ Stock-movement ledger, filterable by date range and movement type.
 ### Setup & Tools (admin)
 **Import parts from BOM** (upload any CSV/Excel part list, map its columns to PartPilot fields —
 the mapping is remembered per header layout — resolve rows against stock and Digi-Key/Mouser,
-or tick **Ignore our own stock** when buying for a customer who won't use stocked parts so every row is priced at the distributors,
+choosing which **shelf** to check stock on — a customer's shelf sees only their parts, so rows we hold on Main are still priced —
 tick the parts to create; the summary lists every row's outcome and the parts it could not find, and can wrap all rows with a part — new and pre-existing — into a new assembly);
 Users (roles, activation, password reset — with guardrails against locking yourself out);
 Company details (used on PO PDFs); Production settings (spillage %, minimum margin);
+**Stock shelves** (our and customer-owned shelves: owner, contents, value; rename / retire);
 Order and Pricing settings (default overhead factor); **Part-number cleanup** (find parts whose
 part number is really a distributor order code and fix the MPN); Webshop (WooCommerce) settings
 and sync; Fortnox connection.

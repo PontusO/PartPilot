@@ -15,9 +15,12 @@ from ...core.db import Database
 MOVEMENT_TYPES = ["RECEIVE", "ISSUE", "WOOSALE", "BUILD", "ADJUST", "OPENING"]
 
 
-def _filter(start, end, mtype):
+def _filter(start, end, mtype, location_id=None):
     """Build a shared WHERE clause + params for both the listing and the summary."""
     where, params = [], []
+    if location_id:
+        where.append("m.location_id = ?")
+        params.append(location_id)
     if start:
         where.append("date(m.moved_at) >= ?")
         params.append(start)
@@ -31,14 +34,15 @@ def _filter(start, end, mtype):
     return clause, params
 
 
-def stock_movements(db: Database, *, start=None, end=None, mtype=None, limit=2000) -> list[dict]:
-    """Ledger rows (newest first), joined to the part and location, capped at ``limit``."""
-    clause, params = _filter(start, end, mtype)
+def stock_movements(db: Database, *, start=None, end=None, mtype=None, location_id=None,
+                    limit=2000) -> list[dict]:
+    """Ledger rows (newest first), joined to the part and shelf, capped at ``limit``."""
+    clause, params = _filter(start, end, mtype, location_id)
     sql = f"""
         SELECT m.id, m.moved_at, m.mtype, m.qty_delta, m.qty_after,
                m.reference, m.note, m.user,
                p.id AS part_id, p.part_no, p.value,
-               l.name AS location_name
+               l.name AS location_name, l.kind AS location_kind
         FROM stock_movements m
         JOIN parts p ON p.id = m.part_id
         LEFT JOIN stock_locations l ON l.id = m.location_id
@@ -50,9 +54,9 @@ def stock_movements(db: Database, *, start=None, end=None, mtype=None, limit=200
         return [dict(r) for r in conn.execute(sql, [*params, limit])]
 
 
-def stock_movement_summary(db: Database, *, start=None, end=None, mtype=None) -> dict:
+def stock_movement_summary(db: Database, *, start=None, end=None, mtype=None, location_id=None) -> dict:
     """Totals for the selected range: movement count, units in/out, distinct parts touched."""
-    clause, params = _filter(start, end, mtype)
+    clause, params = _filter(start, end, mtype, location_id)
     sql = f"""
         SELECT COUNT(*) AS moves,
                COUNT(DISTINCT m.part_id) AS parts,
