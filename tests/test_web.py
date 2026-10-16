@@ -453,8 +453,9 @@ def test_purchase_order_suggestions_and_receive(app):
     sug = client.get("/purchase-orders/suggestions").text
     assert "PR-1" in sug and "VendorX" in sug
 
-    r = client.post("/purchase-orders/suggestions", data={"buy": str(p), f"qty_{p}": "15"},
-                    follow_redirects=False)
+    main = catrepo.default_shelf_id(db)
+    r = client.post("/purchase-orders/suggestions",
+                    data={"buy": f"{p}:{main}", f"qty_{p}_{main}": "15"}, follow_redirects=False)
     assert r.status_code == 303
     po_id = porepo.list_pos(db, status="draft")[0]["id"]
 

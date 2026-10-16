@@ -109,7 +109,8 @@ def po_pdf(po: dict, company: dict) -> bytes:
     for label, value in [("PO number", po.get("po_no") or f"PO-{po['id']}"),
                          ("Order date", po.get("order_date") or ""),
                          ("Required date", po.get("required_date") or ""),
-                         ("Currency", po.get("currency") or "")]:
+                         ("Currency", po.get("currency") or ""),
+                         ("Deliver to shelf", po.get("location_name") or "")]:
         pdf.set_font("Helvetica", "B", 9)
         pdf.cell(32, 5, f"{label}:")
         pdf.set_font("Helvetica", "", 9)

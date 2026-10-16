@@ -30,6 +30,10 @@
         </select>
       </div>
       <div>
+        <label for="location_id">Receive into shelf</label>
+        {% with shelf_selected=values.get('location_id') or shelf_selected, shelf_field='location_id' %}{% include "_shelf_select.html" %}{% endwith %}
+      </div>
+      <div>
         <label for="po_no">PO number</label>
         <input id="po_no" name="po_no" type="text" value="{{ values.get('po_no','') or '' }}" placeholder="auto if blank">
       </div>

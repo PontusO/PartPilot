@@ -112,11 +112,12 @@ def list_pos(db: Database, status: str | None = None, search: str | None = None)
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
             """SELECT p.id, p.po_no, p.status, p.order_date, p.required_date, p.currency,
-                      s.name AS supplier_name,
+                      s.name AS supplier_name, loc.name AS location_name, loc.kind AS location_kind,
                       (SELECT COUNT(*) FROM purchase_order_lines l WHERE l.po_id = p.id) AS line_count,
                       (SELECT COALESCE(SUM(l.qty * COALESCE(l.unit_price, 0)), 0)
                        FROM purchase_order_lines l WHERE l.po_id = p.id) AS total
                FROM purchase_orders p LEFT JOIN suppliers s ON s.id = p.supplier_id
+               LEFT JOIN stock_locations loc ON loc.id = p.location_id
                WHERE (:status IS NULL OR p.status = :status)
                  AND (:search IS NULL OR p.po_no LIKE :like OR s.name LIKE :like)
                ORDER BY p.id DESC""",
@@ -127,8 +128,10 @@ def list_pos(db: Database, status: str | None = None, search: str | None = None)
 def get_po(db: Database, po_id: int) -> dict | None:
     with db.connect() as conn:
         head = conn.execute(
-            """SELECT p.*, s.name AS supplier_name FROM purchase_orders p
-               LEFT JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ?""",
+            """SELECT p.*, s.name AS supplier_name, loc.name AS location_name, loc.kind AS location_kind
+               FROM purchase_orders p
+               LEFT JOIN suppliers s ON s.id = p.supplier_id
+               LEFT JOIN stock_locations loc ON loc.id = p.location_id WHERE p.id = ?""",
             (po_id,),
         ).fetchone()
         if head is None:
@@ -155,35 +158,42 @@ def get_po(db: Database, po_id: int) -> dict | None:
 # ---- shortage analyser (automation: what to buy so planned builds can complete) ----
 
 def shortage_suggestions(db: Database) -> list[dict]:
-    """Components demanded by allocated work orders but not covered by free stock + open POs.
-
-    Returns one row per short component, with its preferred supplier and a suggested order qty.
-    Operator reviews and confirms before any PO is created.
+    """Components demanded by allocated work orders but not covered by free stock + open POs,
+    computed PER SHELF: a work order draws only from its own shelf, and a PO only covers the shelf
+    it receives into. Returns one row per short (part, shelf) with its preferred supplier and a
+    suggested order qty. Operator reviews and confirms before any PO is created.
     """
     with db.connect() as conn:
-        demand = dict(conn.execute(
-            "SELECT wl.part_id, SUM(wl.qty_required) FROM work_order_lines wl "
+        default = stock.default_shelf(conn)
+        demand: dict[tuple[int, int], float] = {}
+        for r in conn.execute(
+            "SELECT wl.part_id, w.location_id, SUM(wl.qty_required) AS q FROM work_order_lines wl "
             "JOIN work_orders w ON w.id = wl.work_order_id WHERE w.status = 'allocated' "
-            "GROUP BY wl.part_id").fetchall())
+            "GROUP BY wl.part_id, w.location_id"):
+            key = (r["part_id"], r["location_id"] or default)
+            demand[key] = demand.get(key, 0) + (r["q"] or 0)
         if not demand:
             return []
-        on_order = dict(conn.execute(
-            "SELECT part_id, SUM(qty - qty_received) FROM purchase_order_lines pl "
-            "JOIN purchase_orders p ON p.id = pl.po_id WHERE p.status = 'ordered' "
-            "GROUP BY part_id").fetchall())
+        on_order: dict[tuple[int, int], float] = {}
+        for r in conn.execute(
+            "SELECT pl.part_id, p.location_id, SUM(pl.qty - pl.qty_received) AS q "
+            "FROM purchase_order_lines pl JOIN purchase_orders p ON p.id = pl.po_id "
+            "WHERE p.status = 'ordered' GROUP BY pl.part_id, p.location_id"):
+            key = (r["part_id"], r["location_id"] or default)
+            on_order[key] = on_order.get(key, 0) + (r["q"] or 0)
         out = []
-        for part_id, required in demand.items():
+        for (part_id, loc_id), required in demand.items():
             part = conn.execute(
-                "SELECT part_no, value, total_qty, total_alloc, unlimited_stock "
-                "FROM parts WHERE id = ?", (part_id,)
+                "SELECT part_no, value, unlimited_stock FROM parts WHERE id = ?", (part_id,)
             ).fetchone()
             if part is None or part["unlimited_stock"]:
                 continue  # unlimited parts (e.g. SMT Assembly) never run short -> never purchased
-            free = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
-            incoming = on_order.get(part_id, 0) or 0
+            free = stock.free_on_shelf(conn, part_id, loc_id)
+            incoming = on_order.get((part_id, loc_id), 0) or 0
             short = required - free - incoming
             if short <= 0:
                 continue
+            loc = conn.execute("SELECT name, kind FROM stock_locations WHERE id = ?", (loc_id,)).fetchone()
             sup = _default_supplier(conn, part_id)
             # Preview the price at the suggested qty using the offer's stored cost tiers (no network);
             # PO generation re-prices live. Falls back to the flat unit price.
@@ -195,6 +205,8 @@ def shortage_suggestions(db: Database) -> list[dict]:
                 price = None
             out.append({
                 "part_id": part_id, "part_no": part["part_no"], "value": part["value"],
+                "location_id": loc_id, "location_name": loc["name"] if loc else "?",
+                "location_kind": loc["kind"] if loc else "ours",
                 "required": required, "free": free, "on_order": incoming, "short": short,
                 "suggested_qty": short,
                 "supplier_id": sup["supplier_id"] if sup else None,
@@ -202,25 +214,30 @@ def shortage_suggestions(db: Database) -> list[dict]:
                 "supplier_pno": sup["supplier_pno"] if sup else None,
                 "unit_price": price,
             })
-    out.sort(key=lambda r: (r["supplier_name"] or "~", r["part_no"]))
+    out.sort(key=lambda r: (r["location_kind"] != "ours", r["location_id"],
+                            r["supplier_name"] or "~", r["part_no"]))
     return out
 
 
 def shortage_suggestions_grouped(db: Database) -> list[dict]:
-    """Shortage rows grouped by supplier: [{supplier_id, supplier_name, lines:[...]}, ...].
-    The no-supplier group (supplier_id None) sorts last (its parts can't be auto-ordered)."""
+    """Shortage rows grouped by shelf, then supplier:
+    [{location_id, location_name, location_kind, suppliers: [{supplier_id, supplier_name, lines}]}].
+    Within a shelf the no-supplier group (supplier_id None) sorts last (can't be auto-ordered)."""
     groups: dict = {}
     for s in shortage_suggestions(db):
-        g = groups.setdefault(s["supplier_id"],
-                              {"supplier_id": s["supplier_id"], "supplier_name": s["supplier_name"],
-                               "lines": []})
-        g["lines"].append(s)
-    return list(groups.values())
+        g = groups.setdefault(s["location_id"], {
+            "location_id": s["location_id"], "location_name": s["location_name"],
+            "location_kind": s["location_kind"], "suppliers": {}})
+        sg = g["suppliers"].setdefault(s["supplier_id"], {
+            "supplier_id": s["supplier_id"], "supplier_name": s["supplier_name"], "lines": []})
+        sg["lines"].append(s)
+    return [{**g, "suppliers": list(g["suppliers"].values())} for g in groups.values()]
 
 
-def create_pos_from_suggestions(db: Database, selections: dict[int, float], user=None) -> list[int]:
-    """Create one draft PO per supplier from selected {part_id: qty}. Parts with no supplier
-    are skipped (can't be auto-ordered). Returns the new PO ids.
+def create_pos_from_suggestions(db: Database, selections: dict[tuple[int, int], float],
+                                user=None) -> list[int]:
+    """Create one draft PO per (supplier, shelf) from selected {(part_id, location_id): qty}. Parts
+    with no supplier are skipped (can't be auto-ordered). Returns the new PO ids.
 
     Each line is priced tier-aware at its buy quantity — for distributor offers this re-queries the
     supplier and refreshes the cost tiers (see :func:`_priced_line`). That network + tier-write step
@@ -228,8 +245,10 @@ def create_pos_from_suggestions(db: Database, selections: dict[int, float], user
     # Phase 1: resolve offers and price each line (may hit the network + write cost tiers).
     clients = cost_refresh.build_clients()
     markup = setup_repo.get_default_markup(db)
-    by_supplier: dict[int, list] = {}
-    for part_id, qty in selections.items():
+    by_supplier: dict[tuple[int, int], list] = {}
+    for key, qty in selections.items():
+        # A bare part id means "for our default shelf" (older callers / scripts).
+        part_id, location_id = key if isinstance(key, tuple) else (key, None)
         if not qty or qty <= 0:
             continue
         with db.connect() as conn:
@@ -237,16 +256,17 @@ def create_pos_from_suggestions(db: Database, selections: dict[int, float], user
         if sup is None or sup["supplier_id"] is None:
             continue
         price = _priced_line(db, clients, sup, qty)
-        by_supplier.setdefault(sup["supplier_id"], []).append(
+        by_supplier.setdefault((sup["supplier_id"], location_id), []).append(
             (part_id, qty, sup["supplier_pno"], price))
 
     # Phase 2: insert the POs/lines in one transaction (no network here).
     created = []
     with db.connect() as conn:
-        for supplier_id, lines in by_supplier.items():
+        for (supplier_id, location_id), lines in by_supplier.items():
             po_id = conn.execute(
-                "INSERT INTO purchase_orders (supplier_id, status, order_date) VALUES (?, 'draft', date('now'))",
-                (supplier_id,),
+                "INSERT INTO purchase_orders (supplier_id, status, order_date, location_id) "
+                "VALUES (?, 'draft', date('now'), ?)",
+                (supplier_id, location_id or stock.default_shelf(conn)),
             ).lastrowid
             conn.execute("UPDATE purchase_orders SET po_no = ? WHERE id = ?", (ref_no("PO", po_id), po_id))
             for i, (part_id, qty, pno, price) in enumerate(lines, start=1):
@@ -430,6 +450,11 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
                 f"Can't receive against a {po['status']} PO — place the order first." if po["status"] == "draft"
                 else f"Can't receive against a {po['status']} PO.")
 
+        loc_id = po["location_id"] or stock.default_shelf(conn)
+        shelf = conn.execute("SELECT retired_at FROM stock_locations WHERE id = ?", (loc_id,)).fetchone()
+        if shelf is None or shelf["retired_at"]:
+            raise ValueError("This PO receives into a retired shelf — reassign it before receiving.")
+
         # Cap every receipt at the line's outstanding quantity — an over-typed qty (or a re-posted
         # form) must not push qty_received past what was ordered.
         for ln in conn.execute(
@@ -459,7 +484,7 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
             if qty and qty > 0 and ln["part_id"]:
                 stock.post_movement(conn, ln["part_id"], delta=qty, mtype=stock.RECEIVE,
                                     reference=po["po_no"] or f"PO-{po_id}", note="goods receiving",
-                                    user=user, location_id=stock.default_shelf(conn))
+                                    user=user, location_id=loc_id)
                 conn.execute("UPDATE purchase_order_lines SET qty_received = qty_received + ? WHERE id = ?",
                              (qty, ln["id"]))
                 conn.execute(

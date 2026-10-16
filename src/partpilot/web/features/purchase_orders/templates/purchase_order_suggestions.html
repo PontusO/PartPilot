@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Suggested purchase orders · PartPilot{% endblock %}
-{% set orderable = groups | selectattr('supplier_id') | list %}
+{% set orderable = groups | map(attribute='suppliers') | sum(start=[]) | selectattr('supplier_id') | list %}
 {% block content %}
 <style>
+  tr.shelfrow td { background:#0f151d; border-top:2px solid var(--line); }
+  tr.shelfrow .shelfname { font-weight:600; }
   tr.suprow td { background:#0f151d; border-top:1px solid var(--line); }
   tr.suprow .supname { font-weight:600; }
   td.indent { padding-left:1.8rem; }
@@ -11,8 +13,10 @@
   <p class="note"><a href="/purchase-orders">← Purchase Orders</a></p>
   <h1>Suggested purchase orders</h1>
   <p class="note">Components short for your <b>allocated</b> work orders, after free stock and goods
-    already on order, grouped by supplier. Untick a whole supplier with the box on its header row, or
-    individual lines. One draft PO is created per supplier.</p>
+    already on order, grouped by <b>shelf</b> and then supplier. A work order draws only from its own
+    shelf, so a customer shelf shows its own shortages even when our stock has the part. Untick a
+    whole supplier with the box on its header row, or individual lines. One draft PO is created per
+    supplier per shelf, receiving into that shelf.</p>
 
   {% if not orderable %}
   <div class="note" style="margin-top:1rem;">Nothing to order — every allocated work order is covered
@@ -24,28 +28,35 @@
       <table>
         <thead>
           <tr><th style="width:1%;"></th><th>Component</th><th>Supplier P/N</th>
-              <th class="num">Required</th><th class="num">Free</th><th class="num">On order</th>
+              <th class="num">Required</th><th class="num">Free on shelf</th><th class="num">On order</th>
               <th class="num">Short</th><th class="num">Order qty</th><th class="num">Unit price</th></tr>
         </thead>
         <tbody>
           {% for g in groups %}
+          <tr class="shelfrow">
+            <td></td>
+            <td colspan="8"><span class="shelfname">{{ g.location_name }}</span>
+              {% if g.location_kind == 'customer' %}<span class="badge warn">customer shelf</span>{% else %}<span class="badge stock">ours</span>{% endif %}</td>
+          </tr>
+          {% for sg in g.suppliers %}
+          {% set key = g.location_id ~ '-' ~ (sg.supplier_id or 'none') %}
           <tr class="suprow">
             <td class="num">
-              {% if g.supplier_id %}<input type="checkbox" class="suptoggle" data-sup="{{ g.supplier_id }}"
-                     checked onclick="toggleSupplier(this)" title="Select all lines for this supplier">{% endif %}
+              {% if sg.supplier_id %}<input type="checkbox" class="suptoggle" data-sup="{{ key }}"
+                     checked onclick="toggleSupplier(this)" title="Select all lines for this supplier on this shelf">{% endif %}
             </td>
-            <td colspan="8">
-              {% if g.supplier_name %}<span class="supname">{{ g.supplier_name }}</span>
-                <span class="note">— {{ g.lines|length }} line(s)</span>
+            <td colspan="8" class="indent">
+              {% if sg.supplier_name %}<span class="supname">{{ sg.supplier_name }}</span>
+                <span class="note">— {{ sg.lines|length }} line(s)</span>
               {% else %}<span class="badge bad">No supplier</span>
                 <span class="note">— add a supplier on these parts to order them</span>{% endif %}
             </td>
           </tr>
-          {% for s in g.lines %}
+          {% for s in sg.lines %}
           <tr>
-            <td class="num">{% if s.supplier_id %}<input type="checkbox" name="buy" value="{{ s.part_id }}"
-                   class="linecb" data-sup="{{ s.supplier_id }}" checked
-                   onchange="syncSupplier('{{ s.supplier_id }}')">{% endif %}</td>
+            <td class="num">{% if s.supplier_id %}<input type="checkbox" name="buy" value="{{ s.part_id }}:{{ s.location_id }}"
+                   class="linecb" data-sup="{{ key }}" checked
+                   onchange="syncSupplier('{{ key }}')">{% endif %}</td>
             <td class="indent"><a href="/catalog/{{ s.part_id }}">{{ s.part_no }}</a>
               {% if s.value %}<span class="flag">{{ s.value }}</span>{% endif %}</td>
             <td>{{ s.supplier_pno or '' }}</td>
@@ -55,13 +66,14 @@
             <td class="num"><span class="badge bad">{{ "%g"|format(s.short) }}</span></td>
             <td class="num">
               {% if s.supplier_id %}
-              <input name="qty_{{ s.part_id }}" type="number" step="any" min="0" value="{{ '%g'|format(s.suggested_qty) }}"
+              <input name="qty_{{ s.part_id }}_{{ s.location_id }}" type="number" step="any" min="0" value="{{ '%g'|format(s.suggested_qty) }}"
                      style="width:90px; text-align:right; padding:.3rem .4rem; background:#0d1219;
                             color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit;">
               {% endif %}
             </td>
             <td class="num">{% if s.unit_price is not none %}{{ "%.4f"|format(s.unit_price) }}{% endif %}</td>
           </tr>
+          {% endfor %}
           {% endfor %}
           {% endfor %}
         </tbody>

@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from ...core.deps import require_role, require_user
+from ..catalog import repo as catalog_repo
 from . import export, repo
 
 router = APIRouter(prefix="/purchase-orders")
@@ -61,12 +62,13 @@ def suggestions(request: Request):
 async def suggestions_apply(request: Request):
     user = require_role(request, PO_WRITE_ROLES)
     form = await request.form()
-    selected = {int(v) for v in form.getlist("buy") if str(v).isdigit()}
     selections = {}
-    for part_id in selected:
-        qty = _num(form.get(f"qty_{part_id}"))
-        if qty and qty > 0:
-            selections[part_id] = qty
+    for v in form.getlist("buy"):                       # "part_id:location_id"
+        pid, _, lid = str(v).partition(":")
+        if pid.isdigit() and lid.isdigit():
+            qty = _num(form.get(f"qty_{pid}_{lid}"))
+            if qty and qty > 0:
+                selections[(int(pid), int(lid))] = qty
     # May query Digi-Key/Mouser to tier-price each line — run off the event loop.
     await run_in_threadpool(
         repo.create_pos_from_suggestions, request.app.state.database, selections, user.username)
@@ -78,9 +80,12 @@ async def suggestions_apply(request: Request):
 @router.get("/new", response_class=HTMLResponse)
 def new_form(request: Request):
     require_role(request, PO_WRITE_ROLES)
+    db = request.app.state.database
     return request.app.state.templates.TemplateResponse(
         request, "purchase_order_form.html",
-        {"values": {}, "suppliers": repo.suppliers(request.app.state.database), "error": None},
+        {"values": {}, "suppliers": repo.suppliers(db), "error": None,
+         "shelves": catalog_repo.pickable_shelves(db) + catalog_repo.locations(db, kind="customer"),
+         "shelf_selected": catalog_repo.default_shelf_id(db)},
     )
 
 
@@ -95,11 +100,15 @@ async def create(request: Request):
         "required_date": (form.get("required_date") or "").strip() or None,
         "currency": (form.get("currency") or "").strip() or None,
         "notes": (form.get("notes") or "").strip() or None,
+        "location_id": _int(form.get("location_id")),
     }
     if not data["supplier_id"]:
+        db = request.app.state.database
         return request.app.state.templates.TemplateResponse(
             request, "purchase_order_form.html",
-            {"values": dict(form), "suppliers": repo.suppliers(request.app.state.database),
+            {"values": dict(form), "suppliers": repo.suppliers(db),
+             "shelves": catalog_repo.pickable_shelves(db) + catalog_repo.locations(db, kind="customer"),
+             "shelf_selected": data["location_id"] or catalog_repo.default_shelf_id(db),
              "error": "Choose a supplier."}, status_code=400)
     po_id = repo.create_po(request.app.state.database, data)
     return RedirectResponse(f"/purchase-orders/{po_id}", status_code=303)

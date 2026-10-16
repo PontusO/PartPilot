@@ -27,7 +27,8 @@
   <h1>{{ po.po_no or 'PO #' ~ po.id }} <span class="badge {{ badge.get(po.status, 'muted') }}">{{ po.status }}</span></h1>
   <p class="note">{{ po.supplier_name or 'No supplier' }}
     {% if po.order_date %} — ordered {{ po.order_date }}{% endif %}
-    {% if po.required_date %} · required {{ po.required_date }}{% endif %}</p>
+    {% if po.required_date %} · required {{ po.required_date }}{% endif %}
+    {% if po.location_name %} · receive into <b>{{ po.location_name }}</b>{% if po.location_kind == 'customer' %} <span class="badge warn">customer shelf</span>{% endif %}{% endif %}</p>
 
   <div class="cards">
     <div class="card"><b>{{ po.lines|length }}</b><small>lines</small></div>

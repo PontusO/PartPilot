@@ -63,12 +63,13 @@ def test_shortage_suggestions_grouped_by_supplier(db):
     worepo.create_work_order(db, {"assembly_id": asm, "qty": 20})  # both short
 
     groups = repo.shortage_suggestions_grouped(db)
-    by_name = {g["supplier_name"]: g for g in groups}
+    assert len(groups) == 1 and groups[0]["location_kind"] == "ours"   # one shelf: Main
+    by_name = {sg["supplier_name"]: sg for sg in groups[0]["suppliers"]}
     assert set(by_name) == {"Acme Supplies", "Beta Ltd"}
     assert [ln["part_no"] for ln in by_name["Acme Supplies"]["lines"]] == ["G-1"]
     assert [ln["part_no"] for ln in by_name["Beta Ltd"]["lines"]] == ["G-2"]
-    for g in groups:  # every line sits under its own supplier
-        assert all(ln["supplier_name"] == g["supplier_name"] for ln in g["lines"])
+    for sg in groups[0]["suppliers"]:  # every line sits under its own supplier
+        assert all(ln["supplier_name"] == sg["supplier_name"] for ln in sg["lines"])
 
 
 def test_create_pos_from_suggestions_and_on_order_clears_shortage(db):
