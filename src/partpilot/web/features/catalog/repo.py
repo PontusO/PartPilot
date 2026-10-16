@@ -228,9 +228,211 @@ def suppliers(db: Database) -> list[dict]:
         return [dict(r) for r in conn.execute("SELECT id, name FROM suppliers ORDER BY name")]
 
 
-def locations(db: Database) -> list[dict]:
+# ---- shelves (stock locations with an owner) ----------------------------------------------
+# A shelf is a stock_locations row: kind 'ours' (our stock) or 'customer' (parts a customer paid
+# for; only their work orders draw from it). owner_contact_id / customer_order_id are soft joins.
+_SHELF_KINDS = ("ours", "customer")
+
+
+def _table_exists(conn, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (name,)).fetchone() is not None
+
+
+def _shelf_rows(conn, where: str, params: tuple) -> list[dict]:
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT l.*,
+                   (SELECT COUNT(*) FROM part_stock pk WHERE pk.location_id = l.id AND pk.on_hand != 0)
+                       AS part_count,
+                   (SELECT COALESCE(SUM(pk.on_hand), 0) FROM part_stock pk WHERE pk.location_id = l.id)
+                       AS on_hand_total
+            FROM stock_locations l {where}
+            ORDER BY CASE l.kind WHEN 'ours' THEN 0 ELSE 1 END,
+                     CASE WHEN l.customer_order_id IS NULL THEN 1 ELSE 0 END, l.id""", params)]
+    has_contacts = _table_exists(conn, "contacts")
+    has_orders = _table_exists(conn, "customer_orders")
+    for r in rows:
+        r["owner_name"] = r["order_ref"] = None
+        if has_contacts and r.get("owner_contact_id"):
+            c = conn.execute("SELECT COALESCE(NULLIF(short_name, ''), name) AS n FROM contacts WHERE id = ?",
+                             (r["owner_contact_id"],)).fetchone()
+            r["owner_name"] = c["n"] if c else None
+        if has_orders and r.get("customer_order_id"):
+            o = conn.execute("SELECT order_ref FROM customer_orders WHERE id = ?",
+                             (r["customer_order_id"],)).fetchone()
+            r["order_ref"] = o["order_ref"] if o else None
+    return rows
+
+
+def locations(db: Database, *, include_retired: bool = False, kind: str | None = None,
+              owner_contact_id: int | None = None) -> list[dict]:
+    """Shelves, ours first. Active only unless ``include_retired``."""
+    where, params = [], []
+    if not include_retired:
+        where.append("l.retired_at IS NULL")
+    if kind:
+        where.append("l.kind = ?")
+        params.append(kind)
+    if owner_contact_id:
+        where.append("l.owner_contact_id = ?")
+        params.append(owner_contact_id)
     with db.connect() as conn:
-        return [dict(r) for r in conn.execute("SELECT id, name FROM stock_locations ORDER BY id")]
+        return _shelf_rows(conn, ("WHERE " + " AND ".join(where)) if where else "", tuple(params))
+
+
+def get_location(db: Database, location_id: int) -> dict | None:
+    with db.connect() as conn:
+        rows = _shelf_rows(conn, "WHERE l.id = ?", (location_id,))
+        if not rows:
+            return None
+        shelf = rows[0]
+        shelf["value_total"] = conn.execute(
+            "SELECT COALESCE(SUM(pk.on_hand * COALESCE(p.unit_cost, 0)), 0) FROM part_stock pk "
+            "JOIN parts p ON p.id = pk.part_id WHERE pk.location_id = ?", (location_id,)).fetchone()[0]
+    return shelf
+
+
+def default_shelf_id(db: Database) -> int:
+    from .stock import default_shelf
+    with db.connect() as conn:
+        sid = default_shelf(conn)
+        conn.commit()
+    return sid
+
+
+def shelves_for_customer(db: Database, contact_id: int) -> list[dict]:
+    return locations(db, kind="customer", owner_contact_id=contact_id)
+
+
+def shelf_for_order(db: Database, order_id: int) -> dict | None:
+    with db.connect() as conn:
+        rows = _shelf_rows(conn, "WHERE l.customer_order_id = ? AND l.retired_at IS NULL", (order_id,))
+    return rows[0] if rows else None
+
+
+def pickable_shelves(db: Database, *, customer_id: int | None = None) -> list[dict]:
+    """Own shelves first, then (if a customer is given) their job shelves, then their customer shelf."""
+    ours = locations(db, kind="ours")
+    if not ours:
+        default_shelf_id(db)
+        ours = locations(db, kind="ours")
+    theirs = shelves_for_customer(db, customer_id) if customer_id else []
+    return ours + theirs
+
+
+def candidate_shelf_ids(db: Database, *, customer_id: int | None = None,
+                        order_id: int | None = None) -> list[int]:
+    """Where a customer's goods may come from, most specific first: job shelf, customer shelf, ours."""
+    out: list[int] = []
+    job = shelf_for_order(db, order_id) if order_id else None
+    if job and (customer_id is None or job["owner_contact_id"] == customer_id):
+        out.append(job["id"])
+    if customer_id:
+        out += [s["id"] for s in shelves_for_customer(db, customer_id)
+                if s["customer_order_id"] is None and s["id"] not in out]
+    out += [s["id"] for s in locations(db, kind="ours") if s["id"] not in out]
+    if not out:
+        out.append(default_shelf_id(db))
+    return out
+
+
+def preferred_shelf_id(db: Database, *, customer_id: int | None = None,
+                       order_id: int | None = None) -> int:
+    return candidate_shelf_ids(db, customer_id=customer_id, order_id=order_id)[0]
+
+
+def create_shelf(db: Database, *, kind: str, owner_contact_id: int | None = None,
+                 customer_order_id: int | None = None, name: str | None = None) -> int:
+    if kind not in _SHELF_KINDS:
+        raise ValueError("A shelf is either ours or a customer's.")
+    name = (name or "").strip()
+    with db.connect() as conn:
+        if kind == "customer":
+            if not owner_contact_id:
+                raise ValueError("A customer shelf needs a customer.")
+            owner = conn.execute(
+                "SELECT kind, COALESCE(NULLIF(short_name, ''), name) AS n FROM contacts WHERE id = ?",
+                (owner_contact_id,)).fetchone()
+            if owner is None or owner["kind"] != "customer":
+                raise ValueError("The shelf owner must be a customer contact.")
+            order_ref = None
+            if customer_order_id:
+                o = conn.execute("SELECT customer_id, order_ref FROM customer_orders WHERE id = ?",
+                                 (customer_order_id,)).fetchone()
+                if o is None or o["customer_id"] != owner_contact_id:
+                    raise ValueError("That order does not belong to this customer.")
+                order_ref = o["order_ref"] or f"CO-{customer_order_id:05d}"
+            if not name:
+                name = f"{owner['n']} · {order_ref}" if order_ref else owner["n"]
+        else:
+            owner_contact_id = customer_order_id = None
+            if not name:
+                raise ValueError("Give the shelf a name.")
+        if conn.execute("SELECT 1 FROM stock_locations WHERE name = ?", (name,)).fetchone():
+            raise ValueError(f"A shelf called {name!r} already exists.")
+        sid = conn.execute(
+            "INSERT INTO stock_locations (name, kind, owner_contact_id, customer_order_id) "
+            "VALUES (?, ?, ?, ?)", (name, kind, owner_contact_id, customer_order_id)).lastrowid
+        conn.commit()
+    return sid
+
+
+def rename_shelf(db: Database, location_id: int, name: str | None) -> None:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Give the shelf a name.")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM stock_locations WHERE name = ? AND id != ?",
+                        (name, location_id)).fetchone():
+            raise ValueError(f"A shelf called {name!r} already exists.")
+        conn.execute("UPDATE stock_locations SET name = ? WHERE id = ?", (name, location_id))
+        conn.commit()
+
+
+def retire_shelf(db: Database, location_id: int) -> None:
+    """Hide a shelf from every picker. Refused while it holds stock or open documents point at it."""
+    with db.connect() as conn:
+        shelf = conn.execute("SELECT * FROM stock_locations WHERE id = ?", (location_id,)).fetchone()
+        if shelf is None:
+            raise ValueError("Shelf not found.")
+        if shelf["kind"] == "ours" and conn.execute(
+                "SELECT COUNT(*) FROM stock_locations WHERE kind = 'ours' AND retired_at IS NULL"
+        ).fetchone()[0] <= 1:
+            raise ValueError("The last shelf of our own cannot be retired.")
+        if conn.execute("SELECT 1 FROM part_stock WHERE location_id = ? AND on_hand != 0 LIMIT 1",
+                        (location_id,)).fetchone():
+            raise ValueError("The shelf still holds stock — it cannot be retired.")
+        if _table_exists(conn, "purchase_orders") and conn.execute(
+                "SELECT 1 FROM purchase_orders WHERE location_id = ? AND status IN ('draft','ordered') LIMIT 1",
+                (location_id,)).fetchone():
+            raise ValueError("An open purchase order still receives into this shelf.")
+        if _table_exists(conn, "work_orders") and conn.execute(
+                "SELECT 1 FROM work_orders WHERE location_id = ? AND status IN ('allocated','issued') LIMIT 1",
+                (location_id,)).fetchone():
+            raise ValueError("An open work order still builds from this shelf.")
+        conn.execute("UPDATE stock_locations SET retired_at = datetime('now') WHERE id = ?", (location_id,))
+        conn.commit()
+
+
+def shelf_stock(db: Database, location_id: int) -> list[dict]:
+    with db.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT pk.part_id, p.part_no, p.value, pk.on_hand, pk.allocated, pk.bin,
+                      COALESCE(p.unit_cost, 0) AS unit_cost
+               FROM part_stock pk JOIN parts p ON p.id = pk.part_id
+               WHERE pk.location_id = ? AND (pk.on_hand != 0 OR pk.allocated != 0)
+               ORDER BY p.part_no""", (location_id,))]
+    for r in rows:
+        r["free"] = (r["on_hand"] or 0) - (r["allocated"] or 0)
+        r["line_value"] = (r["on_hand"] or 0) * r["unit_cost"]
+    return rows
+
+
+def shelf_movements(db: Database, location_id: int, limit: int = 100) -> list[dict]:
+    with db.connect() as conn:
+        return [dict(r) for r in conn.execute(
+            """SELECT m.*, p.part_no FROM stock_movements m JOIN parts p ON p.id = m.part_id
+               WHERE m.location_id = ? ORDER BY m.id DESC LIMIT ?""", (location_id, limit))]
 
 
 def find_part_id_by_mpn(db: Database, mpn: str | None) -> int | None:

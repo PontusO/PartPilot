@@ -108,4 +108,13 @@ MIGRATIONS = [
         ALTER TABLE goods_receipt_lines ADD COLUMN unit_price REAL;
         """,
     ),
+    Migration(
+        version=5,
+        name="receive-into shelf",
+        sql="""
+        -- The shelf (stock_locations) goods on this PO are received into. NULL on legacy rows = our
+        -- default shelf; new POs always get one.
+        ALTER TABLE purchase_orders ADD COLUMN location_id INTEGER REFERENCES stock_locations(id);
+        """,
+    ),
 ]

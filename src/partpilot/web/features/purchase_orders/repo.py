@@ -271,9 +271,10 @@ def create_po(db: Database, data: dict) -> int:
     with db.connect() as conn:
         po_id = conn.execute(
             "INSERT INTO purchase_orders (po_no, supplier_id, status, order_date, required_date, "
-            "currency, notes) VALUES (?, ?, 'draft', ?, ?, ?, ?)",
+            "currency, notes, location_id) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)",
             (data.get("po_no"), data.get("supplier_id"), data.get("order_date"),
-             data.get("required_date"), data.get("currency"), data.get("notes")),
+             data.get("required_date"), data.get("currency"), data.get("notes"),
+             data.get("location_id") or stock.default_shelf(conn)),
         ).lastrowid
         if not data.get("po_no"):
             conn.execute("UPDATE purchase_orders SET po_no = ? WHERE id = ?", (ref_no("PO", po_id), po_id))
