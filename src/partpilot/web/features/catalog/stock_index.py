@@ -13,9 +13,14 @@ from ....stock import StockIndex, StockItem, comp_type_for_category, parse_value
 from ...core.db import Database
 
 
-def build_stock_index(db: Database, location_ids: list[int]) -> StockIndex:
+def build_stock_index(db: Database, location_ids: list[int] | None = None) -> StockIndex:
     """Index every stockable catalog part (documents excluded) for BOM matching by MPN / value, with
-    on-hand/allocated summed over ``location_ids`` only — a customer's shelf sees only their stock."""
+    on-hand/allocated summed over ``location_ids`` only — a customer's shelf sees only their stock.
+    ``None`` means all of OUR shelves (never a customer's); an empty list indexes nothing."""
+    if location_ids is None:
+        with db.connect() as conn:
+            location_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM stock_locations WHERE kind = 'ours' AND retired_at IS NULL")]
     if not location_ids:
         return StockIndex.build([])
     marks = ",".join("?" for _ in location_ids)
