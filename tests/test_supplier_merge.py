@@ -118,3 +118,54 @@ def test_dangling_supplier_reference_fails_the_migration_and_changes_nothing(tmp
         assert "REFERENCES suppliers(id)" in conn.execute(
             "SELECT sql FROM sqlite_master WHERE name='part_suppliers'").fetchone()[0]
         assert not conn.execute("SELECT 1 FROM schema_migrations WHERE feature='catalog' AND version=23").fetchone()
+
+
+def _expected_after(conn):
+    dk = conn.execute("SELECT id FROM contacts WHERE kind='supplier' AND name='Digi-Key'").fetchone()[0]
+    return dk, {1: 101, 2: dk, 3: 103, 4: None, 5: 105}
+
+
+def test_retry_after_partial_failure_does_not_remap_twice(tmp_path):
+    """Review finding: PO v6 rebuilt purchase_orders and goods_receipts in separate transactions. If the
+    second failed, a restart re-applied the supplier->contact mapping to ids that were already contact
+    ids. Each rebuild must be skipped once its table already references contacts."""
+    from partpilot.web.core.db import rebuild_table
+    from partpilot.web.features.catalog.supplier_merge import (FK_SWAP, SUPPLIER_ID_EXPR,
+                                                               map_suppliers_to_contacts)
+    db = _old_db(tmp_path)
+    with db.connect() as conn:
+        _seed(conn)
+        # Simulate: catalog 23 done, PO 6 crashed after purchase_orders, before goods_receipts.
+        map_suppliers_to_contacts(conn)
+        rebuild_table(conn, "part_suppliers", sql_replacements=FK_SWAP, column_exprs={"supplier_id": SUPPLIER_ID_EXPR})
+        rebuild_table(conn, "purchase_orders", sql_replacements=FK_SWAP, column_exprs={"supplier_id": SUPPLIER_ID_EXPR})
+        dk, expected = _expected_after(conn)
+        assert {r[0]: r[1] for r in conn.execute("SELECT id, supplier_id FROM purchase_orders")} == {1: dk, 2: 102}
+    reg = FeatureRegistry(); reg.register(*NEW)
+    db.apply_migrations(reg)                      # the operator's "fix and restart"
+    with db.connect() as conn:
+        assert {r[0]: r[1] for r in conn.execute("SELECT id, supplier_id FROM part_suppliers")} == expected
+        assert {r[0]: r[1] for r in conn.execute("SELECT id, supplier_id FROM purchase_orders")} == {1: dk, 2: 102}
+        assert conn.execute("SELECT supplier_id FROM goods_receipts").fetchone()[0] == dk
+        assert not table_exists(conn, "suppliers")
+        assert not conn.execute("PRAGMA foreign_key_check").fetchall()
+
+
+def test_minimrp_id_match_only_uses_supplier_sourced_contacts(tmp_path):
+    """miniMRP AddIDs collide across its three address tables: a customer-sourced contact that was
+    later edited to kind 'supplier' must not capture a supplier's rows just because the ids match."""
+    db = _old_db(tmp_path)
+    with db.connect() as conn:
+        conn.executescript("""
+            INSERT INTO contacts (id, kind, name, minimrp_id, source) VALUES
+              (201,'supplier','Shadow Co', 7, 'cus'),
+              (202,'supplier','Farnell',   7, 'sup');
+            INSERT INTO suppliers (id, name, minimrp_id) VALUES (1,'Farnell', 7);
+            INSERT INTO parts (id, part_no) VALUES (1,'P1');
+            INSERT INTO part_suppliers (id, part_id, supplier_id, qty_per_uom) VALUES (1,1,1,1);
+        """)
+        conn.commit()
+    reg = FeatureRegistry(); reg.register(*NEW)
+    db.apply_migrations(reg)
+    with db.connect() as conn:
+        assert conn.execute("SELECT supplier_id FROM part_suppliers").fetchone()[0] == 202
