@@ -39,6 +39,13 @@ These are standing rules for how work is done in this repo (agreed 2026-07-20):
 
    Ordinary cosmetic/UI tweaks don't need this — reserve it for changes that matter operationally.
 
+3. **Keep the user manual in step.** `docs/user-manual.md` is the end-user manual, served in-app
+   at `/help` (the `help` feature). It quotes button, field and status labels exactly as rendered
+   and describes the business rules as they behave. Whenever a change renames or adds a screen,
+   button or field, alters a workflow, or changes a rule the manual states (stock, costing, order
+   or work-order lifecycle, roles), **update the relevant chapter in the same commit**. A behaviour
+   change that gets the 🟥 banner above almost always needs a manual edit too.
+
 **Before doing any GUI/UI work** (new or edited templates, buttons, tables, forms, colours, layout),
 **read [`docs/design-rules.md`](docs/design-rules.md)** and follow it. It is the source of truth for
 how the web UI looks: design tokens, the button system, the `.act-bar`/`.act-btn` action-bar pattern,
