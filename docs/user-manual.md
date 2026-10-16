@@ -111,7 +111,8 @@ stock is never touched from the form.
 **Suppliers.** Add one row per source: **Supplier** (pick one, or "+ New supplier…"), **Supplier
 P/N**, **Unit price** per piece, **Reel/UOM qty**, **MOQ**, **Lead (days)**, and tick **Default**.
 The default supplier's unit price becomes the part's unit cost and is what purchase suggestions
-use. Suppliers added here also appear in Contacts as supplier contacts.
+use. A supplier added here becomes a supplier contact with only a name; complete its address in
+Contacts.
 
 **Internal loaded cost.** Leave **Overhead factor** blank to use the Setup default. Manual
 **Loaded cost tiers** override generated ones at the same break quantity.
@@ -520,8 +521,8 @@ shelf cannot be changed afterwards.
 **"Place order"** moves the PO from *draft* to *ordered* and archives the supplier CSV and the PDF
 as the official copies for ISO records. Nothing is sent automatically: download **"⬇ Supplier
 CSV"** to upload to the distributor's cart and **"⬇ PDF PO"** to email to a supplier. The PDF
-carries our company details from Setup, the PO number, dates, currency, the receive-into shelf, and
-every line with supplier part number, manufacturer part number, quantity and price.
+carries our company details from Setup, the supplier's address from Contacts, the PO number, dates,
+currency, the receive-into shelf, and every line with supplier part number, manufacturer part number, quantity and price.
 
 | Status | Meaning |
 |---|---|
@@ -638,9 +639,12 @@ shelves*). **Fortnox customer #** appears once the customer has been invoiced th
 
 ### Suppliers
 
-A supplier saved here is also available as a supplier on parts and purchase orders. Fill in
-**Currency** and **Discount %** if they apply. There is no delete; mark unused contacts in
-**Notes**.
+A supplier is a contact of kind *supplier*, and this is the only place supplier details live. The
+supplier dropdowns on parts and purchase orders list these contacts, and the purchase order PDF
+prints the address, organisation number, email and phone from here. Fill in **Currency** so new
+purchase orders default to it, and **Discount %** if it applies. A contact that is used as a
+supplier on any part, purchase order or goods receipt cannot be changed to another kind; the form
+says so. There is no delete; mark unused contacts in **Notes**.
 
 ## Article Register
 

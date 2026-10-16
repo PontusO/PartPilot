@@ -240,3 +240,8 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   column capped at 820px; chapters separated by a `--line` top border; hover shows a copyable `#`
   anchor. Manual copy quotes UI labels exactly as rendered — **when a label, flow or rule changes,
   update the manual in the same commit.**
+- **2026-10-16** — **Suppliers live only in Contacts.** The catalog `suppliers` table is gone;
+  supplier `<select>`s list `contacts WHERE kind='supplier'` via `catalog.repo.suppliers()` /
+  `purchase_orders.repo.suppliers()`. The PO page links the supplier name to its contact; the PO PDF
+  prints the contact's address block under "Supplier". Refusing a kind change on a referenced
+  supplier renders in `.err` on the contact form.

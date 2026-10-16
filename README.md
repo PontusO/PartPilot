@@ -140,8 +140,9 @@ invoicing hooks in here when connected (see Integrations).
 
 ### Contacts
 Address book of suppliers, customers and others, each with structured addresses (default delivery /
-invoice). Saving a supplier contact mirrors it into the catalog's `suppliers` table, which the
-part-edit and PO forms read.
+invoice). Contacts is the **only supplier record**: the part-edit and PO supplier dropdowns list
+supplier-kind contacts, and the PO PDF prints the supplier's address from here. (The legacy catalog
+`suppliers` table was merged away on 2026-10-16.)
 
 ### Reports
 Stock-movement ledger, filterable by date range, movement type and shelf.
@@ -279,6 +280,10 @@ edit the core. Migrations are tracked per `(feature, version)` and never edited 
 For contributors: [`CLAUDE.md`](CLAUDE.md) covers the development process and architecture
 detail; [`docs/design-rules.md`](docs/design-rules.md) is the source of truth for the UI (tokens,
 button system, action bars, tables and forms).
+
+Migrations are SQL scripts or Python callables (for steps that must inspect the live schema).
+Before applying any pending migration to an existing database the runner writes a copy to
+`data/backups/partpilot-<timestamp>.db`; a failed backup aborts startup.
 
 ## Tests
 

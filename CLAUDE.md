@@ -91,7 +91,8 @@ code does not. Editing a template *and* its route handler, then not restarting, 
 template against the old handler's context — variables come through undefined (e.g. a panel showing
 "not configured" because the handler that passes `devmgmt_configured` hasn't loaded yet). If the UI
 looks half-updated, restart before debugging. Migrations are additive and run on startup, so a
-restart also applies any new ones.
+restart also applies any new ones — and every restart that applies one first writes a backup to
+`data/backups/partpilot-<ts>.db` (prune by hand).
 
 ## Tests
 
@@ -146,7 +147,14 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   sqlite3, no ORM), `migrations.py`, `templates/`.
 - **Migrations** are ordered `Migration(version, name, sql)` per feature, tracked in
   `schema_migrations` keyed by `(feature, version)`. They run on every startup; only unseen ones
-  apply. **Never edit a shipped migration — add a new one.**
+  apply. **Never edit a shipped migration — add a new one.** `sql` may be a callable `fn(conn)`
+  when the step must inspect the live schema (see `catalog/supplier_merge.py`); `core.db.rebuild_table`
+  is the helper for changing a foreign key. Before applying pending migrations on an existing
+  database the runner writes `data/backups/partpilot-<ts>.db`; a failed backup aborts startup.
+- **Suppliers live only in Contacts** (`contacts.kind = 'supplier'`, since 2026-10-16). There is no
+  `suppliers` table; `part_suppliers`, `purchase_orders` and `goods_receipts` reference `contacts(id)`.
+  Supplier dropdowns come from `catalog.repo.suppliers()`; `_get_or_create_supplier` creates a bare
+  supplier contact. Never reintroduce a parallel supplier table.
 - **Routers depend only on `web/core/deps.py`**, not on `create_app`. Get platform services from
   `request.app.state` (`store`, `registry`, `database`, `templates`, `jobs_dir`). Gate actions with
   `require_role(request, roles)` / `require_user(request)`.
