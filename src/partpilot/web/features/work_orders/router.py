@@ -55,7 +55,9 @@ def _render_form(request, *, values, error=None, status=200):
     return request.app.state.templates.TemplateResponse(
         request, "work_order_form.html",
         {"values": values or {}, "assemblies": repo.assemblies(db),
-         "locations": catalog_repo.locations(db), "error": error},
+         "shelves": catalog_repo.pickable_shelves(db) + catalog_repo.locations(db, kind="customer"),
+         "shelf_selected": (values or {}).get("location_id") or catalog_repo.default_shelf_id(db),
+         "error": error},
         status_code=status,
     )
 
@@ -99,10 +101,14 @@ def build_from_order(request: Request, order_id: int):
     if order is None:
         return request.app.state.templates.TemplateResponse(
             request, "error.html", {"message": "Customer order not found."}, status_code=404)
+    cust = order.get("customer_id")
     return request.app.state.templates.TemplateResponse(
         request, "work_order_from_order.html",
         {"order": order, "proposals": repo.fulfilment_proposals(db, order_id),
-         "existing": repo.work_orders_for_order(db, order_id)},
+         "existing": repo.work_orders_for_order(db, order_id),
+         "shelves": catalog_repo.pickable_shelves(db, customer_id=cust),
+         "shelf_selected": catalog_repo.preferred_shelf_id(db, customer_id=cust, order_id=order_id),
+         "customer_has_shelf": bool(catalog_repo.shelves_for_customer(db, cust)) if cust else True},
     )
 
 
@@ -116,7 +122,12 @@ async def build_from_order_apply(request: Request, order_id: int):
         qty = _num(form.get(f"qty_{line_id}"))
         if qty and qty > 0:
             selections[line_id] = qty
-    repo.create_work_orders_for_order(request.app.state.database, order_id, selections, user.username)
+    try:
+        repo.create_work_orders_for_order(request.app.state.database, order_id, selections,
+                                          user.username, location_id=_int(form.get("location_id")))
+    except ValueError as exc:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": str(exc)}, status_code=400)
     return RedirectResponse(f"/customer-orders/{order_id}", status_code=303)
 
 

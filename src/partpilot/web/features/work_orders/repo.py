@@ -166,36 +166,52 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
 
     overhead = setup_repo.get_default_markup(db)   # material -> loaded (internal) cost
     with db.connect() as conn:
+        default_shelf = stock.default_shelf(conn)
         head = conn.execute(
             """SELECT w.*, p.part_no AS assembly_part_no, p.value AS assembly_value,
                       co.id AS customer_order_id, co.order_ref AS customer_order_ref,
-                      co.required_date AS customer_required_date
+                      co.required_date AS customer_required_date,
+                      l.name AS shelf_name, l.kind AS shelf_kind, l.owner_contact_id AS shelf_owner_id
                FROM work_orders w JOIN parts p ON p.id = w.assembly_id
                LEFT JOIN customer_order_lines col ON col.id = w.customer_order_line_id
                LEFT JOIN customer_orders co ON co.id = col.order_id
+               LEFT JOIN stock_locations l ON l.id = COALESCE(w.location_id, ?)
                WHERE w.id = ?""",
-            (wo_id,),
+            (default_shelf, wo_id),
         ).fetchone()
         if head is None:
             return None
+        shelf_id = head["location_id"] or default_shelf
+        # Availability is per shelf: a work order draws only from its own shelf.
         lines = [dict(r) for r in conn.execute(
             """SELECT wl.id, wl.part_id, wl.qty_required, wl.qty_issued, wl.line_no,
-                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc, p.unlimited_stock
+                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc, p.unlimited_stock,
+                      COALESCE(pk.on_hand, 0) AS shelf_on_hand, COALESCE(pk.allocated, 0) AS shelf_allocated
                FROM work_order_lines wl JOIN parts p ON p.id = wl.part_id
+               LEFT JOIN part_stock pk ON pk.part_id = p.id AND pk.location_id = ?
                WHERE wl.work_order_id = ? ORDER BY COALESCE(wl.line_no, 1e9), wl.id""",
-            (wo_id,),
+            (shelf_id, wo_id),
         )]
+        owner_name = None
+        if head["shelf_owner_id"]:
+            o = conn.execute("SELECT COALESCE(NULLIF(short_name, ''), name) AS n FROM contacts WHERE id = ?",
+                             (head["shelf_owner_id"],)).fetchone()
+            owner_name = o["n"] if o else None
         # Has the assembly BOM changed since this WO was planned? (Only actionable while allocated.)
         diff = (_bom_divergence(conn, head) if head["status"] == "allocated"
                 else {"diverged": False, "added": [], "removed": [], "changed": []})
     wo = dict(head)
+    wo["shelf"] = {"id": shelf_id, "name": head["shelf_name"] or "Main",
+                   "kind": head["shelf_kind"] or "ours", "owner_name": owner_name}
+    # Parts on a customer shelf are the customer's property: material is not charged.
+    wo["customer_supplied"] = wo["shelf"]["kind"] == "customer"
     short_count = 0
     loaded_build_cost = 0.0
     with db.connect() as conn:                       # loaded (internal) cost per exploded component
         for d in lines:
             d["unlimited"] = bool(d["unlimited_stock"])
             # Unlimited parts (e.g. SMT Assembly) never run out — always available, never short.
-            d["available"] = (d["total_qty"] or 0) - (d["total_alloc"] or 0)
+            d["available"] = (d["shelf_on_hand"] or 0) - (d["shelf_allocated"] or 0)
             d["short"] = 0.0 if d["unlimited"] else max(0.0, (d["qty_required"] or 0) - d["available"])
             if d["short"] > 0:
                 short_count += 1
@@ -207,7 +223,9 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
                 loaded_build_cost += d["loaded_line"]
     wo["lines"] = lines
     wo["short_count"] = short_count
-    wo["loaded_build_cost"] = loaded_build_cost
+    wo["loaded_build_cost_reference"] = loaded_build_cost
+    wo["loaded_build_cost_charged"] = 0.0 if wo["customer_supplied"] else loaded_build_cost
+    wo["loaded_build_cost"] = wo["loaded_build_cost_charged"]
     wo["bom_diff"] = diff
     wo["bom_diverged"] = diff["diverged"]
     return wo
@@ -238,6 +256,10 @@ def create_work_order(db: Database, data: dict) -> int:
                         (data["assembly_id"],)).fetchone() is None:
             raise ValueError("Choose an assembly to build.")
         qty = data.get("qty") or 1
+        location_id = data.get("location_id") or stock.default_shelf(conn)
+        if conn.execute("SELECT 1 FROM stock_locations WHERE id = ? AND retired_at IS NULL",
+                        (location_id,)).fetchone() is None:
+            raise ValueError("Choose an active shelf to build from.")
         planned_start, due_date, duration_days = _resolve_schedule(conn, data["assembly_id"], data)
         spillage, min_margin = _spillage_settings(conn)
         wo_id = conn.execute(
@@ -246,7 +268,7 @@ def create_work_order(db: Database, data: dict) -> int:
                spillage_percent, min_margin_qty)
                VALUES (?, ?, ?, 'allocated', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (data.get("wo_no"), data["assembly_id"], qty, data.get("customer_order_line_id"),
-             data.get("location_id"), data.get("build_date"), data.get("notes"),
+             location_id, data.get("build_date"), data.get("notes"),
              planned_start, due_date, duration_days, spillage, min_margin),
         ).lastrowid
         if not data.get("wo_no"):
@@ -439,7 +461,7 @@ def order_header(db: Database, order_id: int) -> dict | None:
     """Light header for the build-review page (kept here to avoid a customer_orders import cycle)."""
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT o.id, o.order_ref, o.status, c.name AS customer_name "
+            "SELECT o.id, o.order_ref, o.status, o.customer_id, c.name AS customer_name "
             "FROM customer_orders o LEFT JOIN contacts c ON c.id = o.customer_id WHERE o.id = ?",
             (order_id,),
         ).fetchone()
@@ -498,8 +520,9 @@ def work_orders_for_order(db: Database, order_id: int) -> dict[int, list[dict]]:
 
 
 def create_work_orders_for_order(db: Database, order_id: int, selections: dict[int, float],
-                                 user: str | None = None) -> list[int]:
-    """Create a work order per selected line ({line_id: build_qty}), linked to the order line."""
+                                 user: str | None = None, *, location_id: int | None = None) -> list[int]:
+    """Create a work order per selected line ({line_id: build_qty}), linked to the order line, all
+    building from ``location_id`` (the customer's job/customer shelf, or our default shelf)."""
     with db.connect() as conn:
         head = conn.execute("SELECT order_ref, required_date FROM customer_orders WHERE id = ?",
                             (order_id,)).fetchone()
@@ -516,6 +539,7 @@ def create_work_orders_for_order(db: Database, order_id: int, selections: dict[i
             created.append(create_work_order(db, {
                 "assembly_id": valid[line_id], "qty": qty,   # wo_no auto-assigned (WO-NNNNN)
                 "customer_order_line_id": line_id, "due_date": required_date,
+                "location_id": location_id,
                 "notes": f"Build to fulfil customer order {ref}"}))
     return created
 

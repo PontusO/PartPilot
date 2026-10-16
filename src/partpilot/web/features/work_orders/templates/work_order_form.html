@@ -44,14 +44,10 @@
                style="width:100%; padding:.55rem .65rem; background:#0d1219; color:var(--fg);
                       border:1px solid var(--line); border-radius:7px; font:inherit;">
       </div>
-      {% if locations %}
       <div>
-        <label for="location_id">Location</label>
-        <select id="location_id" name="location_id">
-          {% for l in locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}
-        </select>
+        <label for="location_id">Shelf (components are issued from here)</label>
+        {% with shelf_field='location_id' %}{% include "_shelf_select.html" %}{% endwith %}
       </div>
-      {% endif %}
       <div>
         <label for="due_date">Planned finish (due date)</label>
         <input id="due_date" name="due_date" type="date" value="{{ values.get('due_date','') or '' }}">

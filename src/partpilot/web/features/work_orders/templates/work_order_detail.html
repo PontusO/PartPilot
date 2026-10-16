@@ -10,13 +10,18 @@
     <span class="badge {{ badge.get(w.status, 'muted') }}">{{ status_label.get(w.status, w.status) }}</span></h1>
   <p class="note">Build <b>{{ "%g"|format(w.qty) }}</b> ×
     <a href="/assemblies/{{ w.assembly_id }}">{{ w.assembly_part_no }}</a>
-    {% if w.assembly_value %} — {{ w.assembly_value }}{% endif %}</p>
+    {% if w.assembly_value %} — {{ w.assembly_value }}{% endif %}
+    · Shelf: <a href="/catalog/shelves/{{ w.shelf.id }}"><b>{{ w.shelf.name }}</b></a>
+    {% if w.customer_supplied %}<span class="badge warn" title="parts on this shelf belong to {{ w.shelf.owner_name or 'the customer' }} — material is not charged">customer-owned parts</span>{% endif %}</p>
 
   <div class="cards">
     <div class="card"><b>{{ "%g"|format(w.qty) }}</b><small>to build</small></div>
     <div class="card"><b>{{ w.lines|length }}</b><small>components</small></div>
     <div class="card"><b>{{ w.short_count }}</b><small>short</small></div>
-    {% if w.loaded_build_cost %}
+    {% if w.customer_supplied %}
+    <div class="card"><b>0.00</b>
+      <small>material charged — customer-supplied (ref. value {{ "%.2f"|format(w.loaded_build_cost_reference) }})</small></div>
+    {% elif w.loaded_build_cost %}
     <div class="card"><b>{{ "%.2f"|format(w.loaded_build_cost) }}</b>
       <small>loaded build cost (SEK)</small></div>
     {% endif %}
@@ -116,7 +121,7 @@
     <table>
       <thead>
         <tr><th class="num">#</th><th>Component</th><th>Value</th><th class="num">Required</th>
-            <th class="num">Issued</th><th class="num">Available</th><th class="num">Short</th>
+            <th class="num">Issued</th><th class="num">Available on shelf</th><th class="num">Short</th>
             <th class="num">Loaded (SEK)</th></tr>
       </thead>
       <tbody>
