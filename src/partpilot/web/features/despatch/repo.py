@@ -11,17 +11,6 @@ from ...core.db import Database
 from ..catalog import stock
 
 
-def _recompute_part_alloc(conn, part_id: int) -> None:
-    total = conn.execute(
-        "SELECT COALESCE(SUM(qty), 0) FROM allocations WHERE part_id = ?", (part_id,)
-    ).fetchone()[0]
-    conn.execute("UPDATE parts SET total_alloc = ? WHERE id = ?", (total, part_id))
-    row = conn.execute("SELECT id FROM part_stock WHERE part_id = ? ORDER BY id LIMIT 1",
-                       (part_id,)).fetchone()
-    if row:
-        conn.execute("UPDATE part_stock SET allocated = ? WHERE id = ?", (total, row["id"]))
-
-
 def _consume_allocation(conn, order_line_id: int, qty: float) -> None:
     """Release up to ``qty`` of stock reserved to an order line (it's being shipped)."""
     remaining = qty
@@ -36,7 +25,7 @@ def _consume_allocation(conn, order_line_id: int, qty: float) -> None:
             conn.execute("DELETE FROM allocations WHERE id = ?", (a["id"],))
         else:
             conn.execute("UPDATE allocations SET qty = qty - ? WHERE id = ?", (take, a["id"]))
-        _recompute_part_alloc(conn, a["part_id"])
+        stock.recompute_alloc(conn, a["part_id"])
         remaining -= take
 
 
@@ -311,7 +300,8 @@ def dispatch(db: Database, despatch_id: int, user: str | None = None) -> None:
         ).fetchall():
             if ln["part_id"]:
                 stock.post_movement(conn, ln["part_id"], delta=-ln["qty"], mtype=stock.ISSUE,
-                                    reference=desp_ref, note="despatch", user=user)
+                                    reference=desp_ref, note="despatch", user=user,
+                                    location_id=stock.default_shelf(conn))
                 if ln["order_line_id"]:
                     _consume_allocation(conn, ln["order_line_id"], ln["qty"])
             if ln["order_line_id"]:

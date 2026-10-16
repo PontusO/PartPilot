@@ -11,7 +11,7 @@ import re
 
 from ...core import ref_no
 from ...core.db import Database
-from ..catalog import pricing
+from ..catalog import pricing, stock
 from ..setup import repo as setup_repo
 from . import export
 
@@ -404,19 +404,6 @@ def delete_line(db: Database, order_id: int, line_id: int) -> None:
 
 # ---- stock allocation ----
 
-def _recompute_part_alloc(conn, part_id: int) -> None:
-    """Roll a part's allocations up onto parts.total_alloc (and mirror onto its primary stock row)."""
-    total = conn.execute(
-        "SELECT COALESCE(SUM(qty), 0) FROM allocations WHERE part_id = ?", (part_id,)
-    ).fetchone()[0]
-    conn.execute("UPDATE parts SET total_alloc = ? WHERE id = ?", (total, part_id))
-    row = conn.execute(
-        "SELECT id FROM part_stock WHERE part_id = ? ORDER BY id LIMIT 1", (part_id,)
-    ).fetchone()
-    if row:
-        conn.execute("UPDATE part_stock SET allocated = ? WHERE id = ?", (total, row["id"]))
-
-
 def allocate_order(db: Database, order_id: int) -> float:
     """Reserve available stock to this order's lines (up to the outstanding qty per line, limited by
     each part's free stock). Returns the total newly allocated. Operator-triggered, re-runnable."""
@@ -444,7 +431,7 @@ def allocate_order(db: Database, order_id: int) -> float:
                     "INSERT INTO allocations (customer_order_line_id, part_id, qty) VALUES (?, ?, ?)",
                     (ln["id"], ln["part_id"], take),
                 )
-                _recompute_part_alloc(conn, ln["part_id"])  # lowers free for later lines of same part
+                stock.recompute_alloc(conn, ln["part_id"])  # lowers free for later lines of same part
                 newly += take
         conn.commit()
     return newly
@@ -465,7 +452,7 @@ def _release_allocations(conn, order_id: int) -> None:
         "DELETE FROM allocations WHERE customer_order_line_id IN "
         "(SELECT id FROM customer_order_lines WHERE order_id = ?)", (order_id,))
     for pid in part_ids:
-        _recompute_part_alloc(conn, pid)
+        stock.recompute_alloc(conn, pid)
 
 
 def order_downstream(db: Database, order_id: int) -> dict:

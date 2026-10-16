@@ -422,12 +422,16 @@ async def move_stock(request: Request, part_id: int):
     note = (form.get("note") or "").strip() or None
     reference = (form.get("reference") or "").strip() or "manual"
 
+    with db.connect() as conn:
+        location_id = location_id or stock.default_shelf(conn)
+        current = stock.shelf_on_hand(conn, part_id, location_id)
+        conn.commit()
     if action == "receive" and qty:
         delta, mtype = abs(qty), stock.RECEIVE
     elif action == "issue" and qty:
         delta, mtype = -abs(qty), stock.ISSUE
-    elif action == "adjust" and qty is not None:       # qty is the new on-hand target
-        delta, mtype = qty - (part["total_qty"] or 0), stock.ADJUST
+    elif action == "adjust" and qty is not None:       # qty is the new on-hand target ON THAT SHELF
+        delta, mtype = qty - current, stock.ADJUST
     else:
         delta = None
 

@@ -369,7 +369,7 @@ def issue_work_order(db: Database, wo_id: int, user: str | None = None) -> None:
             if ln["qty_required"] and not ln["unlimited_stock"]:
                 stock.post_movement(conn, ln["part_id"], delta=-ln["qty_required"], mtype=stock.ISSUE,
                                     reference=_wo_ref(wo), note="work order issue", user=user,
-                                    location_id=wo["location_id"])
+                                    location_id=wo["location_id"] or stock.default_shelf(conn))
             conn.execute("UPDATE work_order_lines SET qty_issued = qty_required WHERE id = ?", (ln["id"],))
         conn.execute("UPDATE work_orders SET status = 'issued', updated_at = datetime('now') WHERE id = ?",
                      (wo_id,))
@@ -386,7 +386,7 @@ def finish_work_order(db: Database, wo_id: int, user: str | None = None) -> None
             raise ValueError(f"Only an issued work order can be finished (this one is {wo['status']}).")
         stock.post_movement(conn, wo["assembly_id"], delta=wo["qty"], mtype=stock.BUILD,
                             reference=_wo_ref(wo), note="work order completion", user=user,
-                            location_id=wo["location_id"])
+                            location_id=wo["location_id"] or stock.default_shelf(conn))
         conn.execute(
             "UPDATE work_orders SET status = 'finished', "
             "build_date = COALESCE(build_date, date('now')), updated_at = datetime('now') WHERE id = ?",

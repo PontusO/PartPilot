@@ -458,7 +458,7 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
             if qty and qty > 0 and ln["part_id"]:
                 stock.post_movement(conn, ln["part_id"], delta=qty, mtype=stock.RECEIVE,
                                     reference=po["po_no"] or f"PO-{po_id}", note="goods receiving",
-                                    user=user)
+                                    user=user, location_id=stock.default_shelf(conn))
                 conn.execute("UPDATE purchase_order_lines SET qty_received = qty_received + ? WHERE id = ?",
                              (qty, ln["id"]))
                 conn.execute(

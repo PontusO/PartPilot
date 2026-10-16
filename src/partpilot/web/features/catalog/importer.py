@@ -91,11 +91,18 @@ def import_tables(
         loc_ids = sorted({lid for r in item_locations if (lid := _i(r.get("LocLocationID"))) is not None})
         for lid in loc_ids:
             name = "Main" if lid == 1 else f"Location {lid}"
-            conn.execute(
-                "INSERT INTO stock_locations (name, minimrp_id) VALUES (?, ?) "
-                "ON CONFLICT(minimrp_id) DO UPDATE SET name=excluded.name",
-                (name, lid),
-            )
+            # Shelf names are unique: adopt an existing shelf of that name (e.g. the default "Main"
+            # created by the stock core) instead of inserting a duplicate.
+            same_name = conn.execute(
+                "SELECT id, minimrp_id FROM stock_locations WHERE name = ?", (name,)).fetchone()
+            if same_name is not None and same_name["minimrp_id"] in (None, lid):
+                conn.execute("UPDATE stock_locations SET minimrp_id = ? WHERE id = ?", (lid, same_name["id"]))
+            else:
+                conn.execute(
+                    "INSERT INTO stock_locations (name, minimrp_id) VALUES (?, ?) "
+                    "ON CONFLICT(minimrp_id) DO UPDATE SET name=excluded.name",
+                    (name, lid),
+                )
         loc_map = {row["minimrp_id"]: row["id"] for row in
                    conn.execute("SELECT id, minimrp_id FROM stock_locations WHERE minimrp_id IS NOT NULL")}
 

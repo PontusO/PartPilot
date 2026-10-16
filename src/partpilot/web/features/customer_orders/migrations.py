@@ -120,4 +120,13 @@ MIGRATIONS = [
         ALTER TABLE customer_order_lines ADD COLUMN price_overridden INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    Migration(
+        version=7,
+        name="allocation shelf",
+        sql="""
+        -- Which shelf (stock_locations) an allocation reserves from. NULL on legacy rows = our
+        -- default shelf; allocate_order always sets it.
+        ALTER TABLE allocations ADD COLUMN location_id INTEGER REFERENCES stock_locations(id);
+        """,
+    ),
 ]

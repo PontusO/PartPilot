@@ -215,7 +215,7 @@ def _apply(db, part_id, *, delta, mtype, reference, note, user, baseline) -> Non
     with db.connect() as conn:
         if abs(delta) > _EPS:
             stock.post_movement(conn, part_id, delta=delta, mtype=mtype, reference=reference,
-                                note=note, user=user)
+                                note=note, user=user, location_id=stock.default_shelf(conn))
         conn.execute("UPDATE parts SET webshop_synced_qty = ? WHERE id = ?", (baseline, part_id))
         conn.commit()
 

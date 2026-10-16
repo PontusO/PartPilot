@@ -419,4 +419,24 @@ MIGRATIONS = [
         CREATE INDEX ix_parts_group ON parts(version_group_id);
         """,
     ),
+    Migration(
+        version=22,
+        name="stock shelves (customer-owned stock)",
+        sql="""
+        -- A shelf is a stock location with an owner. kind 'ours' = our stock; 'customer' = parts the
+        -- customer paid for up front and that only their builds may use. owner/order ids are soft
+        -- joins (catalog migrates before contacts / customer_orders).
+        ALTER TABLE stock_locations ADD COLUMN kind TEXT NOT NULL DEFAULT 'ours';
+        ALTER TABLE stock_locations ADD COLUMN owner_contact_id INTEGER;
+        ALTER TABLE stock_locations ADD COLUMN customer_order_id INTEGER;
+        ALTER TABLE stock_locations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));
+        ALTER TABLE stock_locations ADD COLUMN retired_at TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_stockloc_name ON stock_locations(name);
+        -- parts.total_qty / total_alloc now mean OUR stock only; customer shelves roll up here.
+        ALTER TABLE parts ADD COLUMN customer_qty REAL NOT NULL DEFAULT 0;
+        -- Every stock row and ledger row belongs to a shelf (safety net; live DB has no null rows).
+        UPDATE part_stock SET location_id = (SELECT MIN(id) FROM stock_locations) WHERE location_id IS NULL;
+        UPDATE stock_movements SET location_id = (SELECT MIN(id) FROM stock_locations) WHERE location_id IS NULL;
+        """,
+    ),
 ]

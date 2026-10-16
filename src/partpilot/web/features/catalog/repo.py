@@ -310,15 +310,6 @@ def upsert_supplier(
         return sid
 
 
-def _location_id(conn, location_id: int | None) -> int:
-    if location_id:
-        return location_id
-    row = conn.execute("SELECT id FROM stock_locations ORDER BY id LIMIT 1").fetchone()
-    if row:
-        return row["id"]
-    return conn.execute("INSERT INTO stock_locations (name) VALUES ('Main')").lastrowid
-
-
 def _insert_cost_tiers(conn, part_supplier_id: int, line: dict) -> None:
     """Write auto-captured supplier COST breaks for a ``part_suppliers`` row. ``line`` may carry
     ``cost_tiers`` (cut-tape) and/or ``reel_tiers`` (full-reel), each a list of
@@ -397,8 +388,8 @@ def create_part(
             # Through the ledger (OPENING), not a raw part_stock insert — post_movement creates the
             # stock row, rolls up total_qty and records the movement, keeping the running balance
             # honest. The bin is a plain attribute set after the row exists.
-            from .stock import OPENING, post_movement  # late import: stock.py imports this module
-            loc_id = _location_id(conn, (opening or {}).get("location_id"))
+            from .stock import OPENING, default_shelf, post_movement
+            loc_id = (opening or {}).get("location_id") or default_shelf(conn)
             post_movement(conn, part_id, delta=opening_qty, mtype=OPENING,
                           note="opening stock", location_id=loc_id)
             if (opening or {}).get("bin"):
@@ -484,17 +475,21 @@ def update_part(
         # Stock edits go through the ledger: bin/location are plain attributes, but an on-hand change
         # posts an ADJUST movement (delta vs the current value) so the running balance in
         # stock_movements never drifts from the part-form path (mirrors the Adjust-stock action).
-        from .stock import ADJUST, OPENING, post_movement  # late import: stock.py imports this module
+        from .stock import ADJUST, OPENING, _rollup, default_shelf, post_movement
 
+        # The part form manages OUR stock only: the first row on one of our shelves. A customer
+        # shelf's row is never re-homed or re-counted from here.
         qty = (stock or {}).get("qty")
-        row = conn.execute(
-            "SELECT id, on_hand FROM part_stock WHERE part_id = ? ORDER BY id LIMIT 1", (part_id,)
+        loc_id = (stock or {}).get("location_id") or default_shelf(conn)
+        own_row = conn.execute(
+            """SELECT pk.id, pk.on_hand FROM part_stock pk
+               JOIN stock_locations l ON l.id = pk.location_id
+               WHERE pk.part_id = ? AND l.kind = 'ours' ORDER BY pk.id LIMIT 1""", (part_id,)
         ).fetchone()
-        loc_id = _location_id(conn, (stock or {}).get("location_id"))
-        if row is not None:
+        if own_row is not None:
             conn.execute("UPDATE part_stock SET bin=?, location_id=? WHERE id=?",
-                         ((stock or {}).get("bin"), loc_id, row["id"]))
-            delta = (qty or 0) - (row["on_hand"] or 0)
+                         ((stock or {}).get("bin"), loc_id, own_row["id"]))
+            delta = (qty or 0) - (own_row["on_hand"] or 0)
             if delta:
                 post_movement(conn, part_id, delta=delta, mtype=ADJUST,
                               note="part edit", location_id=loc_id)
@@ -504,12 +499,7 @@ def update_part(
             if (stock or {}).get("bin"):
                 conn.execute("UPDATE part_stock SET bin = ? WHERE part_id = ? AND location_id = ?",
                              ((stock or {}).get("bin"), part_id, loc_id))
-
-        conn.execute(
-            "UPDATE parts SET total_qty = "
-            "(SELECT COALESCE(SUM(on_hand), 0) FROM part_stock WHERE part_id = ?) WHERE id = ?",
-            (part_id, part_id),
-        )
+        _rollup(conn, part_id)
         conn.commit()
 
 
