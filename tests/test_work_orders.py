@@ -390,3 +390,21 @@ def test_only_assemblies_with_bom_are_buildable(db):
     names = {x["part_no"] for x in repo.assemblies(db)}
     assert "TOP-1" in names and "SUB-1" in names
     assert "EMPTY-ASSY" not in names and "LONE" not in names
+
+
+def test_retired_assembly_leaves_picker_and_cannot_be_built(db):
+    from partpilot.web.features.catalog import lifecycle
+    a, b, sub, top = _setup(db)
+    lifecycle.retire_part(db, top)
+    assert top not in {r["id"] for r in repo.assemblies(db)}
+    with pytest.raises(ValueError, match=r"TOP-1 is retired and cannot be built\."):
+        repo.create_work_order(db, {"assembly_id": top, "qty": 1})
+
+
+def test_retired_component_in_live_bom_still_builds_and_is_flagged(db):
+    from partpilot.web.features.catalog import lifecycle
+    a, b, sub, top = _setup(db)
+    lifecycle.retire_part(db, b)
+    wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 1}))
+    by = {ln["part_no"]: ln for ln in wo["lines"]}
+    assert by["COMP-B"]["retired"] is True and by["COMP-A"]["retired"] is False

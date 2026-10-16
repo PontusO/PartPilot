@@ -340,3 +340,13 @@ def test_create_order_ignores_action_owned_status(db):
     cust, _ = _seed(db)
     oid = repo.create_order(db, {"customer_id": cust, "status": "shipped"})
     assert repo.get_order(db, oid)["status"] == "draft"  # demoted to a manual status
+
+
+def test_retired_part_leaves_order_picker_and_cannot_be_added(db):
+    from partpilot.web.features.catalog import lifecycle
+    cust, part = _seed(db)
+    oid = repo.create_order(db, {"customer_id": cust})
+    lifecycle.retire_part(db, part)
+    assert part not in {p["id"] for p in repo.parts_for_picker(db)}
+    with pytest.raises(ValueError, match=r"WIDGET-1 is retired and cannot be ordered\."):
+        repo.add_line(db, oid, part, 1, None, None)

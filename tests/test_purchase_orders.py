@@ -503,3 +503,13 @@ def test_po_pdf_prints_supplier_address_and_survives_blank_contact(db):
                    "sales@full.example", "+46 46 123"):
         assert needle in text, needle
     assert export.po_pdf(repo.get_po(db, po_bare), {})[:5] == b"%PDF-"   # every optional line blank: no crash
+
+
+def test_retired_part_leaves_po_picker_and_cannot_be_added(db):
+    from partpilot.web.features.catalog import lifecycle
+    p, asm, wo = _setup_shortage(db)
+    po = repo.create_po(db, {"supplier_id": _acme_id(db)})
+    lifecycle.retire_part(db, p)
+    assert p not in {r["id"] for r in repo.parts_for_picker(db)}
+    with pytest.raises(ValueError, match=r"R-1 is retired and cannot be ordered\."):
+        repo.add_line(db, po, p, 5, 0.5)

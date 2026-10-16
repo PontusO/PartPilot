@@ -104,9 +104,11 @@ def suppliers(db: Database) -> list[dict]:
 
 
 def parts_for_picker(db: Database) -> list[dict]:
+    """Parts a PO line may be raised for — retired parts are never re-bought."""
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts ORDER BY part_no")]
+            "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts p "
+            "WHERE p.retired_at IS NULL ORDER BY part_no")]
 
 
 def list_pos(db: Database, status: str | None = None, search: str | None = None) -> list[dict]:
@@ -323,8 +325,11 @@ def add_line(db: Database, po_id: int, part_id: int | None, qty: float,
             raise ValueError("Purchase order not found.")
         sup = None
         if part_id is not None:
-            if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
+            prow = conn.execute("SELECT part_no, retired_at FROM parts WHERE id = ?", (part_id,)).fetchone()
+            if prow is None:
                 raise ValueError("Selected part was not found.")
+            if prow["retired_at"]:
+                raise ValueError(f"{prow['part_no']} is retired and cannot be ordered.")
             sup = _default_supplier(conn, part_id)
     supplier_pno = sup["supplier_pno"] if sup else None
     if unit_price is None and sup is not None:

@@ -129,12 +129,14 @@ def summary(db: Database) -> dict:
 
 
 def assemblies(db: Database) -> list[dict]:
-    """Assemblies that can be built (have at least one BOM line)."""
+    """Assemblies that can be built (have at least one BOM line, not retired)."""
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
             # Only the current (released) version of an assembly is offered to build by default; a
             # draft is not buildable and a superseded version is chosen explicitly, not from this list.
+            # A retired assembly is never offered: retired means run out, don't restart.
             """SELECT id, part_no, value, default_build_days FROM parts p WHERE kind = 'ASSY'
+               AND p.retired_at IS NULL
                AND EXISTS (SELECT 1 FROM bom_lines b WHERE b.parent_id = p.id)
                AND p.id = (SELECT x.id FROM parts x
                            WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id)
@@ -187,6 +189,7 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
         lines = [dict(r) for r in conn.execute(
             """SELECT wl.id, wl.part_id, wl.qty_required, wl.qty_issued, wl.line_no,
                       p.part_no, p.value, p.kind, p.total_qty, p.total_alloc, p.unlimited_stock,
+                      p.retired_at,
                       COALESCE(pk.on_hand, 0) AS shelf_on_hand, COALESCE(pk.allocated, 0) AS shelf_allocated
                FROM work_order_lines wl JOIN parts p ON p.id = wl.part_id
                LEFT JOIN part_stock pk ON pk.part_id = p.id AND pk.location_id = ?
@@ -211,6 +214,7 @@ def get_work_order(db: Database, wo_id: int) -> dict | None:
     with db.connect() as conn:                       # loaded (internal) cost per exploded component
         for d in lines:
             d["unlimited"] = bool(d["unlimited_stock"])
+            d["retired"] = bool(d.get("retired_at"))   # still issued, never re-bought
             # Unlimited parts (e.g. SMT Assembly) never run out — always available, never short.
             d["available"] = (d["shelf_on_hand"] or 0) - (d["shelf_allocated"] or 0)
             d["short"] = 0.0 if d["unlimited"] else max(0.0, (d["qty_required"] or 0) - d["available"])
@@ -253,9 +257,12 @@ def _resolve_schedule(conn, assembly_id: int, data: dict) -> tuple[str | None, s
 
 def create_work_order(db: Database, data: dict) -> int:
     with db.connect() as conn:
-        if conn.execute("SELECT 1 FROM parts WHERE id = ? AND kind = 'ASSY'",
-                        (data["assembly_id"],)).fetchone() is None:
+        asm = conn.execute("SELECT part_no, retired_at FROM parts WHERE id = ? AND kind = 'ASSY'",
+                           (data["assembly_id"],)).fetchone()
+        if asm is None:
             raise ValueError("Choose an assembly to build.")
+        if asm["retired_at"]:   # server-side: a stale form or typed id must not start a build
+            raise ValueError(f"{asm['part_no']} is retired and cannot be built.")
         qty = data.get("qty") or 1
         location_id = data.get("location_id") or stock.default_shelf(conn)
         if conn.execute("SELECT 1 FROM stock_locations WHERE id = ? AND retired_at IS NULL",

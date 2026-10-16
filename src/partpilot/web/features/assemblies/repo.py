@@ -285,7 +285,7 @@ def parts_for_picker(db: Database, exclude_id: int) -> list[dict]:
     with db.connect() as conn:
         return [dict(r) for r in conn.execute(
             "SELECT id, part_no, value, kind, total_qty FROM parts p "
-            "WHERE id != ? "
+            "WHERE id != ? AND p.retired_at IS NULL "
             "AND p.id = (SELECT x.id FROM parts x "
             "            WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id) "
             "            ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1) "
@@ -368,8 +368,11 @@ def add_bom_line(db: Database, parent_id: int, child_id: int, qty_per: float,
     if child_id == parent_id:
         raise ValueError("An assembly can't contain itself.")
     with db.connect() as conn:
-        if conn.execute("SELECT 1 FROM parts WHERE id = ?", (child_id,)).fetchone() is None:
+        child = conn.execute("SELECT part_no, retired_at FROM parts WHERE id = ?", (child_id,)).fetchone()
+        if child is None:
             raise ValueError("Selected component was not found.")
+        if child["retired_at"]:
+            raise ValueError(f"{child['part_no']} is retired and cannot be added to a BOM.")
         next_no = conn.execute(
             "SELECT COALESCE(MAX(line_no), 0) + 1 FROM bom_lines WHERE parent_id = ?", (parent_id,)
         ).fetchone()[0]

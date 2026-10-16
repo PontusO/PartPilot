@@ -129,7 +129,8 @@
         <tr>
           <td class="num">{{ ln.line_no if ln.line_no is not none else loop.index }}</td>
           <td><a href="/{{ 'assemblies' if ln.kind == 'ASSY' else 'catalog' }}/{{ ln.part_id }}">{{ ln.part_no }}</a>
-            {% if ln.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}</td>
+            {% if ln.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+            {% if ln.retired %}<span class="badge muted" title="Retired part — stock may run out, none will be bought">retired</span>{% endif %}</td>
           <td>{{ ln.value or '' }}</td>
           <td class="num">{{ "%g"|format(ln.qty_required) }}</td>
           <td class="num">{{ "%g"|format(ln.qty_issued) }}</td>

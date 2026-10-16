@@ -145,7 +145,8 @@ def parts_for_picker(db: Database) -> list[dict]:
             # One entry per item — the current (released) version; a draft/superseded version is not
             # offered as an orderable line by default.
             "SELECT id, part_no, value, kind, total_qty, unit_cost FROM parts p "
-            "WHERE p.id = (SELECT x.id FROM parts x "
+            "WHERE p.retired_at IS NULL "
+            "AND p.id = (SELECT x.id FROM parts x "
             "              WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id) "
             "              ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1) "
             "ORDER BY part_no"
@@ -328,8 +329,11 @@ def add_line(db: Database, order_id: int, part_id: int | None, qty: float,
             raise ValueError("Order not found.")
         overridden = 0
         if part_id is not None:
-            if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
+            prow = conn.execute("SELECT part_no, retired_at FROM parts WHERE id = ?", (part_id,)).fetchone()
+            if prow is None:
                 raise ValueError("Selected product was not found.")
+            if prow["retired_at"]:
+                raise ValueError(f"{prow['part_no']} is retired and cannot be ordered.")
             if unit_price is None:   # default to the loaded parts price at the ordered volume
                 unit_price = _loaded_price_at(conn, part_id, qty or 1, overhead)
             else:

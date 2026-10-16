@@ -607,3 +607,13 @@ def test_list_assemblies_hides_retired_unless_asked(db):
     detail = repo.get_assembly(db, a)
     assert detail["retired"] is False
     assert {ln["child_id"]: ln["child_retired"] for ln in detail["lines"]}[s] is True
+
+
+def test_retired_part_leaves_bom_picker_and_cannot_be_added(db):
+    from partpilot.web.features.catalog import lifecycle
+    a, s, c1, c2 = _setup(db)
+    extra = _part(db, "C3", "PART", 3)
+    lifecycle.retire_part(db, extra)
+    assert extra not in {p["id"] for p in repo.parts_for_picker(db, a)}
+    with pytest.raises(ValueError, match=r"C3 is retired and cannot be added to a BOM\."):
+        repo.add_bom_line(db, a, extra, 1, None)
