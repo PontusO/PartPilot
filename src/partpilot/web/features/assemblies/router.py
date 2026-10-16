@@ -44,7 +44,7 @@ def _int(v) -> int | None:
 
 
 @router.get("", response_class=HTMLResponse)
-def assemblies_list(request: Request, q: str | None = None):
+def assemblies_list(request: Request, q: str | None = None, retired: bool = False):
     user = require_user(request)
     db = request.app.state.database
     templates = request.app.state.templates
@@ -53,9 +53,10 @@ def assemblies_list(request: Request, q: str | None = None):
         request,
         "assemblies_list.html",
         {
-            "assemblies": repo.list_assemblies(db, search),
+            "assemblies": repo.list_assemblies(db, search, include_retired=retired),
             "summary": repo.summary(db),
             "q": search or "",
+            "retired": retired,
             "can_edit": user.role in ASSEMBLY_WRITE_ROLES,
         },
     )

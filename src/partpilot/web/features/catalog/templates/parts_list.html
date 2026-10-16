@@ -39,8 +39,14 @@
              {{ 'checked' if stocked else '' }} onchange="this.form.submit()">
       Normally stocked only
     </label>
+    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; white-space:nowrap;
+                  padding-bottom:.55rem;">
+      <input name="retired" type="checkbox" value="1" style="width:auto;"
+             {{ 'checked' if retired else '' }} onchange="this.form.submit()">
+      Show retired
+    </label>
     <button type="submit">Filter</button>
-    {% if q or category or stocked %}<a href="/catalog" style="align-self:center;">clear</a>{% endif %}
+    {% if q or category or stocked or retired %}<a href="/catalog" style="align-self:center;">clear</a>{% endif %}
   </form>
 
   <p class="note">{{ total }} part(s){% if q or category %} matching{% endif %}.</p>
@@ -58,7 +64,7 @@
       <tbody>
         {% for p in parts %}
         <tr>
-          <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a>{% if p.version_count and p.version_count > 1 %} <span class="badge muted" title="{{ p.version_count }} versions exist — showing the current one">+{{ p.version_count - 1 }} ver</span>{% endif %}</td>
+          <td><a href="/catalog/{{ p.id }}">{{ p.part_no }}</a>{% if p.version_count and p.version_count > 1 %} <span class="badge muted" title="{{ p.version_count }} versions exist — showing the current one">+{{ p.version_count - 1 }} ver</span>{% endif %}{% if p.retired %} <span class="badge muted" title="Retired {{ p.retired_at }}">Retired</span>{% endif %}</td>
           <td>{{ p.value or '' }}</td>
           <td>{{ p.category or '' }}</td>
           <td>{% if p.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% else %}<span class="flag">{{ p.kind }}</span>{% endif %}</td>
@@ -80,9 +86,9 @@
 
   {% if has_prev or has_next %}
   <div style="margin-top:1rem; display:flex; gap:1rem; align-items:center;">
-    {% if has_prev %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&page={{ page - 1 }}">← Prev</a>{% endif %}
+    {% if has_prev %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&retired={{ '1' if retired else '' }}&page={{ page - 1 }}">← Prev</a>{% endif %}
     <span class="note">Page {{ page }}</span>
-    {% if has_next %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&page={{ page + 1 }}">Next →</a>{% endif %}
+    {% if has_next %}<a href="?q={{ q }}&category={{ category }}&stocked={{ '1' if stocked else '' }}&retired={{ '1' if retired else '' }}&page={{ page + 1 }}">Next →</a>{% endif %}
   </div>
   {% endif %}
 </div>

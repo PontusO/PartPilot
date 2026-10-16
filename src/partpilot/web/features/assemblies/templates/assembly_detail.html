@@ -49,6 +49,7 @@
 <div class="panel">
   <p class="note"><a href="/assemblies">← Assemblies</a></p>
   <h1>{{ a.part_no }} <span class="badge stock">ASSY</span>
+    {% if a.retired %}<span class="badge muted" title="Retired {{ a.retired_at }} — no new work orders; finished boards may still be despatched">Retired</span>{% endif %}
     {% if a.rev %}<span class="flag" style="font-size:.9rem;">rev {{ a.rev }}</span>{% endif %}</h1>
   <p class="note">{{ a.value or '' }}{% if a.description %} — {{ a.description }}{% endif %}</p>
 
@@ -134,6 +135,7 @@
               <a href="/catalog/{{ ln.child_id }}">{{ ln.child_part_no }}</a>
             {% endif %}
             {% if p and p.exclude %}<span class="badge muted" title="This part's cost is not counted in the BOM total">no BOM cost</span>{% endif %}
+            {% if ln.child_retired %}<span class="badge muted" title="This part is retired — stock may run out, none will be bought">retired</span>{% endif %}
           </td>
           <td>{{ ln.child_value or '' }}</td>
           <td>{{ ln.child_category or '' }}</td>

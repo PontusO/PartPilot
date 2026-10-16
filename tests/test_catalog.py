@@ -588,3 +588,16 @@ def test_catalog_stock_index_matches_and_excludes_documents(db):
     passive = idx.match_param(CompType.RESISTOR, parse_rkm_value("100K", CompType.RESISTOR), "0402")
     assert passive is not None and passive.free == 1000
     assert idx.match_mpn("54-00001-1") is None  # a document is not stock
+
+
+def test_list_parts_hides_retired_unless_asked(db):
+    from partpilot.web.features.catalog import lifecycle
+    a = repo.create_part(db, part={"part_no": "A-1"}, supplier_lines=[])
+    b = repo.create_part(db, part={"part_no": "B-1"}, supplier_lines=[])
+    lifecycle.retire_part(db, b)
+    ids = {p["id"] for p in repo.list_parts(db)[0]}
+    assert a in ids and b not in ids
+    shown = {p["id"]: p for p in repo.list_parts(db, include_retired=True)[0]}
+    assert b in shown and shown[b]["retired"] is True and shown[a]["retired"] is False
+    assert repo.summary(db)["parts"] == 1
+    assert repo.get_part(db, b)["retired"] is True

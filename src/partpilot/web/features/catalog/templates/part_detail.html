@@ -6,6 +6,7 @@
   <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
     <h1 style="margin:0;">{{ part.part_no }}
       {% if part.kind == 'ASSY' %}<span class="badge stock">ASSY</span>{% endif %}
+      {% if part.retired %}<span class="badge muted" title="Retired {{ part.retired_at }} — hidden from lists and pickers, never bought again; stock may run out">Retired</span>{% endif %}
       {% if part.normally_stocked %}<span class="badge stock">Normally stocked</span>{% endif %}
       {% if part.unlimited %}<span class="badge ok">∞ unlimited stock</span>{% endif %}
       {% if part.is_document %}<span class="badge muted" title="Internal document — a deliverable, not a stocked part">document</span>{% endif %}

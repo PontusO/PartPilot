@@ -21,8 +21,14 @@
       <label for="q">Search</label>
       <input id="q" name="q" type="text" value="{{ q }}" placeholder="part no, value, description…">
     </div>
+    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; white-space:nowrap;
+                  padding-bottom:.55rem;">
+      <input name="retired" type="checkbox" value="1" style="width:auto;"
+             {{ 'checked' if retired else '' }} onchange="this.form.submit()">
+      Show retired
+    </label>
     <button type="submit">Filter</button>
-    {% if q %}<a href="/assemblies" style="align-self:center;">clear</a>{% endif %}
+    {% if q or retired %}<a href="/assemblies" style="align-self:center;">clear</a>{% endif %}
   </form>
 
   <div style="overflow-x:auto;">
@@ -35,7 +41,7 @@
       <tbody>
         {% for a in assemblies %}
         <tr>
-          <td><a href="/assemblies/{{ a.id }}">{{ a.part_no }}</a>{% if a.version_count and a.version_count > 1 %} <span class="badge muted" title="{{ a.version_count }} versions exist — showing the current one">+{{ a.version_count - 1 }} ver</span>{% endif %}</td>
+          <td><a href="/assemblies/{{ a.id }}">{{ a.part_no }}</a>{% if a.version_count and a.version_count > 1 %} <span class="badge muted" title="{{ a.version_count }} versions exist — showing the current one">+{{ a.version_count - 1 }} ver</span>{% endif %}{% if a.retired %} <span class="badge muted" title="Retired {{ a.retired_at }}">Retired</span>{% endif %}</td>
           <td>{{ a.value or '' }}</td>
           <td>{{ a.rev or '' }}</td>
           <td class="num">{% if a.line_count %}{{ a.line_count }}{% else %}<span class="flag">0</span>{% endif %}</td>

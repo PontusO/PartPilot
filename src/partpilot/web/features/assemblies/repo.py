@@ -7,22 +7,28 @@ from ...core.db import Database
 
 def summary(db: Database) -> dict:
     with db.connect() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM parts WHERE kind = 'ASSY'").fetchone()[0]
-        lines = conn.execute("SELECT COUNT(*) FROM bom_lines").fetchone()[0]
+        # Retired assemblies are out of every count: they are hidden from the list by default.
+        n = conn.execute(
+            "SELECT COUNT(*) FROM parts WHERE kind = 'ASSY' AND retired_at IS NULL").fetchone()[0]
+        lines = conn.execute(
+            "SELECT COUNT(*) FROM bom_lines b JOIN parts p ON p.id = b.parent_id "
+            "WHERE p.retired_at IS NULL").fetchone()[0]
         empty = conn.execute(
-            "SELECT COUNT(*) FROM parts p WHERE p.kind = 'ASSY' "
+            "SELECT COUNT(*) FROM parts p WHERE p.kind = 'ASSY' AND p.retired_at IS NULL "
             "AND NOT EXISTS (SELECT 1 FROM bom_lines b WHERE b.parent_id = p.id)"
         ).fetchone()[0]
     return {"assemblies": n, "lines": lines, "empty": empty}
 
 
-def list_assemblies(db: Database, search: str | None = None) -> list[dict]:
+def list_assemblies(db: Database, search: str | None = None,
+                    include_retired: bool = False) -> list[dict]:
     like = f"%{search}%" if search else None
     with db.connect() as conn:
         rows = conn.execute(
             # Collapse versions to one row per group: the current (released) version, or the lowest-id
             # one if none released yet. Un-versioned assemblies (the common case) are unaffected.
             """SELECT p.id, p.part_no, p.value, p.rev, p.total_qty, p.external_price, p.version_status,
+                      p.retired_at,
                       (SELECT COUNT(*) FROM parts g
                        WHERE COALESCE(g.version_group_id, g.id) = COALESCE(p.version_group_id, p.id))
                           AS version_count,
@@ -30,15 +36,19 @@ def list_assemblies(db: Database, search: str | None = None) -> list[dict]:
                       (SELECT COUNT(*) FROM bom_lines b WHERE b.child_id = p.id) AS used_in
                FROM parts p
                WHERE p.kind = 'ASSY'
+                 AND (:retired = 1 OR p.retired_at IS NULL)
                  AND p.id = (SELECT x.id FROM parts x
                              WHERE COALESCE(x.version_group_id, x.id) = COALESCE(p.version_group_id, p.id)
                              ORDER BY (x.version_status = 'released') DESC, x.id LIMIT 1)
                  AND (:s IS NULL OR p.part_no LIKE :like OR p.value LIKE :like
                       OR p.description LIKE :like)
                ORDER BY p.part_no""",
-            {"s": search, "like": like},
+            {"s": search, "like": like, "retired": 1 if include_retired else 0},
         ).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    for r in out:
+        r["retired"] = bool(r.get("retired_at"))
+    return out
 
 
 def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
@@ -62,10 +72,11 @@ def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
         if head is None:
             return None
         assembly = dict(head)
+        assembly["retired"] = bool(assembly.get("retired_at"))
         lines = [dict(r) for r in conn.execute(
             """SELECT b.id, b.qty_per, b.refdes, b.line_no, b.comments,
                       c.id AS child_id, c.part_no AS child_part_no, c.value AS child_value,
-                      c.kind AS child_kind, c.category AS child_category,
+                      c.kind AS child_kind, c.category AS child_category, c.retired_at AS child_retired_at,
                       c.unit_cost AS child_unit_cost, c.exclude_from_bom_cost AS exclude_from_bom_cost
                FROM bom_lines b JOIN parts c ON c.id = b.child_id
                WHERE b.parent_id = ?
@@ -75,6 +86,7 @@ def get_assembly(db: Database, part_id: int, build_qty: int = 1) -> dict | None:
         for ln in lines:
             qty_per = ln["qty_per"] or 0
             ln["exclude_from_bom_cost"] = bool(ln["exclude_from_bom_cost"])
+            ln["child_retired"] = bool(ln.pop("child_retired_at"))
             # Price the child at the tier for the quantity this build consumes (qty_per × build_qty),
             # from the same basis as loaded, so material × overhead == loaded and both re-price with
             # the build volume without drifting when cost tiers are refreshed.

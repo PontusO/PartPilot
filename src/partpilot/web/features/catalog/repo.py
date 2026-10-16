@@ -95,18 +95,20 @@ def categories(db: Database) -> list[dict]:
 def list_parts(
     db: Database, *, search: str | None = None, category: str | None = None,
     stocked_only: bool = False, limit: int = 100, offset: int = 0,
+    include_retired: bool = False,
 ) -> tuple[list[dict], int]:
     like = f"%{search}%" if search else None
     where = (
         "WHERE p.kind != 'ASSY' "
         f"AND {_CURRENT_VERSION} "
+        "AND (:retired = 1 OR p.retired_at IS NULL) "
         "AND (:search IS NULL OR p.part_no LIKE :like OR p.value LIKE :like "
         "OR p.mfr_pno LIKE :like OR p.description LIKE :like) "
         "AND (:category IS NULL OR p.category = :category) "
         "AND (:stocked = 0 OR p.normally_stocked = 1)"
     )
     params = {"search": search, "like": like, "category": category,
-              "stocked": 1 if stocked_only else 0}
+              "stocked": 1 if stocked_only else 0, "retired": 1 if include_retired else 0}
     with db.connect() as conn:
         total = conn.execute(
             f"SELECT COUNT(*) FROM parts p {where}", params
@@ -114,7 +116,7 @@ def list_parts(
         rows = conn.execute(
             f"""SELECT p.id, p.part_no, p.value, p.category, p.kind,
                        p.total_qty, p.total_alloc, p.min_qty, p.unit_cost, p.external_price,
-                       p.unlimited_stock, p.normally_stocked, p.version_status,
+                       p.unlimited_stock, p.normally_stocked, p.version_status, p.retired_at,
                        (SELECT COUNT(*) FROM parts g
                         WHERE COALESCE(g.version_group_id, g.id) = COALESCE(p.version_group_id, p.id))
                            AS version_count,
@@ -132,6 +134,7 @@ def list_parts(
         d["unit_price"] = _unit_price(d["price_per_uom"], d["qty_per_uom"])
         d["unlimited"] = bool(d["unlimited_stock"])
         d["normally_stocked"] = bool(d["normally_stocked"])
+        d["retired"] = bool(d.get("retired_at"))
         # An unlimited part never runs out, so it can never be below its reorder point.
         d["below_min"] = (not d["unlimited"]) and d["free"] < (d["min_qty"] or 0)
         parts.append(d)
@@ -202,22 +205,26 @@ def get_part(db: Database, part_id: int) -> dict | None:
     part["normally_stocked"] = bool(part.get("normally_stocked"))
     part["exclude_from_bom_cost"] = bool(part.get("exclude_from_bom_cost"))
     part["is_document"] = bool(part.get("is_document"))
+    part["retired"] = bool(part.get("retired_at"))
     part["free"] = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
     return part
 
 
 def summary(db: Database) -> dict:
     with db.connect() as conn:
-        n_parts = conn.execute("SELECT COUNT(*) FROM parts WHERE kind != 'ASSY'").fetchone()[0]
+        # Retired parts are out of every count: they are hidden from the list by default.
+        n_parts = conn.execute(
+            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND retired_at IS NULL").fetchone()[0]
         n_cats = conn.execute(
-            "SELECT COUNT(DISTINCT category) FROM parts WHERE kind != 'ASSY'"
+            "SELECT COUNT(DISTINCT category) FROM parts WHERE kind != 'ASSY' AND retired_at IS NULL"
         ).fetchone()[0]
         n_below = conn.execute(
-            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND unlimited_stock = 0 "
-            "AND (total_qty - total_alloc) < min_qty AND min_qty > 0"
+            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND retired_at IS NULL "
+            "AND unlimited_stock = 0 AND (total_qty - total_alloc) < min_qty AND min_qty > 0"
         ).fetchone()[0]
         n_stocked = conn.execute(
-            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND normally_stocked = 1"
+            "SELECT COUNT(*) FROM parts WHERE kind != 'ASSY' AND retired_at IS NULL "
+            "AND normally_stocked = 1"
         ).fetchone()[0]
     return {"parts": n_parts, "categories": n_cats, "below_min": n_below,
             "normally_stocked": n_stocked}

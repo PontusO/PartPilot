@@ -1952,3 +1952,23 @@ def test_convert_requires_write_role(app):
     assert ware.post(f"/assemblies/{aid}/convert-to-component",
                      follow_redirects=False).status_code == 403
 
+
+
+def test_show_retired_toggle_on_parts_and_assemblies_lists(app):
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import lifecycle
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    pid = catrepo.create_part(db, part={"part_no": "OLD-COMP"}, supplier_lines=[])
+    asm = asmrepo.create_assembly(db, {"part_no": "OLD-ASSY"})
+    lifecycle.retire_part(db, pid)
+    lifecycle.retire_part(db, asm)
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")
+    assert "OLD-COMP" not in client.get("/catalog").text
+    page = client.get("/catalog?retired=1").text
+    assert "OLD-COMP" in page and "Retired" in page
+    assert "OLD-ASSY" not in client.get("/assemblies").text
+    assert "OLD-ASSY" in client.get("/assemblies?retired=1").text
+    assert "Retired" in client.get(f"/catalog/{pid}").text
+    assert "Retired" in client.get(f"/assemblies/{asm}").text

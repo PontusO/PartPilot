@@ -593,3 +593,17 @@ def test_convert_used_in_links_survive(db):
     repo.convert_to_component(db, s)
     parent = repo.get_assembly(db, a)
     assert "SUB-1" in {ln["child_part_no"] for ln in parent["lines"]}
+
+
+def test_list_assemblies_hides_retired_unless_asked(db):
+    from partpilot.web.features.catalog import lifecycle
+    a, s, c1, c2 = _setup(db)
+    lifecycle.retire_part(db, s)
+    ids = {r["id"] for r in repo.list_assemblies(db)}
+    assert a in ids and s not in ids
+    shown = {r["id"]: r for r in repo.list_assemblies(db, include_retired=True)}
+    assert s in shown and shown[s]["retired"] is True
+    assert repo.summary(db)["assemblies"] == 1
+    detail = repo.get_assembly(db, a)
+    assert detail["retired"] is False
+    assert {ln["child_id"]: ln["child_retired"] for ln in detail["lines"]}[s] is True

@@ -187,7 +187,7 @@ def _render_edit_form(request: Request, part: dict, *, notice: str | None = None
 
 @router.get("", response_class=HTMLResponse)
 def parts_list(request: Request, q: str | None = None, category: str | None = None,
-               stocked: bool = False, page: int = 1):
+               stocked: bool = False, retired: bool = False, page: int = 1):
     user = require_user(request)
     db = request.app.state.database
     templates = request.app.state.templates
@@ -196,7 +196,7 @@ def parts_list(request: Request, q: str | None = None, category: str | None = No
     search = (q or "").strip() or None
     category = (category or "").strip() or None
     parts, total = repo.list_parts(
-        db, search=search, category=category, stocked_only=stocked,
+        db, search=search, category=category, stocked_only=stocked, include_retired=retired,
         limit=_PAGE_SIZE, offset=(page - 1) * _PAGE_SIZE
     )
     return templates.TemplateResponse(
@@ -206,6 +206,7 @@ def parts_list(request: Request, q: str | None = None, category: str | None = No
             "parts": parts, "total": total, "page": page, "page_size": _PAGE_SIZE,
             "has_prev": page > 1, "has_next": page * _PAGE_SIZE < total,
             "q": search or "", "category": category or "", "stocked": stocked,
+            "retired": retired,
             "categories": repo.categories(db), "summary": repo.summary(db),
             "can_add": user.role in CATALOG_WRITE_ROLES,
         },
