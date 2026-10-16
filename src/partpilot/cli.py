@@ -54,9 +54,9 @@ def _open_live_db():
     from .web.app import FEATURES
     from .web.core import FeatureRegistry
     from .web.core.db import Database
-    from .web.core.paths import db_path
+    from .web.core.paths import data_dir, db_path
 
-    db = Database(db_path())
+    db = Database(db_path(), backup_dir=data_dir() / "backups")
     registry = FeatureRegistry()
     registry.register(*FEATURES)
     db.apply_migrations(registry)

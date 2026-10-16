@@ -8,9 +8,10 @@ and shows its nav entry to the right roles — the feature never edits the core.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from fastapi import APIRouter
 
@@ -34,11 +35,13 @@ class NavItem:
 
 @dataclass(frozen=True)
 class Migration:
-    """One ordered schema change owned by a feature. SQL may hold several statements."""
+    """One ordered schema change owned by a feature. ``sql`` is either a SQL script (several
+    statements allowed) or a callable ``fn(conn)`` for migrations that must branch on the live
+    schema (e.g. "does another feature's table exist yet?")."""
 
     version: int
     name: str
-    sql: str
+    sql: str | Callable[[sqlite3.Connection], None]
 
 
 @dataclass

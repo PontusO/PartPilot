@@ -93,7 +93,7 @@ def create_app(
     registry = FeatureRegistry()
     registry.register(*FEATURES)
 
-    database = Database(resolved_db)
+    database = Database(resolved_db, backup_dir=resolved_data_dir / "backups")
     database.apply_migrations(registry)
 
     secret_key = secret_key or os.getenv("PARTPILOT_SECRET_KEY")
