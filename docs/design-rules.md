@@ -245,3 +245,9 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `purchase_orders.repo.suppliers()`. The PO page links the supplier name to its contact; the PO PDF
   prints the contact's address block under "Supplier". Refusing a kind change on a referenced
   supplier renders in `.err` on the contact form.
+- **2026-10-16** — **Part lifecycle (retire → delete).** Part and assembly pages carry **Retire**
+  (active) or **Unretire** + admin-only **Delete** (retired) as real buttons in the `.act-bar`,
+  each destructive one behind `confirm()`; refusals render in `.err`. A retired part shows a
+  `badge muted` **Retired** in its `<h1>` and as a `retired` pill on BOM and work-order lines that
+  still reference it. Lists hide retired rows behind a **Show retired** checkbox that re-submits the
+  filter form (same pattern as "Normally stocked only").

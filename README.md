@@ -52,6 +52,9 @@ offers, stock, movement history and locations. Add/edit components with multiple
 per-part overhead factor. **Costing is two-layer:** captured supplier *cost* tiers → *loaded* cost
 tiers (cost × overhead), either generated from the default supplier's breaks or refreshed live from
 Digi-Key/Mouser. Stock movements (receive / issue / adjust) are posted from here, per shelf.
+A part can be **retired** (hidden from lists and pickers, never suggested for purchase or matched
+by the resolver, existing stock runs out) and, once retired and unreferenced by any order, work
+order, movement or BOM, **deleted** by an admin — the lifecycle applies to every version of the part.
 
 **Stock shelves (customer-owned stock).** A *shelf* is a stock location with an owner: **ours**
 ("Main", plus any others you add) or a **customer's**. Customer shelves hold parts the customer paid
@@ -83,7 +86,8 @@ family's documents, and material / loaded price cards at a chosen build quantity
 edited inline, the whole BOM downloads as `.xlsx`, and **Import BOM** runs a CSV through the same
 resolver as Purchasing (resolve → review → apply: existing parts linked, resolved parts offered as
 new, under-specified lines tagged *manual*). A devmgmt panel publishes the product's
-model/variant (see Integrations).
+model/variant (see Integrations). **Retire / Unretire / Delete** follow the part lifecycle above: a
+retired assembly takes no new work orders but its finished boards can still be despatched.
 
 ### Versioning (parts and assemblies)
 Several versions of the same part number can coexist. **New version** clones a part or assembly

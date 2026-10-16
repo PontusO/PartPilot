@@ -162,6 +162,12 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   {admin, purchasing}`. Nav visibility and route gating both use these. Not-yet-built sections are
   greyed placeholder nav entries via `make_placeholder()`.
 - DB uses WAL mode (concurrent readers + single writer) for multi-user LAN access.
+- **Part lifecycle:** `parts.retired_at` (catalog v24) + `catalog/lifecycle.py` (retire/unretire/
+  delete act on the whole version group). Every picker, purchase-suggestion and stock-index query
+  filters `retired_at IS NULL`; write paths that take a part id refuse retired parts; delete is
+  admin-only and blocked by any referencing row (`lifecycle.delete_blockers`). **A new feature that
+  lists parts for selection must add the same filter**, and a new table referencing `parts` must be
+  added to `lifecycle._BLOCKERS`.
 
 ### PartPilot is the system of record (miniMRP decommissioned)
 
