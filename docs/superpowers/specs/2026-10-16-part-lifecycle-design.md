@@ -100,9 +100,12 @@ stays taken. "Convert to component" works on a retired assembly and leaves `reti
   pre-check never reports a retired part as covering a line.
 - `catalog.import_parts` (bulk BOM import into the catalog, used by the Purchasing screen and the
   assemblies BOM importer): `find_part_id_by_mpn` gains `include_retired: bool = False`. When the
-  only catalog match for a line is retired, the line is **not linked** and is reported with the
-  note `matches retired part <part_no>`; it is created as a new part only if the operator accepts
-  it like any other new line. The planner never silently lands on a retired part.
+  only catalog match for a line is retired, the line is **not linked**, is shown on the review
+  screen with the note `matches retired part <part_no>`, and the apply step **neither links nor
+  creates** it (creating would duplicate the part number); it counts as skipped. The planner
+  never silently lands on a retired part.
+- `work_orders.repo.create_work_orders_for_order` (build to fulfil a customer order) applies the
+  same "retired and cannot be built" refusal as `create_work_order`.
 - WooCommerce sync: `_reconcile_one` skips a product whose matching part is retired, with the
   report note `part is retired`. It does not create a duplicate.
 
