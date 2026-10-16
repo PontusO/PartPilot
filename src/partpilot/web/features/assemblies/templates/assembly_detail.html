@@ -93,11 +93,22 @@
     <a href="/assemblies/{{ a.id }}/import" class="act-btn">Import BOM (.csv)</a>
     <button type="button" class="act-btn" onclick="openAdd()">Add Component to Assy</button>
     <button type="submit" class="act-btn" form="convertForm">Convert to component</button>
+    {% if not a.retired %}
+    <button type="submit" class="act-btn" form="retireForm">Retire</button>
+    {% else %}
+    <button type="submit" class="act-btn" form="unretireForm">Unretire</button>
+    {% if can_delete %}<button type="submit" class="act-btn danger" form="deleteForm">Delete</button>{% endif %}
+    {% endif %}
     {% endif %}
   </div>
   {% if can_edit %}
   <form id="convertForm" method="post" action="/assemblies/{{ a.id }}/convert-to-component"
         onsubmit="return confirm('Convert {{ a.part_no }} from an assembly to a plain component? It moves to the Parts catalog. (Only allowed when it has no BOM lines or work orders.)');"></form>
+  <form id="retireForm" method="post" action="/assemblies/{{ a.id }}/retire"
+        onsubmit="return confirm('Retire {{ a.part_no }}? No new work orders can be raised for it and it leaves the lists and pickers. Existing stock can still be despatched.');"></form>
+  <form id="unretireForm" method="post" action="/assemblies/{{ a.id }}/unretire"></form>
+  <form id="deleteForm" method="post" action="/assemblies/{{ a.id }}/delete"
+        onsubmit="return confirm('Delete {{ a.part_no }} permanently? Only possible when no order, work order, stock movement or parent BOM references it.');"></form>
   {% endif %}
 
   {% if notice %}<div style="background:rgba(70,180,120,.12); border:1px solid var(--ok);

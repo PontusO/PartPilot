@@ -140,6 +140,24 @@ Older parts may carry a Digi-Key or Mouser order code as their part number. Setu
 cleanup** lists them, looks up the real manufacturer part number and promotes it, moving the order
 code to the supplier row. See *Setup & Tools*.
 
+### Retiring and deleting a part
+
+A part is never deleted straight away. First **"Retire"** it (admin or purchasing): the part leaves
+the Parts list and every picker, is never suggested for purchase, and the BOM resolver no longer
+counts its stock. Everything that already references it keeps working: existing stock can still be
+issued or despatched, old orders and work orders still show it, and an assembly whose BOM lists it
+still builds and consumes it (the BOM line shows a **retired** badge). Tick **"Show retired"** on
+the Parts list to see retired parts; a retired part carries a **Retired** badge and an
+**"Unretire"** button. Retiring applies to every version of the part.
+
+Only an admin can **"Delete"** a part, and only once it is retired. Deleting removes every version
+of the part together with its supplier offers, price tiers and stock rows. It is refused while
+anything historical still points at the part: work orders or their lines, customer order lines,
+despatch lines, purchase order or goods receipt lines, stock movements, another assembly's BOM, or
+a devmgmt variant. The refusal lists what blocks it, for example *"Cannot delete R-1: 3 work orders,
+12 stock movements, used in 2 assemblies."* In practice a part that has ever been built, bought or
+sold can only be retired; delete is for parts created by mistake.
+
 ## Stock and shelves
 
 ### What a shelf is
@@ -233,6 +251,7 @@ Actions:
   are kept at their stored price and reported as "In stock, kept".
 - **"Export BOM (.xlsx)"** downloads the priced BOM at the current build volume.
 - **"Convert to component"** turns an empty assembly back into a plain part.
+- **"Retire"**, **"Unretire"** and **"Delete"**: see *Retiring and deleting an assembly*.
 
 Below the BOM, the **Documents** panel lists the controlled documents of the product family
 (drawings, specs, software) with **"＋ New document"**, and the **Device management (devmgmt)**
@@ -267,6 +286,17 @@ instead, which lets you map columns and can wrap the result into a new assembly.
 Versions work as for parts (see *Parts → Versions*): **"＋ New version"** clones the BOM,
 suppliers and pricing into a draft; **"Release"** makes it current. Work orders and orders already
 raised stay pinned to the version they were created against.
+
+### Retiring and deleting an assembly
+
+Assemblies follow the part rules (see *Parts → Retiring and deleting a part*). **"Retire"** (admin
+or purchasing) removes the assembly from the Assemblies list, the **New Work Order** picker and the
+customer-order product picker, and refuses new work orders for it; finished boards on the shelf can
+still be despatched. Tick **"Show retired"** on the Assemblies list to find it again, and
+**"Unretire"** brings it back. **"Delete"** (admin only, after retiring) removes the assembly and
+its own BOM lines; it is refused while any work order, order line, stock movement, parent BOM or
+devmgmt variant references it.
+
 ## Customer orders
 
 A customer order is the commercial record: who ordered what, at which price, and by when. Everything
@@ -386,8 +416,8 @@ order's Required date, drawing from the chosen shelf.
 
 ### Creating a stand-alone work order
 
-**Work Orders → "New Work Order"**. Choose the **Assembly to build** (only assemblies with a BOM
-are offered), **Build quantity**, the **Shelf** components are issued from, **Planned finish**
+**Work Orders → "New Work Order"**. Choose the **Assembly to build** (only active assemblies with
+a BOM are offered; a retired assembly cannot be built), **Build quantity**, the **Shelf** components are issued from, **Planned finish**
 and **Build days (working)**. Build days default from the assembly. **Work order no.** is
 assigned as `WO-NNNNN` if left blank. The shelf cannot be changed after creation.
 
@@ -502,6 +532,8 @@ The suggestions page lists every part that is short, grouped by **shelf** and th
 - Parts with no supplier are listed under **No supplier** and cannot be ordered until you add one
   on the part.
 - Cost-only parts (unlimited stock) are never suggested.
+- A **retired** part is never suggested, even when a work order is short of it: retired means run
+  out, don't re-buy.
 
 Untick lines or whole suppliers, adjust **Order qty**, and press **"Create draft purchase
 orders"**. One draft PO is created per supplier per shelf, receiving into that shelf. Distributor

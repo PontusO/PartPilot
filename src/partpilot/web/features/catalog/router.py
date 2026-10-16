@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
-from . import repo, stock, versions
+from . import lifecycle, repo, stock, versions
 
 router = APIRouter(prefix="/catalog")
 
@@ -21,6 +21,8 @@ CATALOG_WRITE_ROLES = frozenset({"admin", "purchasing"})
 STOCK_MOVE_ROLES = frozenset({"admin", "warehouse", "purchasing"})
 # Renaming / retiring shelves is structural: admin only. Creating one is a purchasing act.
 SHELF_ADMIN_ROLES = frozenset({"admin"})
+# Deleting a (retired) part is irreversible: admin only. Retire/unretire use CATALOG_WRITE_ROLES.
+PART_DELETE_ROLES = frozenset({"admin"})
 
 
 def _num(v) -> float | None:
@@ -436,9 +438,8 @@ def shelf_retire(request: Request, location_id: int):
     return RedirectResponse("/catalog/shelves", status_code=303)
 
 
-@router.get("/{part_id}", response_class=HTMLResponse)
-def part_detail(request: Request, part_id: int, shelf: int | None = None):
-    user = require_user(request)
+def _render_part_detail(request: Request, part_id: int, user, *, error: str | None = None,
+                        status: int = 200, shelf: int | None = None):
     db = request.app.state.database
     templates = request.app.state.templates
     part = repo.get_part(db, part_id)
@@ -447,15 +448,56 @@ def part_detail(request: Request, part_id: int, shelf: int | None = None):
             request, "error.html", {"message": "Part not found."}, status_code=404
         )
     group_id = part.get("version_group_id") or part_id
-    version_list = versions.list_versions(db, group_id)
     return templates.TemplateResponse(
         request, "part_detail.html",
         {"part": part, "can_edit": user.role in CATALOG_WRITE_ROLES,
+         "can_delete": user.role in PART_DELETE_ROLES,
          "can_move": user.role in STOCK_MOVE_ROLES,
          "movements": stock.movements_for_part(db, part_id),
          "locations": repo.locations(db), "shelf_selected": shelf,
-         "versions": version_list, "version_base": "/catalog"},
+         "versions": versions.list_versions(db, group_id), "version_base": "/catalog",
+         "error": error},
+        status_code=status,
     )
+
+
+@router.get("/{part_id}", response_class=HTMLResponse)
+def part_detail(request: Request, part_id: int, shelf: int | None = None):
+    user = require_user(request)
+    return _render_part_detail(request, part_id, user, shelf=shelf)
+
+
+# ---- lifecycle: retire → (admin) delete ----
+
+@router.post("/{part_id}/retire")
+def retire(request: Request, part_id: int):
+    user = require_role(request, CATALOG_WRITE_ROLES)
+    try:
+        lifecycle.retire_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_part_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/catalog/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/unretire")
+def unretire(request: Request, part_id: int):
+    user = require_role(request, CATALOG_WRITE_ROLES)
+    try:
+        lifecycle.unretire_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_part_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/catalog/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/delete")
+def delete(request: Request, part_id: int):
+    """Admin only; refused unless retired and unreferenced (lifecycle.delete_part explains why)."""
+    user = require_role(request, PART_DELETE_ROLES)
+    try:
+        lifecycle.delete_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_part_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse("/catalog", status_code=303)
 
 
 # ---- versioning ----

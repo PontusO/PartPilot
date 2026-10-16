@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from partpilot.devmgmt import DevmgmtConfig
 
 from ...core.deps import require_role, require_user
-from ..catalog import devmgmt_outbox, devmgmt_repo, versions as catalog_versions
+from ..catalog import devmgmt_outbox, devmgmt_repo, lifecycle, versions as catalog_versions
 from ..purchasing.service import resolve_bom_file
 from . import export_xlsx, repo
 from .import_bom import apply_import_plan, build_import_plan
@@ -24,6 +24,8 @@ router = APIRouter(prefix="/assemblies")
 
 # Roles allowed to edit a BOM (same as catalog writes).
 ASSEMBLY_WRITE_ROLES = frozenset({"admin", "purchasing"})
+# Deleting a (retired) assembly is irreversible: admin only.
+ASSEMBLY_DELETE_ROLES = frozenset({"admin"})
 
 # The three ways a component's factory firmware is written on the board (docs §5.2).
 UPDATE_METHODS = ("ota_via_mcu", "local_serial", "local_usb")
@@ -250,6 +252,7 @@ def _render_detail(request: Request, part_id: int, user, error: str | None = Non
             # None on a normal GET; set only after "Refresh prices & estimate".
             "refreshed": refreshed,
             "can_edit": can_edit,
+            "can_delete": user.role in ASSEMBLY_DELETE_ROLES,
             "parts": repo.parts_for_picker(db, part_id) if can_edit else [],
             "error": error,
             "notice": notice,
@@ -410,6 +413,38 @@ def convert_to_component(request: Request, part_id: int):
         return _render_detail(request, part_id, user, error=str(exc), status=400)
     # It's now a component — its home is the catalog.
     return RedirectResponse(f"/catalog/{part_id}", status_code=303)
+
+
+# ---- lifecycle: retire → (admin) delete (shared catalog machinery, assembly-page redirects) ----
+
+@router.post("/{part_id}/retire")
+def retire(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    try:
+        lifecycle.retire_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/unretire")
+def unretire(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_WRITE_ROLES)
+    try:
+        lifecycle.unretire_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
+
+
+@router.post("/{part_id}/delete")
+def delete(request: Request, part_id: int):
+    user = require_role(request, ASSEMBLY_DELETE_ROLES)
+    try:
+        lifecycle.delete_part(request.app.state.database, part_id)
+    except ValueError as exc:
+        return _render_detail(request, part_id, user, error=str(exc), status=400)
+    return RedirectResponse("/assemblies", status_code=303)
 
 
 # ---- import a CSV BOM (reuses the purchasing tool's resolution) ----

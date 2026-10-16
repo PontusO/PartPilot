@@ -1972,3 +1972,54 @@ def test_show_retired_toggle_on_parts_and_assemblies_lists(app):
     assert "OLD-ASSY" in client.get("/assemblies?retired=1").text
     assert "Retired" in client.get(f"/catalog/{pid}").text
     assert "Retired" in client.get(f"/assemblies/{asm}").text
+
+
+def test_part_lifecycle_routes_and_roles(app):
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+    pid = catrepo.create_part(db, part={"part_no": "LC-1"}, supplier_lines=[])
+    buyer, admin = TestClient(app), TestClient(app)
+    _login(buyer, "buyer1", "pw")
+    _login(admin, "boss", "pw")
+
+    page = buyer.get(f"/catalog/{pid}").text
+    assert ">Retire<" in page and ">Delete<" not in page
+    # delete before retire → 400 with the refusal in .err
+    r = admin.post(f"/catalog/{pid}/delete", follow_redirects=False)
+    assert r.status_code == 400 and "Retire LC-1 before deleting it." in r.text
+    # purchasing retires
+    assert buyer.post(f"/catalog/{pid}/retire", follow_redirects=False).status_code == 303
+    assert catrepo.get_part(db, pid)["retired"] is True
+    page = admin.get(f"/catalog/{pid}").text
+    assert ">Unretire<" in page and ">Delete<" in page
+    assert ">Delete<" not in buyer.get(f"/catalog/{pid}").text        # admin-only button
+    # purchasing cannot delete
+    assert buyer.post(f"/catalog/{pid}/delete", follow_redirects=False).status_code == 403
+    # admin deletes → list
+    r = admin.post(f"/catalog/{pid}/delete", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/catalog"
+    assert catrepo.get_part(db, pid) is None
+
+
+def test_assembly_lifecycle_routes(app):
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    app.state.store.create_user("boss", "pw", role="admin")
+    asm = asmrepo.create_assembly(db, {"part_no": "LC-ASSY"})
+    comp = catrepo.create_part(db, part={"part_no": "LC-C"}, supplier_lines=[])
+    asmrepo.add_bom_line(db, asm, comp, 1, None)
+    admin = TestClient(app)
+    _login(admin, "boss", "pw")
+    assert ">Retire<" in admin.get(f"/assemblies/{asm}").text
+    assert admin.post(f"/assemblies/{asm}/retire", follow_redirects=False).status_code == 303
+    page = admin.get(f"/assemblies/{asm}").text
+    assert "Retired" in page and ">Unretire<" in page and ">Delete<" in page
+    assert admin.post(f"/assemblies/{asm}/unretire", follow_redirects=False).status_code == 303
+    assert asmrepo.get_assembly(db, asm)["retired"] is False
+    admin.post(f"/assemblies/{asm}/retire")
+    r = admin.post(f"/assemblies/{asm}/delete", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/assemblies"
+    assert asmrepo.get_assembly(db, asm) is None
+    assert catrepo.get_part(db, comp) is not None

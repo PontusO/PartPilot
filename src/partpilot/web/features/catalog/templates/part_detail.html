@@ -12,10 +12,29 @@
       {% if part.is_document %}<span class="badge muted" title="Internal document — a deliverable, not a stocked part">document</span>{% endif %}
       {% if part.exclude_from_bom_cost %}<span class="badge muted" title="Cost not counted in assembly BOM totals">no BOM cost</span>{% endif %}</h1>
     {% if can_edit %}
-    <a class="act-btn" href="/catalog/{{ part.id }}/edit">Edit</a>
+    <div class="act-bar" style="margin:0;">
+      <a class="act-btn" href="/catalog/{{ part.id }}/edit">Edit</a>
+      {% if not part.retired %}
+      <form method="post" action="/catalog/{{ part.id }}/retire"
+            onsubmit="return confirm('Retire {{ part.part_no }}? It leaves the lists and pickers and will not be bought again. Existing stock can still be used.');">
+        <button type="submit" class="act-btn">Retire</button>
+      </form>
+      {% else %}
+      <form method="post" action="/catalog/{{ part.id }}/unretire">
+        <button type="submit" class="act-btn">Unretire</button>
+      </form>
+      {% if can_delete %}
+      <form method="post" action="/catalog/{{ part.id }}/delete"
+            onsubmit="return confirm('Delete {{ part.part_no }} permanently? Only possible when nothing references it.');">
+        <button type="submit" class="act-btn danger">Delete</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </div>
     {% endif %}
   </div>
   <p class="note">{{ part.value or '' }}{% if part.description %} — {{ part.description }}{% endif %}</p>
+  {% if error %}<div class="err" style="margin-bottom:1rem;">{{ error }}</div>{% endif %}
 
   <div class="cards">
     <div class="card"><b>{{ '∞' if part.unlimited else "%.0f"|format(part.free) }}</b><small>free</small></div>
