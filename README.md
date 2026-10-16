@@ -144,7 +144,12 @@ invoice). Saving a supplier contact mirrors it into the catalog's `suppliers` ta
 part-edit and PO forms read.
 
 ### Reports
-Stock-movement ledger, filterable by date range and movement type.
+Stock-movement ledger, filterable by date range, movement type and shelf.
+
+### Manual
+The end-user manual, [`docs/user-manual.md`](docs/user-manual.md), rendered in-app at `/help` for
+every role (nav 📖 Manual). Organised by workflow and quoting the real button labels — keep it in
+step when a screen or rule changes.
 
 ### Setup & Tools (admin)
 **Import parts from BOM** (upload any CSV/Excel part list, map its columns to PartPilot fields —

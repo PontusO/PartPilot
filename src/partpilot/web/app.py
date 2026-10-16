@@ -33,6 +33,7 @@ from .features.customer_orders import feature as customer_orders_feature
 from .features.despatch import feature as despatch_feature
 from .features.documents import feature as documents_feature
 from .features.goods_receipts import feature as goods_receipts_feature
+from .features.help import feature as help_feature
 from .features.planning import feature as planning_feature
 from .features.purchase_orders import feature as purchase_orders_feature
 from .features.purchasing import feature as purchasing_feature
@@ -61,6 +62,7 @@ FEATURES = [
     purchase_orders_feature,                                                 # order 45
     goods_receipts_feature,                                                   # order 46 (views PO-owned GRN tables)
     reports_feature,                                                         # Reports (order 70)
+    help_feature,                                                            # Manual (order 75); no tables
     setup_feature,                                                          # Setup & Tools (order 80)
 ]
 

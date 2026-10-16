@@ -232,3 +232,11 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   Shelf pages (`shelves.html`, `shelf.html`) follow the list/detail pattern with real row buttons;
   the PO suggestions table gains a shelf header row above each supplier header row. Create-shelf
   errors bounce back to the origin page via `?shelf_error=` and render as `.err`.
+- **2026-10-16** — **In-app user manual** (`/help`, nav 📖 "Manual" order 75, every role). One
+  Markdown source, `docs/user-manual.md`, rendered by the `help` feature with the `markdown`
+  package; headings get `id` anchors so screens can deep-link to a chapter (`/help#work-orders`).
+  Layout pattern for long-form text: a sticky left **table of contents** column (`.manual-toc`,
+  240px, chapters bold with sections indented under a `--line` rule) beside a `.manual-body`
+  column capped at 820px; chapters separated by a `--line` top border; hover shows a copyable `#`
+  anchor. Manual copy quotes UI labels exactly as rendered — **when a label, flow or rule changes,
+  update the manual in the same commit.**

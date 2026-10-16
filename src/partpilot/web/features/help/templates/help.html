@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}User manual · PartPilot{% endblock %}
+{% block content %}
+<style>
+  .manual { display:grid; grid-template-columns: 240px minmax(0, 1fr); gap:1.5rem; align-items:start; }
+  .manual-toc { position:sticky; top:1rem; max-height:calc(100vh - 2rem); overflow-y:auto;
+                font-size:.85rem; padding-right:.5rem; }
+  .manual-toc ol { list-style:none; margin:0; padding:0; }
+  .manual-toc > ol > li { margin:.25rem 0; }
+  .manual-toc > ol > li > a { font-weight:600; }
+  .manual-toc ol ol { margin:.15rem 0 .4rem .8rem; border-left:1px solid var(--line); padding-left:.6rem; }
+  .manual-toc ol ol li { margin:.1rem 0; }
+  .manual-toc a { color:var(--muted); text-decoration:none; display:block; padding:.1rem 0; }
+  .manual-toc a:hover { color:var(--fg); }
+  .manual-body { max-width:820px; line-height:1.55; }
+  .manual-body h2 { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line); }
+  .manual-body h2:first-child { margin-top:0; padding-top:0; border-top:0; }
+  .manual-body h3 { margin-top:1.6rem; }
+  .manual-body h4 { margin-top:1.2rem; color:var(--muted); font-size:.95rem; text-transform:uppercase; letter-spacing:.03em; }
+  .manual-body p, .manual-body li { color:var(--fg); }
+  .manual-body li { margin:.2rem 0; }
+  .manual-body code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.9em;
+                      background:#0d1219; border:1px solid var(--line); border-radius:4px; padding:.05rem .3rem; }
+  .manual-body pre { background:#0d1219; border:1px solid var(--line); border-radius:8px; padding:.8rem 1rem; overflow-x:auto; }
+  .manual-body pre code { border:0; padding:0; background:transparent; }
+  .manual-body table { margin:.8rem 0 1.2rem; }
+  .manual-body blockquote { margin:1rem 0; padding:.6rem 1rem; border-left:3px solid var(--accent);
+                            background:#0d1219; border-radius:0 8px 8px 0; color:var(--fg); }
+  .manual-body blockquote p { margin:.2rem 0; }
+  .manual-body h2 a.anchor, .manual-body h3 a.anchor { color:var(--muted); text-decoration:none; margin-left:.4rem;
+                            opacity:0; font-weight:400; }
+  .manual-body h2:hover a.anchor, .manual-body h3:hover a.anchor { opacity:1; }
+  .manual-body h2, .manual-body h3 { scroll-margin-top:1rem; }
+  @media (max-width: 900px) { .manual { grid-template-columns: 1fr; } .manual-toc { position:static; max-height:none; } }
+</style>
+<div class="panel">
+  <h1>User manual</h1>
+  <p class="note">How to use PartPilot, organised by the jobs you do. Every heading is a link you can
+    share — hover a heading and copy its <span class="code">#</span>.</p>
+  <div class="manual" style="margin-top:1.2rem;">
+    <nav class="manual-toc" aria-label="Contents">
+      <ol>
+        {% for ch in toc %}
+        <li><a href="#{{ ch.slug }}">{{ ch.title }}</a>
+          {% if ch.sections %}<ol>{% for s in ch.sections %}<li><a href="#{{ s.slug }}">{{ s.title }}</a></li>{% endfor %}</ol>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </nav>
+    <article class="manual-body">{{ body | safe }}</article>
+  </div>
+</div>
+<script>
+  // Add a copyable "#" link to each chapter/section heading.
+  document.querySelectorAll('.manual-body h2[id], .manual-body h3[id]').forEach(h => {
+    const a = document.createElement('a'); a.className = 'anchor'; a.href = '#' + h.id; a.textContent = '#';
+    a.title = 'Link to this section'; h.appendChild(a);
+  });
+</script>
+{% endblock %}
