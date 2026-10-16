@@ -452,4 +452,15 @@ MIGRATIONS = [
         name="suppliers merge: part_suppliers.supplier_id -> contacts(id)",
         sql=_migrate_part_suppliers,
     ),
+    Migration(
+        version=24,
+        name="part lifecycle: retired_at",
+        # NULL = active. Set on every version of a group by catalog.lifecycle.retire_part; retired
+        # parts leave lists, pickers, purchase suggestions and the resolver's own-stock check but
+        # stay resolvable by id so history keeps rendering. Delete is a separate, admin-only step.
+        sql="""
+        ALTER TABLE parts ADD COLUMN retired_at TEXT;
+        CREATE INDEX ix_parts_retired ON parts(retired_at);
+        """,
+    ),
 ]
