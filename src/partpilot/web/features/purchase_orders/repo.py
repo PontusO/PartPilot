@@ -130,7 +130,10 @@ def list_pos(db: Database, status: str | None = None, search: str | None = None)
 def get_po(db: Database, po_id: int) -> dict | None:
     with db.connect() as conn:
         head = conn.execute(
-            """SELECT p.*, s.name AS supplier_name, loc.name AS location_name, loc.kind AS location_kind
+            """SELECT p.*, s.name AS supplier_name, s.address AS supplier_address,
+                      s.postcode AS supplier_postcode, s.country AS supplier_country,
+                      s.org_no AS supplier_org_no, s.email AS supplier_email, s.phone AS supplier_phone,
+                      loc.name AS location_name, loc.kind AS location_kind
                FROM purchase_orders p
                LEFT JOIN contacts s ON s.id = p.supplier_id
                LEFT JOIN stock_locations loc ON loc.id = p.location_id WHERE p.id = ?""",
@@ -293,11 +296,16 @@ def create_po(db: Database, data: dict) -> int:
     with db.connect() as conn:
         if data.get("location_id"):
             catrepo.require_shelf(conn, data["location_id"])
+        currency = data.get("currency")
+        if not currency and data.get("supplier_id"):          # default from the supplier contact
+            row = conn.execute("SELECT currency FROM contacts WHERE id = ?",
+                               (data["supplier_id"],)).fetchone()
+            currency = row["currency"] if row else None
         po_id = conn.execute(
             "INSERT INTO purchase_orders (po_no, supplier_id, status, order_date, required_date, "
             "currency, notes, location_id) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)",
             (data.get("po_no"), data.get("supplier_id"), data.get("order_date"),
-             data.get("required_date"), data.get("currency"), data.get("notes"),
+             data.get("required_date"), currency, data.get("notes"),
              data.get("location_id") or stock.default_shelf(conn)),
         ).lastrowid
         if not data.get("po_no"):

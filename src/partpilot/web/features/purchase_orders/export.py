@@ -105,6 +105,14 @@ def po_pdf(po: dict, company: dict) -> bytes:
     pdf.cell(0, 6, "Supplier", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 5, _s(po.get("supplier_name") or "-"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    # Address block from the supplier contact (Contacts is the only supplier record); blank lines skipped.
+    pdf.set_font("Helvetica", "", 9)
+    for block in [po.get("supplier_address"), po.get("supplier_postcode"), po.get("supplier_country"),
+                  _kv("Org no", po.get("supplier_org_no")),
+                  _join_sep(po.get("supplier_email"), po.get("supplier_phone"))]:
+        for line in (block or "").splitlines():
+            if line.strip():
+                pdf.cell(0, 5, _s(line.strip()), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
     for label, value in [("PO number", po.get("po_no") or f"PO-{po['id']}"),
                          ("Order date", po.get("order_date") or ""),

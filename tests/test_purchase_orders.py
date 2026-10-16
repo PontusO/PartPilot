@@ -467,3 +467,39 @@ def test_receive_capped_at_outstanding(db):
     assert repo.get_po(db, po_id)["status"] == "received"
     with _pytest.raises(ValueError):                        # nothing left; a re-post is rejected
         repo.receive_po(db, po_id, {line_id: 1}, "u")
+
+
+def _pdf_text(pdf: bytes) -> str:
+    """Decode fpdf's (possibly flate-compressed) page streams enough to grep for literal strings."""
+    import re
+    import zlib
+    out = []
+    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, re.S):
+        data = m.group(1)
+        try:
+            data = zlib.decompress(data)
+        except zlib.error:
+            pass
+        out.append(data.decode("latin-1", "replace"))
+    return "\n".join(out)
+
+
+def test_po_pdf_prints_supplier_address_and_survives_blank_contact(db):
+    from partpilot.web.features.purchase_orders import export
+    full = conrepo.create_contact(db, {"kind": "supplier", "name": "Full Supplier", "address": "Storgatan 1\nBox 9",
+                                       "postcode": "123 45 Lund", "country": "Sweden", "org_no": "556677-8899",
+                                       "email": "sales@full.example", "phone": "+46 46 123", "currency": "EUR"})
+    bare = conrepo.create_contact(db, {"kind": "supplier", "name": "Bare Supplier"})
+    po_full = repo.create_po(db, {"supplier_id": full})
+    po_bare = repo.create_po(db, {"supplier_id": bare, "currency": "SEK"})
+    head = repo.get_po(db, po_full)
+    assert head["supplier_address"] == "Storgatan 1\nBox 9" and head["supplier_org_no"] == "556677-8899"
+    assert head["currency"] == "EUR"                       # defaulted from the contact
+    assert repo.get_po(db, po_bare)["currency"] == "SEK"    # explicit value wins
+    pdf = export.po_pdf(head, {})
+    assert pdf[:5] == b"%PDF-"
+    text = _pdf_text(pdf)
+    for needle in ("Storgatan 1", "Box 9", "123 45 Lund", "Sweden", "Org no: 556677-8899",
+                   "sales@full.example", "+46 46 123"):
+        assert needle in text, needle
+    assert export.po_pdf(repo.get_po(db, po_bare), {})[:5] == b"%PDF-"   # every optional line blank: no crash
