@@ -153,7 +153,7 @@ def _render_form(request: Request, *, action: str, heading: str, submit_label: s
             "stock": stock or {}, "error": error, "notice": notice,
             "sell_tier_rows": sell_tier_rows or [], "part_id": part_id,
             "categories": repo.categories(db), "suppliers": repo.suppliers(db),
-            "locations": repo.locations(db),
+            "locations": repo.locations(db, kind="ours"),
         },
         status_code=400 if error else 200,
     )

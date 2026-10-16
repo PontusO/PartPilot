@@ -113,26 +113,32 @@
   </div>
   {% endif %}
 
-  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock by location</h2>
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock by shelf</h2>
+  <p class="note">Ours: <b>{{ "%g"|format(part.stock_ours) }}</b> · Customer-owned: <b>{{ "%g"|format(part.stock_customer) }}</b>
+    <span class="flag">— only our shelves count in totals, valuation and the webshop.</span></p>
   <table>
     <thead>
-      <tr><th>Location</th><th>Bin</th><th class="num">On hand</th><th class="num">Allocated</th><th class="num">On order</th></tr>
+      <tr><th>Shelf</th><th>Kind</th><th>Bin</th><th class="num">On hand</th><th class="num">Allocated</th><th class="num">Free</th></tr>
     </thead>
     <tbody>
       {% for st in part.stock %}
       <tr>
-        <td>{{ st.location_name or '' }}</td><td>{{ st.bin or '' }}</td>
-        <td class="num">{{ "%.0f"|format(st.on_hand) }}</td>
-        <td class="num">{{ "%.0f"|format(st.allocated) }}</td>
-        <td class="num">{{ "%.0f"|format(st.on_order) }}</td>
+        <td>{% if st.location_id %}<a href="/catalog/shelves/{{ st.location_id }}">{{ st.location_name or '' }}</a>{% endif %}
+            {% if st.retired_at %}<span class="badge muted">retired</span>{% endif %}</td>
+        <td>{% if st.kind == 'customer' %}<span class="badge warn">customer</span>{% else %}<span class="badge stock">ours</span>{% endif %}</td>
+        <td>{{ st.bin or '' }}</td>
+        <td class="num">{% if st.on_hand < 0 %}<span class="badge bad">{{ "%g"|format(st.on_hand) }}</span>{% else %}{{ "%g"|format(st.on_hand) }}{% endif %}</td>
+        <td class="num">{{ "%g"|format(st.allocated or 0) }}</td>
+        <td class="num">{{ "%g"|format((st.on_hand or 0) - (st.allocated or 0)) }}</td>
       </tr>
       {% endfor %}
-      {% if not part.stock %}<tr><td colspan="5" class="note">No stock records.</td></tr>{% endif %}
+      {% if not part.stock %}<tr><td colspan="6" class="note">No stock records.</td></tr>{% endif %}
     </tbody>
   </table>
 
   {% if can_move %}
-  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Adjust stock</h2>
+  <h2 id="adjust" style="font-size:1.05rem; margin-top:1.4rem;">Adjust stock</h2>
+  <p class="note">"Set on-hand to…" applies to the selected shelf only.</p>
   <form method="post" action="/catalog/{{ part.id }}/stock/move"
         style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end;
                background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:.9rem;">
@@ -149,12 +155,8 @@
     <div style="width:110px;"><label for="qty">Quantity</label>
       <input id="qty" name="qty" type="number" step="any" min="0" required></div>
     {% if locations %}
-    <div><label for="location_id">Location</label>
-      <select id="location_id" name="location_id"
-              style="padding:.5rem .6rem; background:#0d1219; color:var(--fg);
-                     border:1px solid var(--line); border-radius:7px;">
-        {% for l in locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}
-      </select>
+    <div><label for="location_id">Shelf</label>
+      {% with shelves=locations, shelf_selected=none, shelf_field='location_id' %}{% include "_shelf_select.html" %}{% endwith %}
     </div>
     {% endif %}
     <div style="flex:1; min-width:160px;"><label for="note">Note</label>

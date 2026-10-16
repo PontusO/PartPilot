@@ -188,14 +188,16 @@ def get_part(db: Database, part_id: int) -> dict | None:
             (part_id,),
         )]
         stock = [dict(r) for r in conn.execute(
-            """SELECT pk.*, l.name AS location_name
+            """SELECT pk.*, l.name AS location_name, l.kind, l.owner_contact_id, l.retired_at
                FROM part_stock pk LEFT JOIN stock_locations l ON l.id = pk.location_id
-               WHERE pk.part_id = ? ORDER BY pk.id""",
+               WHERE pk.part_id = ? ORDER BY CASE l.kind WHEN 'ours' THEN 0 ELSE 1 END, pk.id""",
             (part_id,),
         )]
     part["suppliers"] = suppliers
     part["sell_tiers"] = sell_tiers
     part["stock"] = stock
+    part["stock_ours"] = sum((s["on_hand"] or 0) for s in stock if s.get("kind") == "ours")
+    part["stock_customer"] = sum((s["on_hand"] or 0) for s in stock if s.get("kind") == "customer")
     part["unlimited"] = bool(part.get("unlimited_stock"))
     part["normally_stocked"] = bool(part.get("normally_stocked"))
     part["exclude_from_bom_cost"] = bool(part.get("exclude_from_bom_cost"))
