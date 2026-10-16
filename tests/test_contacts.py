@@ -121,3 +121,18 @@ def test_addresses_cascade_on_contact_delete(db):
         conn.commit()
         assert conn.execute(
             "SELECT COUNT(*) FROM contact_addresses WHERE contact_id = ?", (cid,)).fetchone()[0] == 0
+
+
+def test_kind_change_refused_while_used_as_supplier(db):
+    from partpilot.web.features.catalog import repo as catrepo
+    sid = repo.create_contact(db, {"kind": "supplier", "name": "Acme Parts"})
+    catrepo.create_part(db, part={"part_no": "R-1"},
+                        supplier_lines=[{"supplier_name": "Acme Parts", "supplier_pno": "A", "unit_price": 0.1,
+                                         "reel_qty": 1, "is_default": True}], opening=None)
+    assert repo.supplier_references(db, sid) == {"parts": 1, "purchase_orders": 0, "goods_receipts": 0}
+    with pytest.raises(ValueError, match="1 part"):
+        repo.update_contact(db, sid, {"kind": "customer", "name": "Acme Parts"})
+    assert repo.get_contact(db, sid)["kind"] == "supplier"
+    repo.update_contact(db, sid, {"kind": "supplier", "name": "Acme Parts Ltd"})   # same kind: fine
+    unused = repo.create_contact(db, {"kind": "supplier", "name": "Nobody"})
+    repo.update_contact(db, unused, {"kind": "other", "name": "Nobody"})           # unreferenced: fine

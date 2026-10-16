@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...core.db import Database
+from ...core.db import Database, table_exists
 
 KINDS = ("supplier", "customer", "other")
 
@@ -55,7 +55,34 @@ def create_contact(db: Database, data: dict) -> int:
         return cur.lastrowid
 
 
+# (label in the error message, table whose supplier_id may point at a contact)
+_REFERENCING = (("parts", "part_suppliers"), ("purchase_orders", "purchase_orders"),
+                ("goods_receipts", "goods_receipts"))
+
+
+def supplier_references(db: Database, contact_id: int) -> dict[str, int]:
+    """How many part offers / POs / GRNs point at this contact as their supplier. Tables another
+    feature owns may be absent (partial test registries) and then count 0."""
+    out: dict[str, int] = {}
+    with db.connect() as conn:
+        for label, table in _REFERENCING:
+            out[label] = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE supplier_id = ?", (contact_id,)).fetchone()[0] \
+                if table_exists(conn, table) else 0
+    return out
+
+
 def update_contact(db: Database, contact_id: int, data: dict) -> None:
+    """Save a contact. Raises ValueError when ``kind`` would leave 'supplier' while parts, POs or
+    GRNs still reference the contact as their supplier (Contacts is the only supplier record)."""
+    current = get_contact(db, contact_id)
+    if current and current["kind"] == "supplier" and data.get("kind") != "supplier":
+        refs = supplier_references(db, contact_id)
+        if any(refs.values()):
+            raise ValueError(
+                f"{current['name']} is used as a supplier on {refs['parts']} part(s), "
+                f"{refs['purchase_orders']} purchase order(s) and {refs['goods_receipts']} goods "
+                f"receipt(s) — it must stay a supplier.")
     assignments = ", ".join(f"{f} = ?" for f in _FIELDS)
     with db.connect() as conn:
         conn.execute(

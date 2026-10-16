@@ -158,7 +158,14 @@ async def update(request: Request, contact_id: int):
             submit_label="Save changes", back_url=f"/contacts/{contact_id}", values=data,
             error="Company name is required.", status=400,
         )
-    repo.update_contact(db, contact_id, data)
+    try:
+        repo.update_contact(db, contact_id, data)
+    except ValueError as e:
+        return _render_form(
+            request, action=f"/contacts/{contact_id}/edit", heading="Edit contact",
+            submit_label="Save changes", back_url=f"/contacts/{contact_id}", values=data,
+            error=str(e), status=400,
+        )
     return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 

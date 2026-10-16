@@ -286,6 +286,20 @@ def test_supplier_contact_is_the_supplier_dropdown(app):
     assert "Widget Supply AB" in client.get("/purchase-orders/new").text
 
 
+def test_kind_change_of_referenced_supplier_shows_error(app):
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    client = TestClient(app); _login(client, "buyer1", "pw")
+    db = app.state.database
+    sid = conrepo.create_contact(db, {"kind": "supplier", "name": "Digi-Key"})
+    catrepo.create_part(db, part={"part_no": "C-1"},
+                        supplier_lines=[{"supplier_name": "Digi-Key", "supplier_pno": "D", "unit_price": 0.1,
+                                         "reel_qty": 1, "is_default": True}], opening=None)
+    r = client.post(f"/contacts/{sid}/edit", data={"kind": "customer", "name": "Digi-Key"})
+    assert r.status_code == 400 and "must stay a supplier" in r.text
+    assert conrepo.get_contact(db, sid)["kind"] == "supplier"
+
+
 def test_planning_calendar_events_and_reschedule(app):
     from partpilot.web.features.assemblies import repo as asmrepo
     from partpilot.web.features.catalog import repo as catrepo
