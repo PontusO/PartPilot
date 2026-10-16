@@ -6,6 +6,7 @@ from partpilot.web.features.article_register import feature as article_register_
 from partpilot.web.features.article_register import repo as ar_repo
 from partpilot.web.features.article_register.codes import article_code
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 from partpilot.web.features.documents import feature as documents_feature
 from partpilot.web.features.documents import repo
 
@@ -15,7 +16,7 @@ def db(tmp_path):
     database = Database(tmp_path / "a.db")
     reg = FeatureRegistry()
     # production order: catalog + article_register own the tables documents soft-joins by code.
-    reg.register(catalog_feature, article_register_feature, documents_feature)
+    reg.register(catalog_feature, contacts_feature, article_register_feature, documents_feature)
     database.apply_migrations(reg)
     return database
 

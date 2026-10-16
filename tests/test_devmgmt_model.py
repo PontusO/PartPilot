@@ -3,6 +3,7 @@ import pytest
 from partpilot.web.core import FeatureRegistry
 from partpilot.web.core.db import Database
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 from partpilot.web.features.catalog import devmgmt_outbox
 from partpilot.web.features.catalog import devmgmt_push as push
 from partpilot.web.features.catalog import devmgmt_repo as repo
@@ -12,7 +13,7 @@ from partpilot.web.features.catalog import devmgmt_repo as repo
 def db(tmp_path):
     database = Database(tmp_path / "c.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature)
+    reg.register(catalog_feature, contacts_feature)
     database.apply_migrations(reg)
     return database
 

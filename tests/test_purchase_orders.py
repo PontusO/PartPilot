@@ -8,6 +8,7 @@ from partpilot.web.features.catalog import feature as catalog_feature
 from partpilot.web.features.catalog import repo as catrepo
 from partpilot.web.features.catalog import stock
 from partpilot.web.features.contacts import feature as contacts_feature
+from partpilot.web.features.contacts import repo as conrepo
 from partpilot.web.features.customer_orders import feature as co_feature
 from partpilot.web.features.purchase_orders import feature as po_feature
 from partpilot.web.features.purchase_orders import repo
@@ -309,7 +310,7 @@ def test_receive_no_offer_for_supplier_skips_price(db):
         db, part={"part_no": "NB-1"},
         supplier_lines=[{"supplier_name": "Acme Supplies", "supplier_pno": "A", "unit_price": 0.5,
                          "reel_qty": 1, "is_default": True}], opening={"qty": 0})
-    beta_id = catrepo.upsert_supplier(db, name="Beta Ltd")
+    beta_id = conrepo.create_contact(db, {"kind": "supplier", "name": "Beta Ltd"})
     po = repo.create_po(db, {"supplier_id": beta_id})
     repo.add_line(db, po, p, 5, 0.90)
     repo.mark_ordered(db, po)

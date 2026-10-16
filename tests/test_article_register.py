@@ -7,6 +7,7 @@ from partpilot.web.features.article_register import importer, repo
 from partpilot.web.features.article_register.codes import article_code
 from partpilot.web.features.article_register.repo import DuplicateNumber
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def db(tmp_path):
     database = Database(tmp_path / "a.db")
     reg = FeatureRegistry()
     # catalog first (as in production) so `parts` exists for the soft code→part_no join.
-    reg.register(catalog_feature, article_register_feature)
+    reg.register(catalog_feature, contacts_feature, article_register_feature)
     database.apply_migrations(reg)
     return database
 

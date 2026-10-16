@@ -15,17 +15,6 @@ router = APIRouter(prefix="/contacts")
 CONTACTS_WRITE_ROLES = frozenset({"admin", "purchasing"})
 
 
-def _mirror_supplier(db, data: dict, *, minimrp_id) -> None:
-    """Project a saved supplier-kind contact into the catalog ``suppliers`` table so it shows up
-    in the part-edit and PO supplier dropdowns (those read ``suppliers``, not ``contacts``)."""
-    if data.get("kind") != "supplier":
-        return
-    catalog_repo.upsert_supplier(
-        db, name=data["name"], short_name=data.get("short_name"),
-        url=data.get("website"), currency=data.get("currency"), minimrp_id=minimrp_id,
-    )
-
-
 def _num(v) -> float | None:
     try:
         return float(v) if v not in (None, "") else None
@@ -107,7 +96,6 @@ async def create(request: Request):
         )
     db = request.app.state.database
     new_id = repo.create_contact(db, data)
-    _mirror_supplier(db, data, minimrp_id=None)
     return RedirectResponse(f"/contacts/{new_id}", status_code=303)
 
 
@@ -171,8 +159,6 @@ async def update(request: Request, contact_id: int):
             error="Company name is required.", status=400,
         )
     repo.update_contact(db, contact_id, data)
-    stored = repo.get_contact(db, contact_id)
-    _mirror_supplier(db, data, minimrp_id=stored.get("minimrp_id") if stored else None)
     return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 

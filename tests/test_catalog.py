@@ -3,6 +3,7 @@ import pytest
 from partpilot.web.core import FeatureRegistry
 from partpilot.web.core.db import Database
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 from partpilot.web.features.catalog import importer, pricing, repo, stock
 
 
@@ -10,7 +11,7 @@ from partpilot.web.features.catalog import importer, pricing, repo, stock
 def db(tmp_path):
     database = Database(tmp_path / "c.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature)
+    reg.register(catalog_feature, contacts_feature)
     database.apply_migrations(reg)
     return database
 
@@ -441,7 +442,7 @@ def test_leaf_and_rolled_sell_price(db):
     database = db
     # Rebuild with assemblies registered so bom_lines exists.
     reg = FeatureRegistry()
-    reg.register(catalog_feature)
+    reg.register(catalog_feature, contacts_feature)
     reg.register(asm_feature)
     database.apply_migrations(reg)
 

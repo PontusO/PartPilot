@@ -1,6 +1,6 @@
 """Bulk load logic for the catalog, over already-parsed row dicts.
 
-``import_tables`` upserts suppliers / parts / part-suppliers / stock keyed by ``minimrp_id`` (the
+``import_tables`` upserts supplier contacts / parts / part-suppliers / stock keyed by ``minimrp_id`` (the
 legacy source id, retained purely as an idempotency key). It reads nothing external — callers pass
 row dicts — so it stays a plain, testable bulk-insert helper. (The miniMRP mdb reader that used to
 feed it was removed when miniMRP was decommissioned.)
@@ -40,19 +40,19 @@ def import_tables(
 ) -> dict[str, int]:
     """Upsert miniMRP rows into the catalog tables. Returns per-table counts."""
     with db.connect() as conn:
-        # --- suppliers ---
+        # --- suppliers (legacy tblsupaddresses rows) -> supplier contacts, keyed like contacts.importer ---
         for r in suppliers:
             conn.execute(
-                """INSERT INTO suppliers (name, short_name, url, currency, minimrp_id)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(minimrp_id) DO UPDATE SET
+                """INSERT INTO contacts (kind, name, short_name, website, currency, minimrp_id, source)
+                   VALUES ('supplier', ?, ?, ?, ?, ?, 'sup')
+                   ON CONFLICT(source, minimrp_id) DO UPDATE SET
                      name=excluded.name, short_name=excluded.short_name,
-                     url=excluded.url, currency=excluded.currency""",
+                     website=excluded.website, currency=excluded.currency""",
                 (_s(r.get("CoName")) or "?", _s(r.get("ShortNm")), _s(r.get("URL")),
                  _s(r.get("defCurrency")), _i(r.get("AddID"))),
             )
-        sup_map = {row["minimrp_id"]: row["id"] for row in
-                   conn.execute("SELECT id, minimrp_id FROM suppliers WHERE minimrp_id IS NOT NULL")}
+        sup_map = {row["minimrp_id"]: row["id"] for row in conn.execute(
+            "SELECT id, minimrp_id FROM contacts WHERE source = 'sup' AND minimrp_id IS NOT NULL")}
 
         # --- parts ---
         from .repo import is_document_part_no  # late import: repo pulls in pricing etc.

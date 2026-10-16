@@ -4,6 +4,7 @@ from partpilot.web.core import FeatureRegistry
 from partpilot.web.core.db import Database
 from partpilot.web.features.assemblies import repo as assemblies_repo
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 from partpilot.web.features.catalog import repo, stock, woo_sync
 from partpilot.woocommerce import WooProduct
 
@@ -12,7 +13,7 @@ from partpilot.woocommerce import WooProduct
 def db(tmp_path):
     database = Database(tmp_path / "cat.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature)
+    reg.register(catalog_feature, contacts_feature)
     database.apply_migrations(reg)
     return database
 

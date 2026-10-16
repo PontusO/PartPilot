@@ -20,7 +20,7 @@ def list_receipts(db: Database, search: str | None = None) -> list[dict]:
                       s.name AS supplier_name, p.po_no,
                       (SELECT COUNT(*) FROM goods_receipt_lines l WHERE l.grn_id = g.id) AS line_count
                FROM goods_receipts g
-               LEFT JOIN suppliers s ON s.id = g.supplier_id
+               LEFT JOIN contacts s ON s.id = g.supplier_id
                LEFT JOIN purchase_orders p ON p.id = g.po_id
                WHERE (:s IS NULL OR g.grn_no LIKE :like OR g.advice_no LIKE :like
                       OR s.name LIKE :like OR p.po_no LIKE :like)
@@ -33,7 +33,7 @@ def get_receipt(db: Database, grn_id: int) -> dict | None:
     with db.connect() as conn:
         head = conn.execute(
             """SELECT g.*, s.name AS supplier_name, p.po_no
-               FROM goods_receipts g LEFT JOIN suppliers s ON s.id = g.supplier_id
+               FROM goods_receipts g LEFT JOIN contacts s ON s.id = g.supplier_id
                LEFT JOIN purchase_orders p ON p.id = g.po_id WHERE g.id = ?""",
             (grn_id,),
         ).fetchone()

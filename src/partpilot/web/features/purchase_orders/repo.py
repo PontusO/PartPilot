@@ -28,7 +28,7 @@ def _default_supplier(conn, part_id):
     return conn.execute(
         """SELECT ps.id AS part_supplier_id, ps.supplier_pno, ps.price_per_uom, ps.qty_per_uom,
                   ps.moq, s.id AS supplier_id, s.name AS supplier_name
-           FROM part_suppliers ps LEFT JOIN suppliers s ON s.id = ps.supplier_id
+           FROM part_suppliers ps LEFT JOIN contacts s ON s.id = ps.supplier_id
            WHERE ps.part_id = ? ORDER BY ps.is_default DESC, ps.id LIMIT 1""",
         (part_id,),
     ).fetchone()
@@ -97,8 +97,10 @@ def summary(db: Database) -> dict:
 
 
 def suppliers(db: Database) -> list[dict]:
+    """Supplier dropdown: supplier-kind contacts (Contacts is the only supplier record)."""
     with db.connect() as conn:
-        return [dict(r) for r in conn.execute("SELECT id, name FROM suppliers ORDER BY name")]
+        return [dict(r) for r in conn.execute(
+            "SELECT id, name FROM contacts WHERE kind = 'supplier' ORDER BY name")]
 
 
 def parts_for_picker(db: Database) -> list[dict]:
@@ -116,7 +118,7 @@ def list_pos(db: Database, status: str | None = None, search: str | None = None)
                       (SELECT COUNT(*) FROM purchase_order_lines l WHERE l.po_id = p.id) AS line_count,
                       (SELECT COALESCE(SUM(l.qty * COALESCE(l.unit_price, 0)), 0)
                        FROM purchase_order_lines l WHERE l.po_id = p.id) AS total
-               FROM purchase_orders p LEFT JOIN suppliers s ON s.id = p.supplier_id
+               FROM purchase_orders p LEFT JOIN contacts s ON s.id = p.supplier_id
                LEFT JOIN stock_locations loc ON loc.id = p.location_id
                WHERE (:status IS NULL OR p.status = :status)
                  AND (:search IS NULL OR p.po_no LIKE :like OR s.name LIKE :like)
@@ -130,7 +132,7 @@ def get_po(db: Database, po_id: int) -> dict | None:
         head = conn.execute(
             """SELECT p.*, s.name AS supplier_name, loc.name AS location_name, loc.kind AS location_kind
                FROM purchase_orders p
-               LEFT JOIN suppliers s ON s.id = p.supplier_id
+               LEFT JOIN contacts s ON s.id = p.supplier_id
                LEFT JOIN stock_locations loc ON loc.id = p.location_id WHERE p.id = ?""",
             (po_id,),
         ).fetchone()

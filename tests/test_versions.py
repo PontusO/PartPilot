@@ -11,6 +11,7 @@ from partpilot.web.core.db import Database
 from partpilot.web.features.assemblies import feature as assemblies_feature
 from partpilot.web.features.assemblies import repo as asm_repo
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 from partpilot.web.features.catalog import repo, versions
 from partpilot.web.features.catalog import stock_index
 
@@ -19,7 +20,7 @@ from partpilot.web.features.catalog import stock_index
 def db(tmp_path):
     database = Database(tmp_path / "v.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature)      # catalog first (owns parts), then assemblies (bom_lines)
+    reg.register(catalog_feature, contacts_feature)      # catalog first (owns parts), then assemblies (bom_lines)
     reg.register(assemblies_feature)
     database.apply_migrations(reg)
     return database

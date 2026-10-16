@@ -7,6 +7,12 @@ one-time import can upsert and a dual-run can diff against the Access DB until t
 
 from __future__ import annotations
 
+
+def _migrate_part_suppliers(conn):
+    # Late import: the merge helpers need the live schema, not SQL text (see supplier_merge.py).
+    from .supplier_merge import migrate_part_suppliers
+    migrate_part_suppliers(conn)
+
 from ...core import Migration
 
 MIGRATIONS = [
@@ -440,5 +446,10 @@ MIGRATIONS = [
         UPDATE part_stock SET location_id = (SELECT MIN(id) FROM stock_locations) WHERE location_id IS NULL;
         UPDATE stock_movements SET location_id = (SELECT MIN(id) FROM stock_locations) WHERE location_id IS NULL;
         """,
+    ),
+    Migration(
+        version=23,
+        name="suppliers merge: part_suppliers.supplier_id -> contacts(id)",
+        sql=_migrate_part_suppliers,
     ),
 ]

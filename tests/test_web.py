@@ -269,37 +269,21 @@ def test_part_form_pricing_roundtrip_and_generate(app):
     assert "Captured supplier cost breaks" in form
 
 
-def test_supplier_contact_mirrors_into_catalog_suppliers(app):
-    """A supplier added in Contacts must appear in the part-edit / PO supplier dropdown, which
-    reads the catalog ``suppliers`` table (not ``contacts``)."""
+def test_supplier_contact_is_the_supplier_dropdown(app):
+    """Contacts is the only supplier record: a supplier-kind contact is immediately selectable on the
+    part form and PO form; a customer is not."""
     from partpilot.web.features.catalog import repo as catrepo
 
     client = TestClient(app)
-    _login(client, "buyer1", "pw")  # purchasing -> can edit
-
+    _login(client, "buyer1", "pw")
     db = app.state.database
-    assert not any(s["name"] == "Widget Supply AB" for s in catrepo.suppliers(db))
-
-    r = client.post("/contacts/new",
-                    data={"kind": "supplier", "name": "Widget Supply AB", "currency": "SEK",
-                          "website": "https://widgets.example"}, follow_redirects=False)
-    assert r.status_code == 303
-    mirrored = [s for s in catrepo.suppliers(db) if s["name"] == "Widget Supply AB"]
-    assert len(mirrored) == 1  # now selectable on the part form
-
-    # A non-supplier contact must NOT create a suppliers row.
-    client.post("/contacts/new", data={"kind": "customer", "name": "Buyer Co"},
+    client.post("/contacts/new", data={"kind": "supplier", "name": "Widget Supply AB", "currency": "SEK"},
                 follow_redirects=False)
-    assert not any(s["name"] == "Buyer Co" for s in catrepo.suppliers(db))
-
-    # Editing the same-named supplier contact updates its mirror in place (no duplicate row).
-    from partpilot.web.features.contacts import repo as conrepo
-    sup_cid = conrepo.list_contacts(db, search="Widget")[0]["id"]
-    client.post(f"/contacts/{sup_cid}/edit",
-                data={"kind": "supplier", "name": "Widget Supply AB", "currency": "USD"},
-                follow_redirects=False)
-    rows = [s for s in catrepo.suppliers(db) if s["name"] == "Widget Supply AB"]
-    assert len(rows) == 1  # still exactly one — matched by name, updated not duplicated
+    client.post("/contacts/new", data={"kind": "customer", "name": "Buyer Co"}, follow_redirects=False)
+    names = [s["name"] for s in catrepo.suppliers(db)]
+    assert "Widget Supply AB" in names and "Buyer Co" not in names
+    assert "Widget Supply AB" in client.get("/catalog/new").text
+    assert "Widget Supply AB" in client.get("/purchase-orders/new").text
 
 
 def test_planning_calendar_events_and_reschedule(app):
@@ -1327,7 +1311,7 @@ def _seed_suspect_part(app, part_no="123-4567-ND", supplier="Digikey"):
         c.execute("INSERT INTO parts (part_no, value, category, mfr_pno) VALUES (?,?,?,NULL)",
                   (part_no, "10K 0402", "RESISTOR"))
         pid = c.execute("SELECT id FROM parts WHERE part_no=?", (part_no,)).fetchone()["id"]
-        sid = c.execute("INSERT INTO suppliers (name) VALUES (?)", (supplier,)).lastrowid
+        sid = c.execute("INSERT INTO contacts (kind, name) VALUES ('supplier', ?)", (supplier,)).lastrowid
         c.execute("INSERT INTO part_suppliers (part_id, supplier_id, supplier_pno, qty_per_uom) "
                   "VALUES (?,?,?,1)", (pid, sid, part_no))
         c.commit()

@@ -5,13 +5,14 @@ from partpilot.web.core.db import Database
 from partpilot.web.features.assemblies import feature as assemblies_feature
 from partpilot.web.features.assemblies import importer, repo
 from partpilot.web.features.catalog import feature as catalog_feature
+from partpilot.web.features.contacts import feature as contacts_feature
 
 
 @pytest.fixture
 def db(tmp_path):
     database = Database(tmp_path / "a.db")
     reg = FeatureRegistry()
-    reg.register(catalog_feature, assemblies_feature)
+    reg.register(catalog_feature, contacts_feature, assemblies_feature)
     database.apply_migrations(reg)
     return database
 

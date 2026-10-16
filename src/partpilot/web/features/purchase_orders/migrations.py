@@ -8,6 +8,12 @@ and supplier part numbers already live); the richer `contacts` address book stay
 
 from __future__ import annotations
 
+
+def _migrate_suppliers(conn):
+    # Late import: the merge helpers need the live schema, not SQL text (see supplier_merge.py).
+    from .supplier_merge import migrate_purchase_orders_and_grns
+    migrate_purchase_orders_and_grns(conn)
+
 from ...core import Migration
 
 MIGRATIONS = [
@@ -116,5 +122,10 @@ MIGRATIONS = [
         -- default shelf; new POs always get one.
         ALTER TABLE purchase_orders ADD COLUMN location_id INTEGER REFERENCES stock_locations(id);
         """,
+    ),
+    Migration(
+        version=6,
+        name="suppliers merge: purchase_orders/goods_receipts.supplier_id -> contacts(id); drop suppliers",
+        sql=_migrate_suppliers,
     ),
 ]

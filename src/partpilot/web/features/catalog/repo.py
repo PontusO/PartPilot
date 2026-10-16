@@ -61,7 +61,7 @@ _DEFAULT_SUPPLIER = """
         SELECT x.id FROM part_suppliers x WHERE x.part_id = p.id
         ORDER BY x.is_default DESC, x.id LIMIT 1
     )
-    LEFT JOIN suppliers s ON s.id = ps.supplier_id
+    LEFT JOIN contacts s ON s.id = ps.supplier_id
 """
 
 
@@ -148,7 +148,7 @@ def parts_for_supplier(db: Database, supplier_name: str) -> list[dict]:
                       ps.supplier_pno, ps.price_per_uom, ps.qty_per_uom
                FROM parts p
                JOIN part_suppliers ps ON ps.part_id = p.id
-               JOIN suppliers s ON s.id = ps.supplier_id
+               JOIN contacts s ON s.id = ps.supplier_id
                WHERE lower(s.name) = lower(?)
                ORDER BY p.part_no""",
             (supplier_name.strip(),),
@@ -170,7 +170,7 @@ def get_part(db: Database, part_id: int) -> dict | None:
         part = dict(row)
         suppliers = [dict(r) for r in conn.execute(
             """SELECT ps.*, s.name AS supplier_name, s.currency
-               FROM part_suppliers ps LEFT JOIN suppliers s ON s.id = ps.supplier_id
+               FROM part_suppliers ps LEFT JOIN contacts s ON s.id = ps.supplier_id
                WHERE ps.part_id = ? ORDER BY ps.is_default DESC, ps.id""",
             (part_id,),
         )]
@@ -226,8 +226,10 @@ def summary(db: Database) -> dict:
 # --- writes (add a component) ---
 
 def suppliers(db: Database) -> list[dict]:
+    """Supplier dropdown: every supplier-kind contact. Contacts is the only supplier record."""
     with db.connect() as conn:
-        return [dict(r) for r in conn.execute("SELECT id, name FROM suppliers ORDER BY name")]
+        return [dict(r) for r in conn.execute(
+            "SELECT id, name FROM contacts WHERE kind = 'supplier' ORDER BY name")]
 
 
 # ---- shelves (stock locations with an owner) ----------------------------------------------
@@ -499,52 +501,16 @@ def find_part_by_part_no(db: Database, part_no: str | None) -> dict | None:
 
 
 def _get_or_create_supplier(conn, name: str) -> int:
-    row = conn.execute("SELECT id FROM suppliers WHERE lower(name) = lower(?)", (name,)).fetchone()
+    """Id of the supplier contact called ``name`` (trimmed, case-insensitive), creating a bare one
+    ("+ New supplier…" on the part form, or the resolver meeting Digi-Key for the first time)."""
+    name = (name or "").strip()
+    row = conn.execute(
+        "SELECT id FROM contacts WHERE kind = 'supplier' AND lower(trim(name)) = lower(?) "
+        "ORDER BY id LIMIT 1", (name,)).fetchone()
     if row:
         return row["id"]
-    return conn.execute("INSERT INTO suppliers (name) VALUES (?)", (name,)).lastrowid
-
-
-def upsert_supplier(
-    db: Database, *, name: str, short_name: str | None = None, url: str | None = None,
-    currency: str | None = None, minimrp_id: int | None = None,
-) -> int | None:
-    """Create/update a ``suppliers`` row so it appears in the part-edit and PO supplier dropdowns.
-
-    The procurement supplier master (``suppliers``) and the Contacts address book
-    (``contacts`` WHERE kind='supplier') are otherwise unlinked, so a supplier added in Contacts
-    never shows up on parts/POs. Contacts mirrors itself here on save via this function. Matches an
-    existing row by ``minimrp_id`` first (the shared miniMRP AddID), then by case-insensitive name.
-    Blank incoming fields never overwrite existing values (COALESCE), so editing a contact can't
-    erase a currency/short_name a PO already relies on. Returns the supplier id.
-    """
-    name = (name or "").strip()
-    if not name:
-        return None
-    with db.connect() as conn:
-        row = None
-        if minimrp_id is not None:
-            row = conn.execute(
-                "SELECT id FROM suppliers WHERE minimrp_id = ?", (minimrp_id,)).fetchone()
-        if row is None:
-            row = conn.execute(
-                "SELECT id FROM suppliers WHERE lower(name) = lower(?)", (name,)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE suppliers SET name = ?, short_name = COALESCE(?, short_name), "
-                "url = COALESCE(?, url), currency = COALESCE(?, currency), "
-                "minimrp_id = COALESCE(minimrp_id, ?) WHERE id = ?",
-                (name, short_name, url, currency, minimrp_id, row["id"]),
-            )
-            sid = row["id"]
-        else:
-            sid = conn.execute(
-                "INSERT INTO suppliers (name, short_name, url, currency, minimrp_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (name, short_name, url, currency, minimrp_id),
-            ).lastrowid
-        conn.commit()
-        return sid
+    return conn.execute(
+        "INSERT INTO contacts (kind, name, source) VALUES ('supplier', ?, 'ui')", (name,)).lastrowid
 
 
 def _insert_cost_tiers(conn, part_supplier_id: int, line: dict) -> None:

@@ -65,7 +65,7 @@ def find_suspect_parts(db: Database) -> list[dict]:
         for r in rows:
             sups = conn.execute(
                 """SELECT s.name AS supplier, ps.supplier_pno
-                   FROM part_suppliers ps LEFT JOIN suppliers s ON s.id = ps.supplier_id
+                   FROM part_suppliers ps LEFT JOIN contacts s ON s.id = ps.supplier_id
                    WHERE ps.part_id = ? AND ps.supplier_pno IS NOT NULL""", (r["id"],)).fetchall()
             d = dict(r)
             d["suppliers"] = [dict(s) for s in sups]

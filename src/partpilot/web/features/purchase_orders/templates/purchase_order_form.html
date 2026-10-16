@@ -14,8 +14,7 @@
   <h1>New purchase order</h1>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   {% if not suppliers %}
-  <div class="note" style="margin-bottom:1rem;">No suppliers yet — add a supplier on a part, or
-    import from miniMRP.</div>
+  <div class="note" style="margin-bottom:1rem;">No suppliers yet — add a supplier in Contacts (kind "supplier") or on a part.</div>
   {% endif %}
 
   <form method="post" action="/purchase-orders/new">

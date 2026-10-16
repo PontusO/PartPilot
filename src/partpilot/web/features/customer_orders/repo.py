@@ -477,7 +477,7 @@ def order_downstream(db: Database, order_id: int) -> dict:
                 f"""SELECT DISTINCT po.id, po.po_no, po.status, s.name AS supplier_name
                     FROM purchase_orders po
                     JOIN purchase_order_lines pl ON pl.po_id = po.id
-                    LEFT JOIN suppliers s ON s.id = po.supplier_id
+                    LEFT JOIN contacts s ON s.id = po.supplier_id
                     WHERE po.status IN ('draft', 'ordered')
                       AND pl.part_id IN (SELECT part_id FROM work_order_lines
                                          WHERE work_order_id IN ({qmarks}))
