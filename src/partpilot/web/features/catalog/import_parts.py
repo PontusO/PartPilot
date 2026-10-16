@@ -73,6 +73,14 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
 
         mpn = _target_mpn(ln)
         existing_id = catalog_repo.find_part_id_by_mpn(db, mpn)
+        if existing_id is None:
+            # The only catalog match is a retired part: never link to it. Flag the line so the
+            # operator sees why it is offered as new; apply_parts_plan refuses to create a duplicate.
+            retired_id = catalog_repo.find_part_id_by_mpn(db, mpn, include_retired=True)
+            if retired_id is not None:
+                old = catalog_repo.get_part(db, retired_id)
+                item["note"] = f"matches retired part {old['part_no']}"
+                item["retired_match"] = True
         value, missing = _value_for(ln)
         if existing_id is not None:
             item.update(status=IN_INVENTORY, part_id=existing_id, part_no=mpn, shelf_free=None)
@@ -143,6 +151,11 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
             # Re-use an existing catalog part if its MPN already landed (avoids duplicates,
             # including the same MPN appearing twice in one file).
             pid = catalog_repo.find_part_id_by_mpn(db, item.get("part_no"))
+            if pid is None and catalog_repo.find_part_id_by_mpn(
+                    db, item.get("part_no"), include_retired=True) is not None:
+                skipped += 1          # only match is retired: never link, never duplicate the number
+                part_ids.append(None)
+                continue
             if pid is None:
                 pid = create_part_from_item(db, item)
                 created += 1

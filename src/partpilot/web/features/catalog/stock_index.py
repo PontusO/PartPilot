@@ -36,7 +36,10 @@ def build_stock_index(db: Database, location_ids: list[int] | None = None) -> St
             f"FROM parts p WHERE COALESCE(p.is_document, 0) = 0 "
             # Cover BOM lines only from the current (released) version — a draft/superseded version
             # carries its own separate (often zero/stale) stock that shouldn't satisfy a build.
-            f"AND p.version_status = 'released'",
+            f"AND p.version_status = 'released' "
+            # A retired part's stock must never satisfy a line: retired means run out, don't re-buy,
+            # and the resolver must not steer a new build onto it.
+            f"AND p.retired_at IS NULL",
             [*location_ids, *location_ids],
         ).fetchall()
     items: list[StockItem] = []

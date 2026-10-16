@@ -601,3 +601,12 @@ def test_list_parts_hides_retired_unless_asked(db):
     assert b in shown and shown[b]["retired"] is True and shown[a]["retired"] is False
     assert repo.summary(db)["parts"] == 1
     assert repo.get_part(db, b)["retired"] is True
+
+
+def test_find_part_id_by_mpn_ignores_retired_unless_asked(db):
+    from partpilot.web.features.catalog import lifecycle
+    pid = repo.create_part(db, part={"part_no": "MPN-9"}, supplier_lines=[])
+    lifecycle.retire_part(db, pid)
+    assert repo.find_part_id_by_mpn(db, "MPN-9") is None
+    assert repo.find_part_id_by_mpn(db, "MPN-9", include_retired=True) == pid
+    assert repo.find_part_by_part_no(db, "MPN-9")["id"] == pid   # the number stays taken

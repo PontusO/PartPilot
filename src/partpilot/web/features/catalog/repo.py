@@ -479,15 +479,17 @@ def shelf_movements(db: Database, location_id: int, limit: int = 100) -> list[di
                WHERE m.location_id = ? ORDER BY m.id DESC LIMIT ?""", (location_id, limit))]
 
 
-def find_part_id_by_mpn(db: Database, mpn: str | None) -> int | None:
-    """Look up an existing part by MPN (matches part_no or mfr_pno, case-insensitive)."""
+def find_part_id_by_mpn(db: Database, mpn: str | None, *, include_retired: bool = False) -> int | None:
+    """Look up an existing part by MPN (matches part_no or mfr_pno, case-insensitive). Retired parts
+    are skipped unless ``include_retired`` — importers must never silently land on one."""
     if not mpn:
         return None
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT id FROM parts WHERE lower(part_no) = lower(?) OR lower(mfr_pno) = lower(?) "
+            "SELECT id FROM parts WHERE (lower(part_no) = lower(?) OR lower(mfr_pno) = lower(?)) "
+            "AND (? = 1 OR retired_at IS NULL) "
             "ORDER BY (version_status = 'released') DESC, id LIMIT 1",
-            (mpn, mpn),
+            (mpn, mpn, 1 if include_retired else 0),
         ).fetchone()
     return row["id"] if row else None
 

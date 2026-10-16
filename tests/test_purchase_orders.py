@@ -513,3 +513,11 @@ def test_retired_part_leaves_po_picker_and_cannot_be_added(db):
     assert p not in {r["id"] for r in repo.parts_for_picker(db)}
     with pytest.raises(ValueError, match=r"R-1 is retired and cannot be ordered\."):
         repo.add_line(db, po, p, 5, 0.5)
+
+
+def test_shortage_suggestions_skip_retired_parts(db):
+    from partpilot.web.features.catalog import lifecycle
+    p, asm, wo = _setup_shortage(db)
+    assert len(repo.shortage_suggestions(db)) == 1
+    lifecycle.retire_part(db, p)        # retired: run out, never re-buy
+    assert repo.shortage_suggestions(db) == []

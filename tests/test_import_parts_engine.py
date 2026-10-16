@@ -73,3 +73,32 @@ def test_apply_parts_plan_reports_which_rows_were_created(db):
     res = import_parts.apply_parts_plan(db, plan, accepted={0, 1, 2})
     assert res["created_rows"] == [0]
     assert res["created"] == 1 and res["linked"] == 3
+
+
+def test_apply_parts_plan_neither_links_nor_creates_a_retired_match(db):
+    from partpilot.web.features.catalog import lifecycle
+    old = catrepo.create_part(db, part={"part_no": "RET-1"}, supplier_lines=[])
+    lifecycle.retire_part(db, old)
+    plan = [{"status": "new", "part_no": "RET-1", "mfr_pno": "RET-1", "qty": 1, "refdes": "C1"}]
+    res = import_parts.apply_parts_plan(db, plan, accepted={0})
+    assert (res["created"], res["linked"], res["skipped"]) == (0, 0, 1)
+    assert res["part_ids"] == [None]
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM parts WHERE part_no = 'RET-1'").fetchone()[0] == 1
+
+
+def test_build_import_plan_flags_retired_match(db):
+    from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+    from partpilot.web.features.catalog import lifecycle
+    from partpilot.web.features.purchasing.service import ResolvedRun
+    old = catrepo.create_part(db, part={"part_no": "RET-1"}, supplier_lines=[])
+    lifecycle.retire_part(db, old)
+    line = ResolvedLine(
+        line=BomLine(refdes=["C1"], qty=1, value="RET-1"), kind=LineKind.MPN,
+        chosen=Candidate(supplier="Digi-Key", mpn="RET-1", dk_part_number="RET-1-ND"),
+        status=Status.RESOLVED, confidence=0.9)
+    run = ResolvedRun(resolved=[line], build_qty=1, currency="SEK", stock_checked=False,
+                      mouser_enabled=False, warnings=[], stock_shelf=None)
+    item = import_parts.build_import_plan(db, run)[0]
+    assert item["status"] == "new" and item["part_id"] is None
+    assert item["note"] == "matches retired part RET-1"

@@ -275,3 +275,11 @@ def test_version_routes_are_role_gated(app):
     _login(client, "ware1", "pw")               # warehouse: not a catalog writer
     r = client.post(f"/catalog/{pid}/versions/new", data={"rev": "B"}, follow_redirects=False)
     assert r.status_code == 403
+
+
+def test_stock_index_excludes_retired_parts(db):
+    from partpilot.web.features.catalog import lifecycle
+    pid = _mk_part(db, part_no="GRM-9", rev="A", qty=100.0)
+    assert pid in {it.item_id for it in stock_index.build_stock_index(db).items}
+    lifecycle.retire_part(db, pid)
+    assert pid not in {it.item_id for it in stock_index.build_stock_index(db).items}
