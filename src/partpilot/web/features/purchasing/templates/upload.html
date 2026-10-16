@@ -8,7 +8,7 @@
       <em>purchasing</em> role.</div>
   {% else %}
     <p class="note">Upload a BOM (CSV or Excel). PartPilot resolves each line against
-      Digi-Key{% if stock_available %}, checks miniMRP stock,{% endif %} and produces a purchasing
+      Digi-Key{% if stock_available %}, checks stock on the shelf you pick,{% endif %} and produces a purchasing
       breakdown plus ready-to-upload distributor cart files.</p>
     <form method="post" action="/purchasing/run" enctype="multipart/form-data" onsubmit="showOverlay()">
       <label for="file">BOM file</label>
@@ -18,10 +18,10 @@
       <input id="build_qty" name="build_qty" type="number" min="1" value="{{ default_build_qty }}" required>
 
       {% if stock_available %}
-      <div class="check">
-        <input id="check_stock" name="check_stock" type="checkbox" value="true" checked>
-        <label for="check_stock" style="margin:0; color:inherit;">Check miniMRP stock first</label>
-      </div>
+      <label for="stock_shelf">Check stock on shelf</label>
+      {% with shelf_field='stock_shelf', shelf_none=True %}{% include "_shelf_select.html" %}{% endwith %}
+      <p class="note">Rows already covered by free stock on that shelf are marked in stock and skip the
+        distributors. Pick a customer's shelf when buying for them; "Don't check stock" prices every row.</p>
       {% endif %}
 
       <button type="submit">Resolve &amp; build carts</button>

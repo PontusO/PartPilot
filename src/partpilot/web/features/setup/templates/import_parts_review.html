@@ -5,8 +5,9 @@
   <p class="note"><a href="/setup/import-parts">← Import parts</a></p>
   <h1>Review parts <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
   {% for w in warnings %}<div class="err">{{ w }}</div>{% endfor %}
-  {% if not stock_checked %}<p class="note"><span class="badge warn">own stock ignored</span>
-    Every row was resolved at the distributors regardless of what we have on the shelf.</p>{% endif %}
+  {% if stock_shelf %}<p class="note">Stock checked on <b>{{ stock_shelf }}</b> — rows covered there are in stock; a row
+    linked to a catalog part shows how many are free on that shelf.</p>
+  {% else %}<p class="note"><span class="badge warn">Stock not checked</span> — every row went to the distributors.</p>{% endif %}
   <p class="note">Rows <b>already in the catalog</b> are linked and left untouched. Tick the rows
     you want to <b>create as catalog parts</b>. <b>New</b> rows resolved at a distributor are
     pre-ticked; <b>unresolved</b> rows would be created bare from the BOM text; <b>manual</b> rows
@@ -45,7 +46,8 @@
               {% if it.supplier_label %}<span class="flag">· {{ it.supplier_label }}</span>{% endif %}
             </td>
             <td>
-              {% if it.status == 'in_inventory' %}<span class="badge ok">in inventory</span>
+              {% if it.status == 'in_inventory' %}<span class="badge ok">in catalog</span>
+                {% if it.shelf_free is not none %}<span class="flag">{{ "%g"|format(it.shelf_free) }} free on {{ stock_shelf }}</span>{% endif %}
               {% elif it.status == 'new' %}<span class="badge warn">new</span>
               {% elif it.status == 'unresolved' %}<span class="badge bad">unresolved</span>
               {% elif it.status == 'manual' %}<span class="badge bad">manual</span>

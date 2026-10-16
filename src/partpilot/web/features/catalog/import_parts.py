@@ -46,8 +46,11 @@ def _value_for(line: ResolvedLine) -> tuple[str | None, list[str]]:
     return line.line.value or None, []   # non-passive: keep the raw BOM value, nothing to flag
 
 
-def build_import_plan(db: Database, run: ResolvedRun) -> list[dict]:
-    """Turn resolved lines into a review plan (one JSON-serializable dict per BOM line)."""
+def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | None = None) -> list[dict]:
+    """Turn resolved lines into a review plan (one JSON-serializable dict per BOM line). Rows that
+    link to an existing catalog part also carry ``shelf_free`` — how many are free on the shelf the
+    stock check ran against — so "in the catalog but not on this shelf" is visible."""
+    from . import stock as stock_core
     plan: list[dict] = []
     for ln in run.resolved:
         item = {
@@ -72,7 +75,10 @@ def build_import_plan(db: Database, run: ResolvedRun) -> list[dict]:
         existing_id = catalog_repo.find_part_id_by_mpn(db, mpn)
         value, missing = _value_for(ln)
         if existing_id is not None:
-            item.update(status=IN_INVENTORY, part_id=existing_id, part_no=mpn)
+            item.update(status=IN_INVENTORY, part_id=existing_id, part_no=mpn, shelf_free=None)
+            if stock_location_id:
+                with db.connect() as conn:
+                    item["shelf_free"] = stock_core.free_on_shelf(conn, existing_id, stock_location_id)
         elif ln.chosen is not None:
             c = ln.chosen
             item.update(

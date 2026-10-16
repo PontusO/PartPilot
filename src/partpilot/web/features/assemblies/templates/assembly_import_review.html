@@ -6,6 +6,8 @@
   <h1>Import BOM into {{ a.part_no }}
     <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
   {% for w in warnings %}<div class="err">{{ w }}</div>{% endfor %}
+  {% if stock_shelf %}<p class="note">Stock checked on <b>{{ stock_shelf }}</b>.</p>
+  {% else %}<p class="note"><span class="badge warn">Stock not checked</span></p>{% endif %}
   <p class="note">Lines <b>already in inventory</b> are linked automatically. Tick the parts you
     want to <b>create in inventory</b> — ticked lines are added to the assembly's BOM. Unticked
     new/unresolved lines are left out.</p>
@@ -42,7 +44,8 @@
               {% if it.supplier_label %}<span class="flag">· {{ it.supplier_label }}</span>{% endif %}
             </td>
             <td>
-              {% if it.status == 'in_inventory' %}<span class="badge ok">in inventory</span>
+              {% if it.status == 'in_inventory' %}<span class="badge ok">in catalog</span>
+                {% if it.shelf_free is not none %}<span class="flag">{{ "%g"|format(it.shelf_free) }} free on {{ stock_shelf }}</span>{% endif %}
               {% elif it.status == 'new' %}<span class="badge warn">new</span>
               {% elif it.status == 'unresolved' %}<span class="badge bad">unresolved</span>
               {% elif it.status == 'manual' %}<span class="badge bad">manual</span>

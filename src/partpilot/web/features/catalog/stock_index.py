@@ -13,18 +13,26 @@ from ....stock import StockIndex, StockItem, comp_type_for_category, parse_value
 from ...core.db import Database
 
 
-def build_stock_index(db: Database) -> StockIndex:
-    """Index every stockable catalog part (documents excluded) for BOM matching by MPN / value."""
+def build_stock_index(db: Database, location_ids: list[int]) -> StockIndex:
+    """Index every stockable catalog part (documents excluded) for BOM matching by MPN / value, with
+    on-hand/allocated summed over ``location_ids`` only — a customer's shelf sees only their stock."""
+    if not location_ids:
+        return StockIndex.build([])
+    marks = ",".join("?" for _ in location_ids)
     with db.connect() as conn:
         rows = conn.execute(
-            "SELECT id, part_no, COALESCE(value, '') AS value, "
-            "       COALESCE(description, '') AS description, COALESCE(category, '') AS category, "
-            "       COALESCE(mfr_pno, '') AS mfr_pno, "
-            "       COALESCE(total_qty, 0) AS total_qty, COALESCE(total_alloc, 0) AS total_alloc "
-            "FROM parts WHERE COALESCE(is_document, 0) = 0 "
+            f"SELECT p.id, p.part_no, COALESCE(p.value, '') AS value, "
+            f"       COALESCE(p.description, '') AS description, COALESCE(p.category, '') AS category, "
+            f"       COALESCE(p.mfr_pno, '') AS mfr_pno, "
+            f"       COALESCE((SELECT SUM(pk.on_hand) FROM part_stock pk "
+            f"                 WHERE pk.part_id = p.id AND pk.location_id IN ({marks})), 0) AS total_qty, "
+            f"       COALESCE((SELECT SUM(pk.allocated) FROM part_stock pk "
+            f"                 WHERE pk.part_id = p.id AND pk.location_id IN ({marks})), 0) AS total_alloc "
+            f"FROM parts p WHERE COALESCE(p.is_document, 0) = 0 "
             # Cover BOM lines only from the current (released) version — a draft/superseded version
             # carries its own separate (often zero/stale) stock that shouldn't satisfy a build.
-            "AND version_status = 'released'"
+            f"AND p.version_status = 'released'",
+            [*location_ids, *location_ids],
         ).fetchall()
     items: list[StockItem] = []
     for r in rows:

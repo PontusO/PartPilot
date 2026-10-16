@@ -492,9 +492,14 @@ def meta_source(upload) -> str:
     return Path(getattr(upload, "filename", "") or "file").name
 
 
+def _ip_shelves(db) -> dict:
+    return {"shelves": catalog_repo.locations(db), "shelf_selected": catalog_repo.default_shelf_id(db)}
+
+
 def _ip_upload_page(request: Request, error: str | None = None, status: int = 200):
     return request.app.state.templates.TemplateResponse(
-        request, "import_parts_upload.html", {"error": error}, status_code=status)
+        request, "import_parts_upload.html",
+        {"error": error, **_ip_shelves(request.app.state.database)}, status_code=status)
 
 
 def _ip_map_page(request: Request, *, job_id: str, meta: dict, samples: list[list[str]],
@@ -504,7 +509,7 @@ def _ip_map_page(request: Request, *, job_id: str, meta: dict, samples: list[lis
         request, "import_parts_map.html",
         {"job_id": job_id, "source": meta["source"], "headers": meta["headers"],
          "samples": samples, "selected": selected, "targets": ip.TARGETS,
-         "build_qty": meta.get("build_qty"), "check_stock": meta.get("check_stock", True),
+         "build_qty": meta.get("build_qty"), "stock_shelf": meta.get("stock_shelf_name"),
          "error": error}, status_code=status)
 
 
@@ -551,9 +556,14 @@ async def import_parts_upload(request: Request):
         return _ip_upload_page(request, "Choose a CSV or Excel file.", 400)
     raw_qty = (form.get("build_qty") or "").strip()
     build_qty = int(raw_qty) if raw_qty.isdigit() and int(raw_qty) > 0 else None
-    # "Ignore our own stock": buying for a customer who won't use our stocked parts, so every row
-    # must go to the distributors instead of short-circuiting to IN_STOCK.
-    check_stock = form.get("ignore_stock") is None
+    # "Check stock on shelf": a customer's shelf sees only their stock, so rows we hold on Main still
+    # go to the distributors; "none" prices every row.
+    try:
+        check_stock, stock_location_id = catalog_repo.parse_stock_shelf(db, form.get("stock_shelf"))
+    except ValueError as exc:
+        return _ip_upload_page(request, str(exc), 400)
+    shelf = catalog_repo.get_location(db, stock_location_id) if stock_location_id else None
+    stock_shelf_name = shelf["name"] if shelf else None
 
     job_id = uuid4().hex
     suffix = Path(upload.filename).suffix.lower()
@@ -565,7 +575,8 @@ async def import_parts_upload(request: Request):
         bom_path.unlink(missing_ok=True)
         return _ip_upload_page(request, f"Could not read {meta_source(upload)}: {exc}", 400)
     meta = {"source": Path(upload.filename).name, "headers": headers, "build_qty": build_qty,
-            "suffix": suffix, "check_stock": check_stock}
+            "suffix": suffix, "check_stock": check_stock, "stock_location_id": stock_location_id,
+            "stock_shelf_name": stock_shelf_name}
     meta_path.write_text(json.dumps(meta))
     return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
                         selected=_ip_selected_from_mapping(ip.prefill_mapping(db, headers), headers))
@@ -596,20 +607,21 @@ async def import_parts_resolve(request: Request):
     try:
         run = await run_in_threadpool(
             resolve_bom_file, bom_path, build_qty=meta.get("build_qty"), database=db,
-            check_stock=meta.get("check_stock", True), mappings=ip.run_mappings(mapping))
+            check_stock=meta.get("check_stock", True), stock_location_id=meta.get("stock_location_id"),
+            mappings=ip.run_mappings(mapping))
     except Exception as exc:  # missing creds, network, bad rows
         # The upload is kept so the user can fix the mapping and retry without re-uploading.
         return _ip_map_page(request, job_id=job_id, meta=meta, samples=samples,
                             selected=selected, error=f"Resolve failed: {exc}", status=500)
 
-    plan = build_import_plan(db, run)
+    plan = build_import_plan(db, run, meta.get("stock_location_id"))
     plan_path.write_text(json.dumps(plan))
-    meta["stock_checked"] = run.stock_checked   # what actually happened, shown on the result page
+    meta["stock_shelf"] = run.stock_shelf   # what actually happened, shown on the result page
     meta_path.write_text(json.dumps(meta))
     return request.app.state.templates.TemplateResponse(
         request, "import_parts_review.html",
         {"plan": plan, "job_id": job_id, "warnings": run.warnings, "source": meta["source"],
-         "stock_checked": run.stock_checked})
+         "stock_shelf": run.stock_shelf})
 
 
 @router.post("/import-parts/apply")
@@ -631,7 +643,7 @@ async def import_parts_apply(request: Request):
     rows = _ip_outcome_rows(plan, result, accepted)
     (jobs_dir / f"piresult-{job_id}.json").write_text(json.dumps({
         "source": meta["source"], "rows": rows,
-        "stock_checked": meta.get("stock_checked", True),
+        "stock_shelf": meta.get("stock_shelf"),
         "counts": {"created": result["created"], "linked": result["linked"],
                    "skipped": result["skipped"]},
         "review": result["review"],
@@ -682,7 +694,7 @@ def _ip_result_page(request: Request, job_id: str, data: dict, *, values: dict |
         request, "import_parts_result.html",
         {"job_id": job_id, "source": data["source"], "result": data["counts"],
          "review": data["review"], "rows": rows,
-         "stock_checked": data.get("stock_checked", True),
+         "stock_shelf": data.get("stock_shelf"),
          "created": [r for r in rows if r["outcome"] == CREATED],
          "not_found": [r for r in rows if r["unfound"]],
          "bom_rows": [r for r in rows if r["part_id"] is not None],

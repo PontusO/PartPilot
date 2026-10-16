@@ -38,6 +38,7 @@ class PurchaseResult:
     stock_checked: bool
     mouser_enabled: bool
     warnings: list[str] = field(default_factory=list)
+    stock_shelf: str | None = None   # name of the shelf whose stock was checked (None = not checked)
 
 
 def _summary(resolved: list[ResolvedLine]) -> dict[str, int]:
@@ -57,6 +58,7 @@ class ResolvedRun:
     stock_checked: bool
     mouser_enabled: bool
     warnings: list[str] = field(default_factory=list)
+    stock_shelf: str | None = None   # shelf the stock check ran against ("our shelves" when unspecified)
 
 
 def resolve_bom_file(
@@ -65,6 +67,7 @@ def resolve_bom_file(
     build_qty: int | None = None,
     currency: str | None = None,
     check_stock: bool = True,
+    stock_location_id: int | None = None,
     reel_threshold: float | None = None,
     sandbox: bool = False,
     settings_path: str | Path | None = None,
@@ -77,7 +80,8 @@ def resolve_bom_file(
     assembly BOM import call it, so resolution changes propagate to both. Blocking and
     network-bound — run it in a threadpool from async routes. Pass ``database`` to check
     PartPilot's own catalog stock first (a line covered by free stock skips the distributor
-    lookup); omit it to always query the distributors. Pass ``mappings`` (``{field: [header, ...]}``)
+    lookup); omit it to always query the distributors. ``stock_location_id`` narrows that check to
+    one shelf (e.g. a customer's); without it all of OUR shelves count. Pass ``mappings`` (``{field: [header, ...]}``)
     to override the yaml column aliases for this run — only the given fields are detected, so an
     omitted field is never fuzzy-matched onto a column the user chose to ignore.
     """
@@ -96,10 +100,20 @@ def resolve_bom_file(
     # skips the distributor lookup. Needs the PartPilot database; without it (a bare CLI run) the
     # stock check is simply skipped and every line goes to the distributors.
     stock = None
+    stock_shelf = None
     if check_stock and database is not None:
+        from partpilot.web.features.catalog import repo as catalog_repo
         from partpilot.web.features.catalog.stock_index import build_stock_index
 
-        stock = build_stock_index(database)
+        if stock_location_id:
+            shelf = catalog_repo.get_location(database, stock_location_id)
+            if shelf is None or shelf["retired_at"]:
+                raise ValueError("That shelf is retired or unknown.")
+            shelf_ids, stock_shelf = [stock_location_id], shelf["name"]
+        else:
+            shelf_ids = [s["id"] for s in catalog_repo.locations(database, kind="ours")]
+            stock_shelf = "our shelves"
+        stock = build_stock_index(database, shelf_ids)
 
     creds = DigiKeyCredentials.from_env(sandbox=sandbox)
     if currency:
@@ -118,9 +132,14 @@ def resolve_bom_file(
     resolved = resolve_bom(
         lines, client, settings, build_qty, lookup, stock, mouser, reel_threshold
     )
+    if stock_shelf:   # name the shelf in the note; the engine itself stays shelf-agnostic
+        for ln in resolved:
+            if ln.status == Status.IN_STOCK and (ln.flag_reason or "").startswith("in stock:"):
+                ln.flag_reason = ln.flag_reason.replace("in stock:", f"in stock on {stock_shelf}:", 1)
     return ResolvedRun(
         resolved=resolved, build_qty=build_qty, currency=creds.locale_currency,
         stock_checked=stock is not None, mouser_enabled=mouser is not None, warnings=warnings,
+        stock_shelf=stock_shelf,
     )
 
 
@@ -131,6 +150,7 @@ def run_purchase(
     build_qty: int | None = None,
     currency: str | None = None,
     check_stock: bool = True,
+    stock_location_id: int | None = None,
     reel_threshold: float | None = None,
     sandbox: bool = False,
     settings_path: str | Path | None = None,
@@ -143,8 +163,8 @@ def run_purchase(
 
     run = resolve_bom_file(
         bom_path, build_qty=build_qty, currency=currency, check_stock=check_stock,
-        reel_threshold=reel_threshold, sandbox=sandbox, settings_path=settings_path,
-        database=database,
+        stock_location_id=stock_location_id, reel_threshold=reel_threshold, sandbox=sandbox,
+        settings_path=settings_path, database=database,
     )
 
     report_path = out_dir / f"{bom_path.stem}-resolved.xlsx"
@@ -163,4 +183,5 @@ def run_purchase(
         stock_checked=run.stock_checked,
         mouser_enabled=run.mouser_enabled,
         warnings=run.warnings,
+        stock_shelf=run.stock_shelf,
     )

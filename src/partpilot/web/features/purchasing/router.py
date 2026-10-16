@@ -13,6 +13,7 @@ from partpilot.config import Settings
 from partpilot.models import Status
 
 from ...auth import PURCHASE_ROLES
+from ..catalog import repo as catalog_repo
 from ...core.deps import require_role, require_user
 from .service import run_purchase
 
@@ -46,6 +47,8 @@ def upload_page(request: Request):
             "default_build_qty": settings.build_qty,
             "default_currency": settings.currency or "",
             "stock_available": True,  # we always check our own catalog stock first
+            "shelves": catalog_repo.locations(request.app.state.database),
+            "shelf_selected": catalog_repo.default_shelf_id(request.app.state.database),
         },
     )
 
@@ -55,7 +58,7 @@ async def run(
     request: Request,
     file: UploadFile = File(...),
     build_qty: int = Form(...),
-    check_stock: bool = Form(False),
+    stock_shelf: str = Form(""),
 ):
     user = require_role(request, PURCHASE_ROLES)
     templates = request.app.state.templates
@@ -70,6 +73,12 @@ async def run(
             status_code=400,
         )
 
+    try:
+        check_stock, stock_location_id = catalog_repo.parse_stock_shelf(request.app.state.database, stock_shelf)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request, "error.html", {"message": str(exc)}, status_code=400)
+
     job_id = uuid.uuid4().hex
     job_dir = jobs_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +88,7 @@ async def run(
     try:
         result = await run_in_threadpool(
             run_purchase, bom_path, job_dir, build_qty=build_qty, check_stock=check_stock,
-            database=request.app.state.database,
+            stock_location_id=stock_location_id, database=request.app.state.database,
         )
     except Exception as exc:  # surface engine/credential errors to the user
         return templates.TemplateResponse(

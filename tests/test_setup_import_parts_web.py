@@ -45,7 +45,7 @@ def _fake_resolve(bom_path, *, build_qty=None, database=None, mappings=None, **k
             out.append(ResolvedLine(line=ln, kind=LineKind.MPN, status=Status.NOT_FOUND))
     return ResolvedRun(resolved=out, build_qty=build_qty or 1, currency="SEK",
                        stock_checked=kw.get("check_stock", True), mouser_enabled=False,
-                       warnings=["fake warning"])
+                       warnings=["fake warning"], stock_shelf="Main")
 
 
 CSV = ("Title row,,,\nDesignator,Wert,Value,Qty\n"
@@ -97,7 +97,7 @@ def test_full_flow_maps_resolves_reviews_and_applies(app, monkeypatch):
     assert r.status_code == 200, r.text
     html = r.text
     assert "fake warning" in html
-    assert "in inventory" in html and "RES-10K" in html
+    assert "in catalog" in html and "RES-10K" in html
     assert html.count('name="accept"') == 2            # new (10k) + unresolved (odd)
     assert "manual" in html
     assert "junk" not in html                           # the ignored column never reached the resolver
@@ -237,48 +237,3 @@ def test_setup_index_lists_tool(app):
     r = c.get("/setup")
     assert "/setup/import-parts" in r.text
 
-
-def test_ignore_stock_checkbox_skips_own_stock_check(app, monkeypatch):
-    """Buying for a customer who won't use our stocked parts: tick 'ignore stock' on the upload
-    page and every row goes to the distributors; the map, review and result pages say so."""
-    seen = {}
-
-    def spy(bom_path, **kw):
-        seen["check_stock"] = kw.get("check_stock", "missing")
-        return _fake_resolve(bom_path, **kw)
-
-    monkeypatch.setattr(setup_router, "resolve_bom_file", spy)
-    c = _admin(app)
-    r = c.post("/setup/import-parts", files={"file": ("bom.csv", CSV, "text/csv")},
-               data={"ignore_stock": "1"})
-    assert r.status_code == 200
-    assert "stock ignored" in r.text.lower()
-    job = _job_id(r.text)
-    r = c.post("/setup/import-parts/resolve",
-               data={"job_id": job, "map_0": "refdes", "map_1": "value", "map_2": "ignore",
-                     "map_3": "qty"})
-    assert r.status_code == 200
-    assert seen["check_stock"] is False
-    assert "stock ignored" in r.text.lower()
-    r = c.post("/setup/import-parts/apply", data={"job_id": job, "accept": ["0"]},
-               follow_redirects=True)
-    assert "stock ignored" in r.text.lower()
-
-
-def test_own_stock_is_checked_by_default(app, monkeypatch):
-    seen = {}
-
-    def spy(bom_path, **kw):
-        seen["check_stock"] = kw.get("check_stock", "missing")
-        return _fake_resolve(bom_path, **kw)
-
-    monkeypatch.setattr(setup_router, "resolve_bom_file", spy)
-    c = _admin(app)
-    r = c.post("/setup/import-parts", files={"file": ("bom.csv", CSV, "text/csv")})
-    assert "stock ignored" not in r.text.lower()
-    job = _job_id(r.text)
-    r = c.post("/setup/import-parts/resolve",
-               data={"job_id": job, "map_0": "refdes", "map_1": "value", "map_2": "ignore",
-                     "map_3": "qty"})
-    assert seen["check_stock"] is True
-    assert "stock ignored" not in r.text.lower()

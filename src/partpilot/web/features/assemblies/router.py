@@ -422,7 +422,11 @@ def import_form(request: Request, part_id: int):
     if a is None:
         return templates.TemplateResponse(
             request, "error.html", {"message": "Assembly not found."}, status_code=404)
-    return templates.TemplateResponse(request, "assembly_import.html", {"a": a, "error": None})
+    from ..catalog import repo as catalog_repo   # late import: catalog imports this feature's helpers
+    return templates.TemplateResponse(
+        request, "assembly_import.html",
+        {"a": a, "error": None, "shelves": catalog_repo.locations(db),
+         "shelf_selected": catalog_repo.default_shelf_id(db)})
 
 
 @router.post("/{part_id}/import", response_class=HTMLResponse)
@@ -436,32 +440,40 @@ async def import_resolve(request: Request, part_id: int):
         return templates.TemplateResponse(
             request, "error.html", {"message": "Assembly not found."}, status_code=404)
 
+    from ..catalog import repo as catalog_repo   # late import: catalog imports this feature's helpers
     form = await request.form()
     upload = form.get("file")
+    shelf_ctx = {"shelves": catalog_repo.locations(db), "shelf_selected": catalog_repo.default_shelf_id(db)}
     if not upload or not getattr(upload, "filename", ""):
         return templates.TemplateResponse(
-            request, "assembly_import.html", {"a": a, "error": "Choose a CSV BOM file."},
+            request, "assembly_import.html", {"a": a, "error": "Choose a CSV BOM file.", **shelf_ctx},
             status_code=400)
+    try:
+        check_stock, stock_location_id = catalog_repo.parse_stock_shelf(db, form.get("stock_shelf"))
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request, "assembly_import.html", {"a": a, "error": str(exc), **shelf_ctx}, status_code=400)
 
     job_id = uuid.uuid4().hex
     bom_path = jobs_dir / f"asmimp-{job_id}-{Path(upload.filename).name}"
     bom_path.write_bytes(await upload.read())
     try:
         run = await run_in_threadpool(
-            resolve_bom_file, bom_path, build_qty=1, database=request.app.state.database)
+            resolve_bom_file, bom_path, build_qty=1, database=request.app.state.database,
+            check_stock=check_stock, stock_location_id=stock_location_id)
     except Exception as exc:  # missing creds, bad file, etc.
         return templates.TemplateResponse(
-            request, "assembly_import.html", {"a": a, "error": f"Resolve failed: {exc}"},
+            request, "assembly_import.html", {"a": a, "error": f"Resolve failed: {exc}", **shelf_ctx},
             status_code=500)
     finally:
         bom_path.unlink(missing_ok=True)
 
-    plan = build_import_plan(db, run)
+    plan = build_import_plan(db, run, stock_location_id)
     (jobs_dir / f"asmplan-{job_id}.json").write_text(json.dumps(plan))
     return templates.TemplateResponse(
         request, "assembly_import_review.html",
         {"a": a, "plan": plan, "job_id": job_id, "warnings": run.warnings,
-         "source": Path(upload.filename).name},
+         "source": Path(upload.filename).name, "stock_shelf": run.stock_shelf},
     )
 
 

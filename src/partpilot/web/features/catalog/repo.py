@@ -343,6 +343,22 @@ def preferred_shelf_id(db: Database, *, customer_id: int | None = None,
     return candidate_shelf_ids(db, customer_id=customer_id, order_id=order_id)[0]
 
 
+def parse_stock_shelf(db: Database, raw: str | None) -> tuple[bool, int | None]:
+    """Form value of the "Check stock on shelf" selector -> (check_stock, stock_location_id).
+    ``none`` = don't check; empty = our default shelf. Raises ValueError for retired/unknown ids."""
+    v = (raw or "").strip()
+    if v == "none":
+        return False, None
+    if not v:
+        return True, default_shelf_id(db)
+    if not v.isdigit():
+        raise ValueError("Choose a shelf.")
+    shelf = get_location(db, int(v))
+    if shelf is None or shelf["retired_at"]:
+        raise ValueError("That shelf is retired or unknown.")
+    return True, int(v)
+
+
 def create_shelf(db: Database, *, kind: str, owner_contact_id: int | None = None,
                  customer_order_id: int | None = None, name: str | None = None) -> int:
     if kind not in _SHELF_KINDS:

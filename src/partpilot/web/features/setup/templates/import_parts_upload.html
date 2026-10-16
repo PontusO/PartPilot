@@ -14,11 +14,11 @@
     <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
     <label for="build_qty">Build quantity for the stock / pricing check (optional)</label>
     <input id="build_qty" name="build_qty" type="number" min="1" step="1" placeholder="settings default">
-    <div class="check">
-      <input id="ignore_stock" name="ignore_stock" type="checkbox" value="1">
-      <label for="ignore_stock" style="margin:0; color:inherit;">Ignore our own stock — resolve every
-        row at the distributors (e.g. buying for a customer who won't use stocked parts)</label>
-    </div>
+    <label for="stock_shelf">Check stock on shelf</label>
+    {% with shelf_field='stock_shelf', shelf_none=True %}{% include "_shelf_select.html" %}{% endwith %}
+    <p class="note">Rows already covered by free stock on that shelf are marked in stock and skip the
+      distributors. Pick a customer's shelf when buying for them — their shelf sees only their parts, so
+      rows we hold on Main are still priced. "Don't check stock" prices every row.</p>
     <button type="submit">Next: map columns</button>
   </form>
 </div>

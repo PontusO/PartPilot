@@ -4,7 +4,7 @@
 <div class="panel">
   <h1>Purchasing — {{ source_name }}</h1>
   <p class="note">
-    {{ result.build_qty }} board(s){% if result.stock_checked %}, miniMRP stock checked{% endif %}{% if result.mouser_enabled %}, Mouser fallback enabled{% endif %}.
+    {{ result.build_qty }} board(s){% if result.stock_checked %}, stock checked on <b>{{ result.stock_shelf }}</b>{% else %}, stock not checked{% endif %}{% if result.mouser_enabled %}, Mouser fallback enabled{% endif %}.
   </p>
 
   {% for w in result.warnings %}<div class="err">{{ w }}</div>{% endfor %}

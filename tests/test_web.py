@@ -1130,7 +1130,7 @@ def test_purchasing_flow_and_download(app, monkeypatch):
     r = client.post(
         "/purchasing/run",
         files={"file": ("slice.csv", b"refdes,value\nR1,10k\n", "text/csv")},
-        data={"build_qty": "10", "check_stock": "true"},
+        data={"build_qty": "10", "stock_shelf": ""},
     )
     assert r.status_code == 200
     assert "MPN1" in r.text and "resolved" in r.text

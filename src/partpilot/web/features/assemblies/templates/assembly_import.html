@@ -12,6 +12,10 @@
         onsubmit="showOverlay()">
     <label for="file">BOM file (.csv / Excel)</label>
     <input id="file" name="file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls" required>
+    <label for="stock_shelf">Check stock on shelf</label>
+    {% with shelf_field='stock_shelf', shelf_none=True %}{% include "_shelf_select.html" %}{% endwith %}
+    <p class="note">Lines covered by free stock on that shelf are marked in stock. Pick a customer's shelf
+      when the build is theirs; "Don't check stock" prices every line.</p>
     <button type="submit">Resolve</button>
   </form>
 </div>

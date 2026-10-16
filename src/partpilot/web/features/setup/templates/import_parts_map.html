@@ -42,7 +42,7 @@
       <button type="submit" class="ghost">Resolve rows</button>
       <button type="button" class="quiet" onclick="window.location.href='/setup/import-parts'">Cancel</button>
       {% if build_qty %}<span class="note">Build qty {{ build_qty }}</span>{% endif %}
-      {% if not check_stock %}<span class="badge warn" title="every row goes to Digi-Key/Mouser, even if we have it in stock">own stock ignored</span>{% endif %}
+      {% if stock_shelf %}<span class="note">Stock checked on <b>{{ stock_shelf }}</b></span>{% else %}<span class="badge warn" title="every row goes to Digi-Key/Mouser">stock not checked</span>{% endif %}
     </div>
   </form>
 </div>

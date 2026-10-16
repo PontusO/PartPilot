@@ -11,8 +11,8 @@
   <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
   <h1>Imported parts <span class="flag" style="font-size:.9rem;">— {{ source }}</span></h1>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  {% if not stock_checked %}<p class="note"><span class="badge warn">own stock ignored</span>
-    Rows were resolved at the distributors regardless of what we have on the shelf.</p>{% endif %}
+  {% if stock_shelf %}<p class="note">Stock checked on <b>{{ stock_shelf }}</b>.</p>
+  {% else %}<p class="note"><span class="badge warn">Stock not checked</span> — rows were resolved at the distributors.</p>{% endif %}
 
   <div class="cards">
     <div class="card"><b>{{ result.created }}</b><small>parts created</small></div>
