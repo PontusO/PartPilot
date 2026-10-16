@@ -28,7 +28,7 @@ def reports_index(request: Request):
 
 @router.get("/stock-movements", response_class=HTMLResponse)
 def stock_movements(request: Request, start: str | None = None, end: str | None = None,
-                    mtype: str | None = None, location_id: int | None = None):
+                    mtype: str | None = None, location_id: str | None = None):
     require_user(request)
     db = request.app.state.database
     # Default to the last 30 days so the page opens on something useful, not the whole ledger.
@@ -36,6 +36,7 @@ def stock_movements(request: Request, start: str | None = None, end: str | None 
     start = (start or "").strip() or (today - timedelta(days=30)).isoformat()
     end = (end or "").strip() or today.isoformat()
     mtype = (mtype or "").strip() or None
+    location_id = int(location_id) if (location_id or "").strip().isdigit() else None   # "" = all shelves
 
     rows = repo.stock_movements(db, start=start, end=end, mtype=mtype, location_id=location_id, limit=LIMIT)
     summary = repo.stock_movement_summary(db, start=start, end=end, mtype=mtype, location_id=location_id)

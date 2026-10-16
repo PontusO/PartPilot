@@ -289,6 +289,8 @@ def create_pos_from_suggestions(db: Database, selections: dict[tuple[int, int], 
 
 def create_po(db: Database, data: dict) -> int:
     with db.connect() as conn:
+        if data.get("location_id"):
+            catrepo.require_shelf(conn, data["location_id"])
         po_id = conn.execute(
             "INSERT INTO purchase_orders (po_no, supplier_id, status, order_date, required_date, "
             "currency, notes, location_id) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)",

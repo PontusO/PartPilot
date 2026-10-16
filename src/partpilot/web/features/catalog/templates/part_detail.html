@@ -156,7 +156,7 @@
       <input id="qty" name="qty" type="number" step="any" min="0" required></div>
     {% if locations %}
     <div><label for="location_id">Shelf</label>
-      {% with shelves=locations, shelf_selected=none, shelf_field='location_id' %}{% include "_shelf_select.html" %}{% endwith %}
+      {% with shelves=locations, shelf_field='location_id' %}{% include "_shelf_select.html" %}{% endwith %}
     </div>
     {% endif %}
     <div style="flex:1; min-width:160px;"><label for="note">Note</label>

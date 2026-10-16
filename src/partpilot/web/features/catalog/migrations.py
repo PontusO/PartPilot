@@ -429,7 +429,9 @@ MIGRATIONS = [
         ALTER TABLE stock_locations ADD COLUMN kind TEXT NOT NULL DEFAULT 'ours';
         ALTER TABLE stock_locations ADD COLUMN owner_contact_id INTEGER;
         ALTER TABLE stock_locations ADD COLUMN customer_order_id INTEGER;
-        ALTER TABLE stock_locations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));
+        -- (no DEFAULT (datetime('now')): SQLite refuses a non-constant default on a populated table)
+        ALTER TABLE stock_locations ADD COLUMN created_at TEXT;
+        UPDATE stock_locations SET created_at = datetime('now') WHERE created_at IS NULL;
         ALTER TABLE stock_locations ADD COLUMN retired_at TEXT;
         CREATE UNIQUE INDEX IF NOT EXISTS ux_stockloc_name ON stock_locations(name);
         -- parts.total_qty / total_alloc now mean OUR stock only; customer shelves roll up here.

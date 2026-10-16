@@ -13,9 +13,10 @@ from ..catalog import repo as catrepo
 
 
 def _ship_line(conn, part_id: int, order_line_id: int | None, qty: float, *, reference: str,
-               user: str | None) -> None:
+               user: str | None, shelves: list[int]) -> None:
     """Issue ``qty`` of a despatch line: first from the shelves its allocations reserved (consuming
-    them), then any unallocated remainder from our default shelf."""
+    them), then any unallocated remainder from the order's candidate shelves (job, customer, ours)
+    by what they hold, and finally from our default shelf (which may go negative, as today)."""
     remaining = qty
     if order_line_id:
         for a in conn.execute(
@@ -34,6 +35,14 @@ def _ship_line(conn, part_id: int, order_line_id: int | None, qty: float, *, ref
                 conn.execute("UPDATE allocations SET qty = qty - ? WHERE id = ?", (take, a["id"]))
             remaining -= take
         stock.recompute_alloc(conn, part_id)
+    for loc in shelves:
+        if remaining <= 0:
+            break
+        take = min(remaining, max(0.0, stock.shelf_on_hand(conn, part_id, loc)))
+        if take > 0:
+            stock.post_movement(conn, part_id, delta=-take, mtype=stock.ISSUE, reference=reference,
+                                note="despatch", user=user, location_id=loc)
+            remaining -= take
     if remaining > 0:
         stock.post_movement(conn, part_id, delta=-remaining, mtype=stock.ISSUE, reference=reference,
                             note="despatch", user=user, location_id=stock.default_shelf(conn))
@@ -300,6 +309,11 @@ def dispatch(db: Database, despatch_id: int, user: str | None = None) -> None:
             raise ValueError("Despatch not found.")
         if d["status"] != "packed":
             raise ValueError(f"Confirm the package is ready before dispatching (this one is {d['status']}).")
+        cust = conn.execute("SELECT customer_id FROM customer_orders WHERE id = ?",
+                            (d["order_id"],)).fetchone() if d["order_id"] else None
+    shelves = catrepo.candidate_shelf_ids(db, customer_id=cust["customer_id"] if cust else None,
+                                          order_id=d["order_id"])
+    with db.connect() as conn:
         desp_ref = d["despatch_no"] or ref_no("DN", despatch_id)
         order_id = d["order_id"]
 
@@ -321,7 +335,7 @@ def dispatch(db: Database, despatch_id: int, user: str | None = None) -> None:
         ).fetchall():
             if ln["part_id"]:
                 _ship_line(conn, ln["part_id"], ln["order_line_id"], ln["qty"],
-                           reference=desp_ref, user=user)
+                           reference=desp_ref, user=user, shelves=shelves)
             if ln["order_line_id"]:
                 conn.execute("UPDATE customer_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?",
                              (ln["qty"], ln["order_line_id"]))

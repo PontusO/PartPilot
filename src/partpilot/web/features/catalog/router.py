@@ -170,8 +170,10 @@ def _render_edit_form(request: Request, part: dict, *, notice: str | None = None
          "is_default": bool(s["is_default"]), "cost_tiers": s.get("cost_tiers") or []}
         for s in part["suppliers"]
     ]
-    st = part["stock"][0] if part["stock"] else {}
-    stock = {"qty": st.get("on_hand"), "location_id": st.get("location_id"), "bin": st.get("bin")}
+    # The form manages OUR stock only — never pre-fill from a customer's shelf row (saving the form
+    # unchanged would otherwise book the customer's quantity as an opening balance on Main).
+    st = next((s for s in part["stock"] if s.get("kind") == "ours"), {})
+    stock = {"qty": st.get("on_hand", 0), "location_id": st.get("location_id"), "bin": st.get("bin")}
     return _render_form(
         request, action=f"/catalog/{part_id}/edit", heading=f"Edit — {part['part_no']}",
         submit_label="Save changes", stock_heading="Stock on hand",
@@ -434,7 +436,7 @@ def shelf_retire(request: Request, location_id: int):
 
 
 @router.get("/{part_id}", response_class=HTMLResponse)
-def part_detail(request: Request, part_id: int):
+def part_detail(request: Request, part_id: int, shelf: int | None = None):
     user = require_user(request)
     db = request.app.state.database
     templates = request.app.state.templates
@@ -450,7 +452,7 @@ def part_detail(request: Request, part_id: int):
         {"part": part, "can_edit": user.role in CATALOG_WRITE_ROLES,
          "can_move": user.role in STOCK_MOVE_ROLES,
          "movements": stock.movements_for_part(db, part_id),
-         "locations": repo.locations(db),
+         "locations": repo.locations(db), "shelf_selected": shelf,
          "versions": version_list, "version_base": "/catalog"},
     )
 
@@ -503,6 +505,11 @@ async def move_stock(request: Request, part_id: int):
 
     with db.connect() as conn:
         location_id = location_id or stock.default_shelf(conn)
+        try:
+            repo.require_shelf(conn, location_id)
+        except ValueError as exc:
+            return request.app.state.templates.TemplateResponse(
+                request, "error.html", {"message": str(exc)}, status_code=400)
         current = stock.shelf_on_hand(conn, part_id, location_id)
         conn.commit()
     if action == "receive" and qty:

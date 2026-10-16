@@ -343,6 +343,23 @@ def preferred_shelf_id(db: Database, *, customer_id: int | None = None,
     return candidate_shelf_ids(db, customer_id=customer_id, order_id=order_id)[0]
 
 
+def require_shelf(conn, location_id: int | None, *, kinds: tuple[str, ...] | None = None,
+                  customer_id: int | None = None) -> dict:
+    """Validate a posted shelf id inside a transaction: it must exist and be active; optionally be of
+    one of ``kinds``; optionally be ours or owned by ``customer_id``. Raises ValueError."""
+    row = conn.execute("SELECT * FROM stock_locations WHERE id = ?", (location_id,)).fetchone() \
+        if location_id else None
+    if row is None:
+        raise ValueError("Unknown shelf.")
+    if row["retired_at"]:
+        raise ValueError(f"The shelf {row['name']!r} is retired.")
+    if kinds and row["kind"] not in kinds:
+        raise ValueError(f"The shelf {row['name']!r} is a customer's shelf — pick one of ours.")
+    if customer_id is not None and row["kind"] == "customer" and row["owner_contact_id"] != customer_id:
+        raise ValueError(f"The shelf {row['name']!r} belongs to another customer.")
+    return dict(row)
+
+
 def parse_stock_shelf(db: Database, raw: str | None) -> tuple[bool, int | None]:
     """Form value of the "Check stock on shelf" selector -> (check_stock, stock_location_id).
     ``none`` = don't check; empty = our default shelf. Raises ValueError for retired/unknown ids."""
@@ -701,6 +718,7 @@ def update_part(
         # shelf's row is never re-homed or re-counted from here.
         qty = (stock or {}).get("qty")
         loc_id = (stock or {}).get("location_id") or default_shelf(conn)
+        require_shelf(conn, loc_id, kinds=("ours",))
         own_row = conn.execute(
             """SELECT pk.id, pk.on_hand FROM part_stock pk
                JOIN stock_locations l ON l.id = pk.location_id

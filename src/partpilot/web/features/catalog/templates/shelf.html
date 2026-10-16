@@ -30,7 +30,7 @@
           <td class="num">{% if r.on_hand < 0 %}<span class="badge bad">{{ "%g"|format(r.on_hand) }}</span>{% else %}{{ "%g"|format(r.on_hand) }}{% endif %}</td>
           <td class="num">{{ "%g"|format(r.allocated) }}</td><td class="num">{{ "%g"|format(r.free) }}</td>
           <td class="num">{{ "%.2f"|format(r.line_value) }}</td>
-          {% if can_move %}<td><button type="button" class="ghost" onclick="window.location.href='/catalog/{{ r.part_id }}#adjust'">Adjust</button></td>{% endif %}
+          {% if can_move %}<td><button type="button" class="ghost" onclick="window.location.href='/catalog/{{ r.part_id }}?shelf={{ shelf.id }}#adjust'">Adjust</button></td>{% endif %}
         </tr>
         {% endfor %}
         {% if not rows %}<tr><td colspan="8" class="note">Nothing on this shelf.</td></tr>{% endif %}

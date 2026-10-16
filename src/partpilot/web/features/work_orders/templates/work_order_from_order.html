@@ -58,12 +58,7 @@
       {% if not customer_has_shelf and order.customer_id %}
       <p class="note" style="margin-top:.4rem;">This customer has no shelf yet — the build will draw from
         our stock. Buying parts for them instead?
-        <form method="post" action="/catalog/shelves" style="display:inline;">
-          <input type="hidden" name="kind" value="customer">
-          <input type="hidden" name="owner_contact_id" value="{{ order.customer_id }}">
-          <input type="hidden" name="return_to" value="/work-orders/from-order/{{ order.id }}">
-          <button type="submit" class="ghost">Create customer shelf</button>
-        </form></p>
+        <button type="submit" form="create-shelf" class="ghost">Create customer shelf</button></p>
       {% endif %}
     </div>
     {% endif %}
@@ -72,5 +67,13 @@
       <button type="button" onclick="window.location.href='/customer-orders/{{ order.id }}'">Back to order</button>
     </div>
   </form>
+  {% if buildable and not customer_has_shelf and order.customer_id %}
+  {# Sibling form (never nested): the button above submits it via form="create-shelf". #}
+  <form id="create-shelf" method="post" action="/catalog/shelves">
+    <input type="hidden" name="kind" value="customer">
+    <input type="hidden" name="owner_contact_id" value="{{ order.customer_id }}">
+    <input type="hidden" name="return_to" value="/work-orders/from-order/{{ order.id }}">
+  </form>
+  {% endif %}
 </div>
 {% endblock %}

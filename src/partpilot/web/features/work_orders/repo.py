@@ -531,8 +531,10 @@ def create_work_orders_for_order(db: Database, order_id: int, selections: dict[i
     """Create a work order per selected line ({line_id: build_qty}), linked to the order line, all
     building from ``location_id`` (the customer's job/customer shelf, or our default shelf)."""
     with db.connect() as conn:
-        head = conn.execute("SELECT order_ref, required_date FROM customer_orders WHERE id = ?",
+        head = conn.execute("SELECT order_ref, required_date, customer_id FROM customer_orders WHERE id = ?",
                             (order_id,)).fetchone()
+        if location_id and head is not None:
+            catrepo.require_shelf(conn, location_id, customer_id=head["customer_id"])
         ref = (head["order_ref"] if head and head["order_ref"] else f"CO{order_id}")
         required_date = head["required_date"] if head else None
         valid = {r["id"]: r["part_id"] for r in conn.execute(
