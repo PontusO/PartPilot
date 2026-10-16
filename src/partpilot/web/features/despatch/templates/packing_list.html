@@ -28,7 +28,7 @@
           <tr>
             <td class="num"><input type="checkbox" name="packed" value="{{ ln.id }}"
                                    {{ 'checked' if ln.packed else '' }} {{ 'disabled' if is_packed or not can_pack else '' }}></td>
-            <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}<span class="note">(no part)</span>{% endif %}</td>
+            <td>{% if ln.part_id %}<a href="/catalog/{{ ln.part_id }}">{{ ln.part_no }}</a>{% else %}<span class="note">(no part)</span>{% endif %} {% if ln.customer_shelf_qty %}<span class="badge warn" title="{{ "%g"|format(ln.customer_shelf_qty) }} reserved on the customer's own shelf">ships from customer shelf</span>{% endif %}</td>
             <td>{{ ln.value or '' }}</td>
             <td class="num">{{ "%g"|format(ln.qty) }}</td>
           </tr>

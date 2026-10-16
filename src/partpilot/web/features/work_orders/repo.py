@@ -13,6 +13,7 @@ from datetime import date
 from ...core import add_workdays, iso, parse_date, ref_no, sub_workdays, workdays_between
 from ...core.db import Database
 from ..catalog import devmgmt_outbox, stock
+from ..catalog import repo as catrepo
 
 
 def _spillage_settings(conn) -> tuple[float, float]:
@@ -475,7 +476,13 @@ def fulfilment_proposals(db: Database, order_id: int) -> list[dict]:
               'covered'    — a buildable assembly already met by stock + open WOs;
               'component'  — not an assembly (would be purchased, not built).
     shortfall = ordered − free stock − qty already on open work orders for this line.
+    Free stock is counted over the shelves this customer may draw from (job shelf, customer shelf,
+    ours) — never another customer's shelf.
     """
+    with db.connect() as conn:
+        head = conn.execute("SELECT customer_id FROM customer_orders WHERE id = ?", (order_id,)).fetchone()
+    shelves = catrepo.candidate_shelf_ids(
+        db, customer_id=head["customer_id"] if head else None, order_id=order_id)
     with db.connect() as conn:
         lines = conn.execute(
             """SELECT l.id AS line_id, l.ordered_qty, l.part_id,
@@ -487,7 +494,7 @@ def fulfilment_proposals(db: Database, order_id: int) -> list[dict]:
         props = []
         for r in lines:
             d = dict(r)
-            free = (d["total_qty"] or 0) - (d["total_alloc"] or 0)
+            free = sum(stock.free_on_shelf(conn, d["part_id"], s) for s in shelves)
             on_wo = conn.execute(
                 "SELECT COALESCE(SUM(qty), 0) FROM work_orders "
                 "WHERE customer_order_line_id = ? AND status IN ('allocated', 'issued')",

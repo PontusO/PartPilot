@@ -9,24 +9,34 @@ from __future__ import annotations
 from ...core import ref_no
 from ...core.db import Database
 from ..catalog import stock
+from ..catalog import repo as catrepo
 
 
-def _consume_allocation(conn, order_line_id: int, qty: float) -> None:
-    """Release up to ``qty`` of stock reserved to an order line (it's being shipped)."""
+def _ship_line(conn, part_id: int, order_line_id: int | None, qty: float, *, reference: str,
+               user: str | None) -> None:
+    """Issue ``qty`` of a despatch line: first from the shelves its allocations reserved (consuming
+    them), then any unallocated remainder from our default shelf."""
     remaining = qty
-    for a in conn.execute(
-        "SELECT id, part_id, qty FROM allocations WHERE customer_order_line_id = ? ORDER BY id",
-        (order_line_id,),
-    ).fetchall():
-        if remaining <= 0:
-            break
-        take = min(a["qty"], remaining)
-        if take >= a["qty"]:
-            conn.execute("DELETE FROM allocations WHERE id = ?", (a["id"],))
-        else:
-            conn.execute("UPDATE allocations SET qty = qty - ? WHERE id = ?", (take, a["id"]))
-        stock.recompute_alloc(conn, a["part_id"])
-        remaining -= take
+    if order_line_id:
+        for a in conn.execute(
+            "SELECT id, location_id, qty FROM allocations WHERE customer_order_line_id = ? AND part_id = ? "
+            "ORDER BY id", (order_line_id, part_id),
+        ).fetchall():
+            if remaining <= 0:
+                break
+            take = min(a["qty"], remaining)
+            stock.post_movement(conn, part_id, delta=-take, mtype=stock.ISSUE, reference=reference,
+                                note="despatch", user=user,
+                                location_id=a["location_id"] or stock.default_shelf(conn))
+            if take >= a["qty"]:
+                conn.execute("DELETE FROM allocations WHERE id = ?", (a["id"],))
+            else:
+                conn.execute("UPDATE allocations SET qty = qty - ? WHERE id = ?", (take, a["id"]))
+            remaining -= take
+        stock.recompute_alloc(conn, part_id)
+    if remaining > 0:
+        stock.post_movement(conn, part_id, delta=-remaining, mtype=stock.ISSUE, reference=reference,
+                            note="despatch", user=user, location_id=stock.default_shelf(conn))
 
 
 # ---- reads ----
@@ -68,7 +78,11 @@ def get_despatch(db: Database, despatch_id: int) -> dict | None:
         if head is None:
             return None
         lines = [dict(r) for r in conn.execute(
-            """SELECT l.id, l.qty, l.unit_price, l.part_id, l.packed, p.part_no, p.value
+            """SELECT l.id, l.qty, l.unit_price, l.part_id, l.packed, p.part_no, p.value,
+                      (SELECT COALESCE(SUM(a.qty), 0) FROM allocations a
+                       JOIN stock_locations sl ON sl.id = a.location_id
+                       WHERE a.customer_order_line_id = l.order_line_id AND a.part_id = l.part_id
+                         AND sl.kind = 'customer') AS customer_shelf_qty
                FROM despatch_lines l LEFT JOIN parts p ON p.id = l.part_id
                WHERE l.despatch_id = ? ORDER BY l.id""",
             (despatch_id,),
@@ -115,6 +129,10 @@ def shippable_lines(db: Database, order_id: int) -> list[dict]:
     already subtracts quantities sitting on open (packing/packed) packing lists, so opening a second
     list can never offer — or accept — more than remains to ship in total."""
     with db.connect() as conn:
+        head = conn.execute("SELECT customer_id FROM customer_orders WHERE id = ?", (order_id,)).fetchone()
+    shelves = catrepo.candidate_shelf_ids(
+        db, customer_id=head["customer_id"] if head else None, order_id=order_id)
+    with db.connect() as conn:
         rows = conn.execute(
             """SELECT l.id AS line_id, l.ordered_qty, l.shipped_qty, l.unit_price, l.discount_percent,
                       l.part_id, p.part_no, p.value, p.total_qty,
@@ -128,12 +146,15 @@ def shippable_lines(db: Database, order_id: int) -> list[dict]:
                WHERE l.order_id = ? ORDER BY COALESCE(l.line_no, 1e9), l.id""",
             (order_id,),
         ).fetchall()
+        on_hand_by_part = {
+            r["part_id"]: sum(stock.shelf_on_hand(conn, r["part_id"], s) for s in shelves)
+            for r in rows if r["part_id"]}
     out = []
     for r in rows:
         d = dict(r)
         d["outstanding"] = max(0.0, (d["ordered_qty"] or 0) - (d["shipped_qty"] or 0)
                                - (d["open_packed"] or 0))
-        on_hand = d["total_qty"] or 0
+        on_hand = on_hand_by_part.get(d["part_id"], 0) or 0
         d["suggested_qty"] = min(d["outstanding"], on_hand) if on_hand > 0 else d["outstanding"]
         d["net_price"] = (d["unit_price"] or 0) * (1 - (d["discount_percent"] or 0) / 100.0)
         out.append(d)
@@ -299,11 +320,8 @@ def dispatch(db: Database, despatch_id: int, user: str | None = None) -> None:
             (despatch_id,),
         ).fetchall():
             if ln["part_id"]:
-                stock.post_movement(conn, ln["part_id"], delta=-ln["qty"], mtype=stock.ISSUE,
-                                    reference=desp_ref, note="despatch", user=user,
-                                    location_id=stock.default_shelf(conn))
-                if ln["order_line_id"]:
-                    _consume_allocation(conn, ln["order_line_id"], ln["qty"])
+                _ship_line(conn, ln["part_id"], ln["order_line_id"], ln["qty"],
+                           reference=desp_ref, user=user)
             if ln["order_line_id"]:
                 conn.execute("UPDATE customer_order_lines SET shipped_qty = shipped_qty + ? WHERE id = ?",
                              (ln["qty"], ln["order_line_id"]))

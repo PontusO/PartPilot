@@ -12,6 +12,7 @@ import re
 from ...core import ref_no
 from ...core.db import Database
 from ..catalog import pricing, stock
+from ..catalog import repo as catrepo
 from ..setup import repo as setup_repo
 from . import export
 
@@ -405,9 +406,14 @@ def delete_line(db: Database, order_id: int, line_id: int) -> None:
 # ---- stock allocation ----
 
 def allocate_order(db: Database, order_id: int) -> float:
-    """Reserve available stock to this order's lines (up to the outstanding qty per line, limited by
-    each part's free stock). Returns the total newly allocated. Operator-triggered, re-runnable."""
+    """Reserve available stock to this order's lines (up to the outstanding qty per line), walking
+    the shelves the customer may draw from — their job shelf, their customer shelf, then ours — and
+    recording one allocation row per shelf taken. Returns the total newly allocated. Re-runnable."""
     newly = 0.0
+    with db.connect() as conn:
+        head = conn.execute("SELECT customer_id FROM customer_orders WHERE id = ?", (order_id,)).fetchone()
+    shelves = catrepo.candidate_shelf_ids(
+        db, customer_id=head["customer_id"] if head else None, order_id=order_id)
     with db.connect() as conn:
         lines = conn.execute(
             "SELECT id, part_id, ordered_qty FROM customer_order_lines WHERE order_id = ?", (order_id,)
@@ -420,19 +426,17 @@ def allocate_order(db: Database, order_id: int) -> float:
                 (ln["id"],),
             ).fetchone()[0]
             need = (ln["ordered_qty"] or 0) - already
-            if need <= 0:
-                continue
-            part = conn.execute("SELECT total_qty, total_alloc FROM parts WHERE id = ?",
-                                (ln["part_id"],)).fetchone()
-            free = (part["total_qty"] or 0) - (part["total_alloc"] or 0)
-            take = min(need, free)
-            if take > 0:
-                conn.execute(
-                    "INSERT INTO allocations (customer_order_line_id, part_id, qty) VALUES (?, ?, ?)",
-                    (ln["id"], ln["part_id"], take),
-                )
-                stock.recompute_alloc(conn, ln["part_id"])  # lowers free for later lines of same part
-                newly += take
+            for loc in shelves:
+                if need <= 0:
+                    break
+                take = min(need, stock.free_on_shelf(conn, ln["part_id"], loc))
+                if take > 0:
+                    conn.execute(
+                        "INSERT INTO allocations (customer_order_line_id, part_id, qty, location_id) "
+                        "VALUES (?, ?, ?, ?)", (ln["id"], ln["part_id"], take, loc))
+                    stock.recompute_alloc(conn, ln["part_id"])  # lowers free for later lines of same part
+                    need -= take
+                    newly += take
         conn.commit()
     return newly
 
