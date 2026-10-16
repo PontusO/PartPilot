@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ shelf.name }} · Shelf · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/catalog/shelves">← Stock shelves</a></p>
+  <h1>{{ shelf.name }}
+    {% if shelf.kind == 'customer' %}<span class="badge warn">customer shelf</span>{% else %}<span class="badge stock">our shelf</span>{% endif %}
+    {% if shelf.retired_at %}<span class="badge muted">retired</span>{% endif %}</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if shelf.owner_contact_id or shelf.customer_order_id %}
+  <p class="note">
+    {% if shelf.owner_contact_id %}Owner: <a href="/contacts/{{ shelf.owner_contact_id }}">{{ shelf.owner_name }}</a>{% endif %}
+    {% if shelf.customer_order_id %} · Job: <a href="/customer-orders/{{ shelf.customer_order_id }}">{{ shelf.order_ref }}</a>{% endif %}
+  </p>
+  {% endif %}
+  <div class="cards">
+    <div class="card"><b>{{ rows|length }}</b><small>parts</small></div>
+    <div class="card"><b>{{ "%g"|format(shelf.on_hand_total) }}</b><small>units on hand</small></div>
+    <div class="card"><b>{{ "%.2f"|format(shelf.value_total) }}</b><small>value at unit cost</small></div>
+  </div>
+  <div style="overflow-x:auto; margin-top:1rem;">
+    <table>
+      <thead><tr><th>Part</th><th>Value</th><th>Bin</th><th class="num">On hand</th><th class="num">Allocated</th>
+                 <th class="num">Free</th><th class="num">Line value</th>{% if can_move %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="/catalog/{{ r.part_id }}">{{ r.part_no }}</a></td>
+          <td class="note">{{ r.value or '' }}</td><td>{{ r.bin or '' }}</td>
+          <td class="num">{% if r.on_hand < 0 %}<span class="badge bad">{{ "%g"|format(r.on_hand) }}</span>{% else %}{{ "%g"|format(r.on_hand) }}{% endif %}</td>
+          <td class="num">{{ "%g"|format(r.allocated) }}</td><td class="num">{{ "%g"|format(r.free) }}</td>
+          <td class="num">{{ "%.2f"|format(r.line_value) }}</td>
+          {% if can_move %}<td><button type="button" class="ghost" onclick="window.location.href='/catalog/{{ r.part_id }}#adjust'">Adjust</button></td>{% endif %}
+        </tr>
+        {% endfor %}
+        {% if not rows %}<tr><td colspan="8" class="note">Nothing on this shelf.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_admin and not shelf.retired_at %}
+  <div style="margin-top:1.2rem; display:flex; gap:.8rem; align-items:flex-end; flex-wrap:wrap;">
+    <form method="post" action="/catalog/shelves/{{ shelf.id }}/rename" style="display:flex; gap:.6rem; align-items:flex-end;">
+      <div><label for="name">Rename</label><input id="name" name="name" type="text" value="{{ shelf.name }}" required></div>
+      <button type="submit" class="ghost">Save</button>
+    </form>
+    <form method="post" action="/catalog/shelves/{{ shelf.id }}/retire"
+          onsubmit="return confirm('Retire this shelf? It must be empty with no open orders.')">
+      <button type="submit" class="danger">Retire shelf</button>
+    </form>
+  </div>
+  {% endif %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Recent movements</h2>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>When</th><th>Part</th><th>Type</th><th class="num">Δ</th><th class="num">After</th><th>Ref</th><th>Note</th><th>User</th></tr></thead>
+      <tbody>
+        {% for m in movements %}
+        <tr><td class="note">{{ m.moved_at }}</td><td><a href="/catalog/{{ m.part_id }}">{{ m.part_no }}</a></td>
+            <td>{{ m.mtype }}</td><td class="num">{{ "%g"|format(m.qty_delta) }}</td><td class="num">{{ "%g"|format(m.qty_after) }}</td>
+            <td>{{ m.reference or '' }}</td><td class="note">{{ m.note or '' }}</td><td class="note">{{ m.user or '' }}</td></tr>
+        {% endfor %}
+        {% if not movements %}<tr><td colspan="8" class="note">No movements yet.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

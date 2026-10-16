@@ -1,0 +1,10 @@
+{# Shelf picker shared by every feature.
+   Context: shelves (list of {id, name, kind}), shelf_selected (id | 'none' | none),
+   shelf_field (input name; default location_id), shelf_none (offer "Don't check stock"). #}
+{% set _f = shelf_field or 'location_id' %}
+<select id="{{ _f }}" name="{{ _f }}">
+  {% if shelf_none %}<option value="none" {{ 'selected' if shelf_selected == 'none' else '' }}>Don't check stock</option>{% endif %}
+  {% for s in shelves %}
+  <option value="{{ s.id }}" {{ 'selected' if shelf_selected|string == s.id|string else '' }}>{% if s.kind == 'customer' %}Customer: {% endif %}{{ s.name }}</option>
+  {% endfor %}
+</select>

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Stock shelves · PartPilot{% endblock %}
+{% block content %}
+<div class="panel">
+  <p class="note"><a href="/setup">← Setup &amp; Tools</a></p>
+  <h1>Stock shelves</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <p class="note">A shelf is where stock sits and <b>whose</b> it is. <b>Our</b> shelves count in our
+    totals, valuation and the webshop. A <b>customer</b> shelf holds parts the customer paid for: only
+    their work orders draw from it, and it never counts as ours. Customer shelves are created from the
+    customer's contact page or from a customer order (job shelf).</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Shelf</th><th>Kind</th><th>Owner</th><th>Order</th><th class="num">Parts</th>
+                 <th class="num">On hand</th><th></th></tr></thead>
+      <tbody>
+        {% for s in shelves %}
+        <tr>
+          <td><b>{{ s.name }}</b>{% if s.retired_at %} <span class="badge muted">retired</span>{% endif %}</td>
+          <td>{% if s.kind == 'customer' %}<span class="badge warn">customer</span>{% else %}<span class="badge stock">ours</span>{% endif %}</td>
+          <td>{% if s.owner_contact_id %}<a href="/contacts/{{ s.owner_contact_id }}">{{ s.owner_name or '#' ~ s.owner_contact_id }}</a>{% endif %}</td>
+          <td>{% if s.customer_order_id %}<a href="/customer-orders/{{ s.customer_order_id }}">{{ s.order_ref or '#' ~ s.customer_order_id }}</a>{% endif %}</td>
+          <td class="num">{{ s.part_count }}</td>
+          <td class="num">{{ "%g"|format(s.on_hand_total) }}</td>
+          <td><button type="button" class="ghost" onclick="window.location.href='/catalog/shelves/{{ s.id }}'">Open</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_admin %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">New shelf of our own</h2>
+  <form method="post" action="/catalog/shelves" style="display:flex; gap:.6rem; align-items:flex-end; flex-wrap:wrap;">
+    <input type="hidden" name="kind" value="ours">
+    <input type="hidden" name="return_to" value="/catalog/shelves">
+    <div><label for="name">Name</label><input id="name" name="name" type="text" required placeholder="e.g. Store 2"></div>
+    <button type="submit" class="ghost">Create</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

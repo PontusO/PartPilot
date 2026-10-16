@@ -46,6 +46,9 @@ TOOLS = [
      "description": "Upload any CSV/Excel BOM or part list, map its columns to PartPilot fields, "
                     "resolve each row against stock and Digi-Key/Mouser, and tick the parts to "
                     "create in the catalog. Mappings are remembered per file layout."},
+    {"label": "Stock shelves", "url": "/catalog/shelves", "icon": "🗄️",
+     "description": "Our shelves and customer-owned shelves: who owns what stock, where it sits, "
+                    "and what it is worth. Create, rename and retire shelves."},
     {"label": "Part-number cleanup", "url": "/setup/part-cleanup", "icon": "🧹",
      "description": "Find parts whose part number is really a distributor order code (no "
                     "manufacturer P/N captured), look up the manufacturer P/N at Digi-Key/Mouser, "

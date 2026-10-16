@@ -32,6 +32,21 @@
   <h1>{{ o.order_ref or 'Order #' ~ o.id }}
     <span class="badge {{ badge.get(o.status, 'muted') }}">{{ o.status }}</span></h1>
   <p class="note">{{ o.customer_name or 'No customer' }}{% if o.customer_po %} — their PO {{ o.customer_po }}{% endif %}</p>
+  {% if shelf_error %}<div class="err">{{ shelf_error }}</div>{% endif %}
+  <p class="note">Job shelf:
+    {% if job_shelf %}<a href="/catalog/shelves/{{ job_shelf.id }}"><b>{{ job_shelf.name }}</b></a>
+      <span class="badge warn">customer-owned</span>
+    {% elif can_shelf and o.customer_id %}
+      <form method="post" action="/catalog/shelves" style="display:inline;">
+        <input type="hidden" name="kind" value="customer">
+        <input type="hidden" name="owner_contact_id" value="{{ o.customer_id }}">
+        <input type="hidden" name="customer_order_id" value="{{ o.id }}">
+        <input type="hidden" name="return_to" value="/customer-orders/{{ o.id }}">
+        <button type="submit" class="ghost">Create job shelf</button>
+      </form>
+      <span class="note">— parts bought for this order only</span>
+    {% else %}none{% endif %}
+  </p>
 
   {% if o.status == 'cancelled' and (downstream.work_orders or downstream.purchase_orders) %}
   <div style="margin:.5rem 0 1rem; background:rgba(217,119,6,.12); border:1px solid var(--warn);

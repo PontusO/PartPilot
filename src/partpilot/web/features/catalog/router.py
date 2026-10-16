@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote, urlparse
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
 from . import repo, stock, versions
 
@@ -16,6 +19,8 @@ _PAGE_SIZE = 100
 CATALOG_WRITE_ROLES = frozenset({"admin", "purchasing"})
 # Roles allowed to move stock (receive/issue/adjust) — warehouse handles inventory.
 STOCK_MOVE_ROLES = frozenset({"admin", "warehouse", "purchasing"})
+# Renaming / retiring shelves is structural: admin only. Creating one is a purchasing act.
+SHELF_ADMIN_ROLES = frozenset({"admin"})
 
 
 def _num(v) -> float | None:
@@ -353,6 +358,80 @@ def refresh_cost_tiers(request: Request, part_id: int):
 
 
 # ---- detail ----
+
+# ---- shelves (stock locations with an owner) ----
+
+def _safe_return(url: str | None, fallback: str) -> str:
+    """Only same-site paths may be used as a bounce-back target."""
+    u = (url or "").strip()
+    return u if u.startswith("/") and not u.startswith("//") and urlparse(u).netloc == "" else fallback
+
+
+@router.get("/shelves", response_class=HTMLResponse)
+def shelves_list(request: Request):
+    user = require_user(request)
+    db = request.app.state.database
+    repo.default_shelf_id(db)   # make sure our default shelf exists so the list is never empty
+    return request.app.state.templates.TemplateResponse(
+        request, "shelves.html",
+        {"shelves": repo.locations(db, include_retired=True), "error": None,
+         "can_admin": user.role in SHELF_ADMIN_ROLES})
+
+
+@router.get("/shelves/{location_id}", response_class=HTMLResponse)
+def shelf_detail(request: Request, location_id: int, error: str | None = None):
+    user = require_user(request)
+    db = request.app.state.database
+    shelf = repo.get_location(db, location_id)
+    if shelf is None:
+        return request.app.state.templates.TemplateResponse(
+            request, "error.html", {"message": "Shelf not found."}, status_code=404)
+    return request.app.state.templates.TemplateResponse(
+        request, "shelf.html",
+        {"shelf": shelf, "rows": repo.shelf_stock(db, location_id),
+         "movements": repo.shelf_movements(db, location_id), "error": error,
+         "can_admin": user.role in SHELF_ADMIN_ROLES, "can_move": user.role in STOCK_MOVE_ROLES},
+        status_code=400 if error else 200)
+
+
+@router.post("/shelves")
+async def shelf_create(request: Request):
+    """Create a shelf from the shelves page, a customer's contact page or a customer order. Errors
+    bounce back to ``return_to`` with ``?shelf_error=`` so the origin page can show them."""
+    require_role(request, PURCHASE_ROLES)
+    db = request.app.state.database
+    form = await request.form()
+    try:
+        sid = repo.create_shelf(
+            db, kind=(form.get("kind") or "").strip(), owner_contact_id=_int(form.get("owner_contact_id")),
+            customer_order_id=_int(form.get("customer_order_id")), name=form.get("name"))
+    except ValueError as exc:
+        back = _safe_return(form.get("return_to"), "/catalog/shelves")
+        sep = "&" if "?" in back else "?"
+        return RedirectResponse(f"{back}{sep}shelf_error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(_safe_return(form.get("return_to"), f"/catalog/shelves/{sid}"), status_code=303)
+
+
+@router.post("/shelves/{location_id}/rename")
+async def shelf_rename(request: Request, location_id: int):
+    require_role(request, SHELF_ADMIN_ROLES)
+    form = await request.form()
+    try:
+        repo.rename_shelf(request.app.state.database, location_id, form.get("name"))
+    except ValueError as exc:
+        return shelf_detail(request, location_id, error=str(exc))
+    return RedirectResponse(f"/catalog/shelves/{location_id}", status_code=303)
+
+
+@router.post("/shelves/{location_id}/retire")
+def shelf_retire(request: Request, location_id: int):
+    require_role(request, SHELF_ADMIN_ROLES)
+    try:
+        repo.retire_shelf(request.app.state.database, location_id)
+    except ValueError as exc:
+        return shelf_detail(request, location_id, error=str(exc))
+    return RedirectResponse("/catalog/shelves", status_code=303)
+
 
 @router.get("/{part_id}", response_class=HTMLResponse)
 def part_detail(request: Request, part_id: int):

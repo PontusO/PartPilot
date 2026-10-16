@@ -7,7 +7,9 @@ from datetime import date
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
+from ..catalog import repo as catalog_repo
 from ..despatch import repo as despatch_repo
 from ..despatch.router import DESPATCH_ROLES
 from ..work_orders import repo as wo_repo
@@ -162,7 +164,10 @@ def _render_detail(request, order_id, user, error=None, status=200):
          "downstream": repo.order_downstream(db, order_id),
          "wos_by_line": wo_repo.work_orders_for_order(db, order_id),
          "acknowledgements": repo.documents_for_order(db, order_id),
-         "build_short_count": sum(1 for p in proposals if p["category"] == "build")},
+         "build_short_count": sum(1 for p in proposals if p["category"] == "build"),
+         "job_shelf": catalog_repo.shelf_for_order(db, order_id),
+         "can_shelf": user.role in PURCHASE_ROLES,
+         "shelf_error": request.query_params.get("shelf_error")},
         status_code=status,
     )
 

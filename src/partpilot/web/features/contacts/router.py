@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from ...auth import PURCHASE_ROLES
 from ...core.deps import require_role, require_user
 from ..catalog import repo as catalog_repo
 from . import repo
@@ -121,7 +122,10 @@ def contact_detail(request: Request, contact_id: int):
     return request.app.state.templates.TemplateResponse(
         request, "contact_detail.html",
         {"c": c, "addresses": repo.list_addresses(db, contact_id),
-         "can_edit": user.role in CONTACTS_WRITE_ROLES},
+         "can_edit": user.role in CONTACTS_WRITE_ROLES,
+         "shelves": catalog_repo.shelves_for_customer(db, contact_id) if c["kind"] == "customer" else [],
+         "can_shelf": user.role in PURCHASE_ROLES,
+         "shelf_error": request.query_params.get("shelf_error")},
     )
 
 

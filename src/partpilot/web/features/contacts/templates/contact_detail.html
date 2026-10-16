@@ -61,6 +61,35 @@
   </div>
   {% endif %}
 
+  {% if c.kind == 'customer' %}
+  <h2 style="font-size:1.05rem; margin-top:1.4rem;">Stock shelves</h2>
+  {% if shelf_error %}<div class="err">{{ shelf_error }}</div>{% endif %}
+  <p class="note">Parts this customer has paid for live on their own shelves. Only their work orders
+    draw from them, and they never count as our stock.</p>
+  <table>
+    <thead><tr><th>Shelf</th><th>Job</th><th class="num">Parts</th><th class="num">On hand</th><th></th></tr></thead>
+    <tbody>
+      {% for s in shelves %}
+      <tr><td><b>{{ s.name }}</b></td>
+          <td>{% if s.customer_order_id %}<a href="/customer-orders/{{ s.customer_order_id }}">{{ s.order_ref }}</a>{% else %}<span class="note">all jobs</span>{% endif %}</td>
+          <td class="num">{{ s.part_count }}</td><td class="num">{{ "%g"|format(s.on_hand_total) }}</td>
+          <td><button type="button" class="ghost" onclick="window.location.href='/catalog/shelves/{{ s.id }}'">Open</button></td></tr>
+      {% endfor %}
+      {% if not shelves %}<tr><td colspan="5" class="note">No shelves yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+  {% if can_shelf %}
+  <form method="post" action="/catalog/shelves" style="display:flex; gap:.6rem; align-items:flex-end; margin-top:.6rem;">
+    <input type="hidden" name="kind" value="customer">
+    <input type="hidden" name="owner_contact_id" value="{{ c.id }}">
+    <input type="hidden" name="return_to" value="/contacts/{{ c.id }}">
+    <div><label for="shelf_name">Shelf name (optional)</label>
+      <input id="shelf_name" name="name" type="text" placeholder="{{ c.short_name or c.name }}"></div>
+    <button type="submit" class="ghost">New shelf</button>
+  </form>
+  {% endif %}
+  {% endif %}
+
   <h2 style="font-size:1.05rem; margin-top:1.4rem;">Delivery &amp; invoice addresses</h2>
   <p class="note">Used to ship goods and send invoices — each can have its own company name. Mark a
     default delivery and a default invoice address; orders pre-fill from those.</p>
