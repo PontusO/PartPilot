@@ -152,11 +152,13 @@ the Parts list to see retired parts; a retired part carries a **Retired** badge 
 
 Only an admin can **"Delete"** a part, and only once it is retired. Deleting removes every version
 of the part together with its supplier offers, price tiers and stock rows. It is refused while
-anything historical still points at the part: work orders or their lines, customer order lines,
-despatch lines, purchase order or goods receipt lines, stock movements, another assembly's BOM, or
-a devmgmt variant. The refusal lists what blocks it, for example *"Cannot delete R-1: 3 work orders,
-12 stock movements, used in 2 assemblies."* In practice a part that has ever been built, bought or
-sold can only be retired; delete is for parts created by mistake.
+anything historical still points at the part: work orders or their lines, customer order lines
+and allocations, despatch lines, purchase order or goods receipt lines, units still on hand, stock
+movements, another assembly's BOM, or a devmgmt variant. The refusal lists what blocks it, for
+example *"Cannot delete R-1: 3 work orders, 12 stock movements, used in 2 assemblies."* In practice
+a part that has ever been built, bought or sold can only be retired; delete is for parts created by
+mistake. A retired webshop product keeps syncing its stock with the shop, so the last units can
+still sell.
 
 ## Stock and shelves
 
@@ -263,6 +265,10 @@ devmgmt is used only for connected products; ask before publishing.
 From the assembly press **"Import BOM (.csv)"**, choose the **BOM file** (CSV or Excel) and the
 shelf to check stock on, then **"Resolve"**. Each line is classified and matched (see *How the BOM
 resolver works*) and the review screen shows:
+
+A line whose only catalog match is a **retired** part shows the **retired** badge with no tick box: it
+is neither linked nor created, and the result page lists it under **Not added — retired parts** so
+you can unretire the part or add a replacement by hand.
 
 | Status | Meaning | What happens |
 |---|---|---|
@@ -405,6 +411,10 @@ From the customer order press **"Check stock & build"**. The page lists every or
 **On WO** (already planned or in WIP) and **Shortfall**. Assembly lines with a shortfall are
 pre-ticked with **Build qty** set to the shortfall. Components are marked "component → purchase"
 and are never built.
+
+An order line for a **retired** assembly is shown with a **retired** badge and no tick box: it cannot
+be built, only despatched from stock. If a retired assembly is submitted anyway, nothing is created
+and the page explains why.
 
 Choose **"Build from shelf"**. The picker offers our shelves and this customer's shelves, and
 preselects the job shelf if one exists, otherwise the customer's shelf, otherwise Main. If the

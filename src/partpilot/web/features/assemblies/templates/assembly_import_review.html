@@ -49,6 +49,7 @@
               {% elif it.status == 'new' %}<span class="badge warn">new</span>
               {% elif it.status == 'unresolved' %}<span class="badge bad">unresolved</span>
               {% elif it.status == 'manual' %}<span class="badge bad">manual</span>
+              {% elif it.status == 'retired' %}<span class="badge muted" title="The only catalog match is a retired part — this line is not added">retired</span>
               {% else %}<span class="badge muted">skip</span>{% endif %}
             </td>
             <td class="flag">{{ it.note }}</td>

@@ -529,8 +529,9 @@ async def import_apply(request: Request, part_id: int):
             result = apply_import_plan(db, part_id, json.loads(plan_path.read_text()), accepted)
             plan_path.unlink(missing_ok=True)
 
-    # Nothing imported, or nothing needs a closer look -> straight back to the assembly.
-    if result is None or not result.get("review"):
+    # Nothing imported, or nothing needs a closer look -> straight back to the assembly. Lines left
+    # out because they match a retired part are always shown: the BOM is missing them.
+    if result is None or not (result.get("review") or result.get("retired")):
         return RedirectResponse(f"/assemblies/{part_id}", status_code=303)
     # Some created parts have an incomplete value notation: show them with edit links to finish.
     a = repo.get_assembly(db, part_id)

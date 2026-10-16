@@ -22,6 +22,9 @@ _BLOCKERS: tuple[tuple[str, str, str], ...] = (
     ("despatch lines", "despatch_lines", "part_id"),
     ("purchase order lines", "purchase_order_lines", "part_id"),
     ("goods receipt lines", "goods_receipt_lines", "part_id"),
+    # Physical stock blocks even without ledger rows (seeded stock has none): deleting would make
+    # units on a shelf vanish from the books. Zero it by adjustment first (which leaves a movement).
+    ("units on hand", "part_stock", "SUM(ABS(on_hand))"),
     ("stock movements", "stock_movements", "part_id"),
     ("assemblies using it", "bom_lines", "child_id"),
     ("devmgmt variants", "variants", "assembly_id"),
@@ -50,15 +53,19 @@ def delete_blockers(conn, part_id: int) -> dict[str, int]:
     for label, table, column in _BLOCKERS:
         if not table_exists(conn, table):
             continue
-        n = conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({marks})", ids).fetchone()[0]
+        if column.startswith("SUM("):
+            n = conn.execute(
+                f"SELECT COALESCE({column}, 0) FROM {table} WHERE part_id IN ({marks})", ids).fetchone()[0]
+        else:
+            n = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({marks})", ids).fetchone()[0]
         if n:
             out[label] = n
     return out
 
 
 def format_blockers(part_no: str, blockers: dict[str, int]) -> str:
-    items = [f"used in {n} assemblies" if label == "assemblies using it" else f"{n} {label}"
+    items = [f"used in {n:g} assemblies" if label == "assemblies using it" else f"{n:g} {label}"
              for label, n in blockers.items()]
     return f"Cannot delete {part_no}: {', '.join(items)}."
 

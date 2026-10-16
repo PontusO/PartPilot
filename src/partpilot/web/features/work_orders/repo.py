@@ -481,7 +481,8 @@ def fulfilment_proposals(db: Database, order_id: int) -> list[dict]:
 
     category: 'build'     — a buildable assembly short of stock (needs a WO);
               'covered'    — a buildable assembly already met by stock + open WOs;
-              'component'  — not an assembly (would be purchased, not built).
+              'component'  — not an assembly (would be purchased, not built);
+              'retired'    — a retired part: never offered for building (run out, don't restart).
     shortfall = ordered − free stock − qty already on open work orders for this line.
     Free stock is counted over the shelves this customer may draw from (job shelf, customer shelf,
     ours) — never another customer's shelf.
@@ -493,7 +494,7 @@ def fulfilment_proposals(db: Database, order_id: int) -> list[dict]:
     with db.connect() as conn:
         lines = conn.execute(
             """SELECT l.id AS line_id, l.ordered_qty, l.part_id,
-                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc
+                      p.part_no, p.value, p.kind, p.total_qty, p.total_alloc, p.retired_at
                FROM customer_order_lines l JOIN parts p ON p.id = l.part_id
                WHERE l.order_id = ? ORDER BY COALESCE(l.line_no, 1e9), l.id""",
             (order_id,),
@@ -511,8 +512,10 @@ def fulfilment_proposals(db: Database, order_id: int) -> list[dict]:
                 "SELECT 1 FROM bom_lines WHERE parent_id = ? LIMIT 1", (d["part_id"],)
             ).fetchone() is not None
             shortfall = max(0.0, (d["ordered_qty"] or 0) - free - on_wo)
+            d["retired"] = bool(d.get("retired_at"))
             d.update(free=free, on_wo=on_wo, shortfall=shortfall,
-                     category=("component" if not buildable else "build" if shortfall > 0 else "covered"))
+                     category=("retired" if d["retired"] else "component" if not buildable
+                               else "build" if shortfall > 0 else "covered"))
             props.append(d)
     return props
 
@@ -544,9 +547,16 @@ def create_work_orders_for_order(db: Database, order_id: int, selections: dict[i
             catrepo.require_shelf(conn, location_id, customer_id=head["customer_id"])
         ref = (head["order_ref"] if head and head["order_ref"] else f"CO{order_id}")
         required_date = head["required_date"] if head else None
-        valid = {r["id"]: r["part_id"] for r in conn.execute(
-            "SELECT l.id, l.part_id FROM customer_order_lines l JOIN parts p ON p.id = l.part_id "
+        rows = {r["id"]: r for r in conn.execute(
+            "SELECT l.id, l.part_id, p.part_no, p.retired_at "
+            "FROM customer_order_lines l JOIN parts p ON p.id = l.part_id "
             "WHERE l.order_id = ? AND p.kind = 'ASSY'", (order_id,))}
+        valid = {lid: r["part_id"] for lid, r in rows.items()}
+        # Check every selected line BEFORE creating anything: each create_work_order commits on its
+        # own, so a late refusal would leave earlier work orders behind and a retry would duplicate.
+        for line_id, qty in selections.items():
+            if line_id in rows and qty and qty > 0 and rows[line_id]["retired_at"]:
+                raise ValueError(f"{rows[line_id]['part_no']} is retired and cannot be built.")
 
     created = []
     for line_id, qty in selections.items():

@@ -21,6 +21,7 @@ NEW = "new"                     # resolved on Digi-Key/Mouser, not in catalog ->
 UNRESOLVED = "unresolved"       # searched, no match, but has a value/MPN -> offer a bare create
 MANUAL = "manual"               # under-specified (no value/MPN) -> needs a human, can't import
 SKIP = "skip"                   # DNP / non-orderable -> not added
+RETIRED = "retired"             # only catalog match is a retired part -> never linked, never created
 
 
 def _target_mpn(line: ResolvedLine) -> str | None:
@@ -74,13 +75,15 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
         mpn = _target_mpn(ln)
         existing_id = catalog_repo.find_part_id_by_mpn(db, mpn)
         if existing_id is None:
-            # The only catalog match is a retired part: never link to it. Flag the line so the
-            # operator sees why it is offered as new; apply_parts_plan refuses to create a duplicate.
+            # The only catalog match is a retired part: never link to it and never create a duplicate
+            # number. The row gets its own status so the review screen offers no accept box.
             retired_id = catalog_repo.find_part_id_by_mpn(db, mpn, include_retired=True)
             if retired_id is not None:
                 old = catalog_repo.get_part(db, retired_id)
-                item["note"] = f"matches retired part {old['part_no']}"
-                item["retired_match"] = True
+                item.update(status=RETIRED, part_no=old["part_no"],
+                            note=f"matches retired part {old['part_no']}")
+                plan.append(item)
+                continue
         value, missing = _value_for(ln)
         if existing_id is not None:
             item.update(status=IN_INVENTORY, part_id=existing_id, part_no=mpn, shelf_free=None)
@@ -135,10 +138,13 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
     Returns counts plus ``review`` (created passives with an incomplete iLabs value) and
     ``part_ids``: one entry per plan row, the catalog part id that row now points at, or None
     for rows that were skipped / not accepted / manual. ``created_rows`` lists the plan indexes
-    whose part was created by this call (the rest of the non-None rows were linked).
+    whose part was created by this call (the rest of the non-None rows were linked). ``retired``
+    lists the rows whose only catalog match is a retired part — never linked, never created — so
+    the caller can show the operator which BOM lines were left out.
     """
     created = linked = skipped = 0
     review: list[dict] = []
+    retired: list[dict] = []
     part_ids: list[int | None] = []
     created_rows: list[int] = []
     for i, item in enumerate(plan):
@@ -146,6 +152,11 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
         if status == IN_INVENTORY:
             part_ids.append(item["part_id"])
             linked += 1
+            continue
+        if status == RETIRED:
+            skipped += 1
+            retired.append({"refdes": item.get("refdes"), "part_no": item.get("part_no")})
+            part_ids.append(None)
             continue
         if status in (NEW, UNRESOLVED) and i in accepted:
             # Re-use an existing catalog part if its MPN already landed (avoids duplicates,
@@ -170,4 +181,4 @@ def apply_parts_plan(db: Database, plan: list[dict], accepted: set[int]) -> dict
         skipped += 1          # SKIP, MANUAL, or not accepted
         part_ids.append(None)
     return {"created": created, "linked": linked, "skipped": skipped,
-            "review": review, "part_ids": part_ids, "created_rows": created_rows}
+            "review": review, "retired": retired, "part_ids": part_ids, "created_rows": created_rows}

@@ -408,3 +408,20 @@ def test_retired_component_in_live_bom_still_builds_and_is_flagged(db):
     wo = repo.get_work_order(db, repo.create_work_order(db, {"assembly_id": top, "qty": 1}))
     by = {ln["part_no"]: ln for ln in wo["lines"]}
     assert by["COMP-B"]["retired"] is True and by["COMP-A"]["retired"] is False
+
+
+def test_build_to_order_refuses_retired_assembly_before_creating_anything(db):
+    from partpilot.web.features.catalog import lifecycle
+    a, b, sub, top = _setup(db)
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
+    oid = corepo.create_order(db, {"customer_id": cust})
+    corepo.add_line(db, oid, top, 2, 1.0, None)
+    corepo.add_line(db, oid, sub, 2, 1.0, None)
+    lifecycle.retire_part(db, sub)
+    props = {p["part_id"]: p for p in repo.fulfilment_proposals(db, oid)}
+    assert props[top]["category"] == "build" and props[sub]["category"] == "retired"
+    lines = {p["part_id"]: p["line_id"] for p in props.values()}
+    with pytest.raises(ValueError, match=r"SUB-1 is retired and cannot be built\."):
+        repo.create_work_orders_for_order(db, oid, {lines[top]: 2, lines[sub]: 2}, "u")
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM work_orders").fetchone()[0] == 0

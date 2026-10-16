@@ -11,6 +11,19 @@
     <div class="card"><b>{{ result.skipped }}</b><small>skipped</small></div>
   </div>
 
+  {% if result.retired %}
+  <h2 style="font-size:1.05rem; margin-top:1.2rem;">Not added — retired parts ({{ result.retired|length }})</h2>
+  <p class="note">These BOM lines match only a <b>retired</b> part, so no line was added and no duplicate
+    part was created. Unretire the part, or add a replacement to the BOM by hand.</p>
+  <table>
+    <thead><tr><th>RefDes</th><th>Retired part</th></tr></thead>
+    <tbody>
+      {% for r in result.retired %}<tr><td>{{ r.refdes }}</td><td>{{ r.part_no }} <span class="badge muted">retired</span></td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if result.review %}
   <h2 style="font-size:1.05rem; margin-top:1.2rem;">Needs checking ({{ result.review|length }})</h2>
   <p class="note">These parts were created but their iLabs <code>value</code> couldn't be fully built —
     the distributor didn't expose every field. Open each one (new tab), confirm the value and fill
@@ -31,6 +44,7 @@
       </tbody>
     </table>
   </div>
+  {% endif %}
 
   <div style="margin-top:1.2rem;">
     <a href="/assemblies/{{ a.id }}"><button type="button">Done — back to {{ a.part_no }}</button></a>

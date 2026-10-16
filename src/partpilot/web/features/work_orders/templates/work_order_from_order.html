@@ -44,7 +44,8 @@
             </td>
             <td class="note">
               {% if p.category == 'covered' %}covered
-              {% elif p.category == 'component' %}component → purchase{% endif %}
+              {% elif p.category == 'component' %}component → purchase
+              {% elif p.category == 'retired' %}<span class="badge muted">retired</span> cannot be built — despatch from stock only{% endif %}
             </td>
           </tr>
           {% endfor %}

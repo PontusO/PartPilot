@@ -100,5 +100,14 @@ def test_build_import_plan_flags_retired_match(db):
     run = ResolvedRun(resolved=[line], build_qty=1, currency="SEK", stock_checked=False,
                       mouser_enabled=False, warnings=[], stock_shelf=None)
     item = import_parts.build_import_plan(db, run)[0]
-    assert item["status"] == "new" and item["part_id"] is None
+    assert item["status"] == "retired" and item["part_id"] is None
+    assert item["part_no"] == "RET-1"
     assert item["note"] == "matches retired part RET-1"
+
+
+def test_apply_parts_plan_reports_retired_rows(db):
+    plan = [{"status": "retired", "part_no": "RET-1", "qty": 1, "refdes": "C1"},
+            {"status": "skip", "qty": 1, "refdes": "C2"}]
+    res = import_parts.apply_parts_plan(db, plan, accepted={0, 1})
+    assert res["skipped"] == 2 and res["part_ids"] == [None, None]
+    assert res["retired"] == [{"refdes": "C1", "part_no": "RET-1"}]

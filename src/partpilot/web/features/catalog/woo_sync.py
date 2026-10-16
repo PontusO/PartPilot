@@ -115,11 +115,8 @@ def _reconcile_one(db, product, *, user, dry_run, report: SyncReport, pushes) ->
     if existing is None:
         _create(db, product, kind=kind, user=user, dry_run=dry_run, report=report)
         return
-    if existing.get("retired_at"):
-        # Retired: leave the part and its stock alone, and never create a duplicate for the SKU.
-        report.skipped += 1
-        report._note(sku, "skipped", "part is retired")
-        return
+    # A retired product keeps reconciling: retired means run out, don't restart, and the webshop is
+    # where the last units sell. (A duplicate can't be created: find_part_by_part_no sees retired.)
 
     # Copy the shop price into external_price (book-keeping), independent of stock.
     if not dry_run and product.price is not None:

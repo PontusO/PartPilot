@@ -521,3 +521,12 @@ def test_shortage_suggestions_skip_retired_parts(db):
     assert len(repo.shortage_suggestions(db)) == 1
     lifecycle.retire_part(db, p)        # retired: run out, never re-buy
     assert repo.shortage_suggestions(db) == []
+
+
+def test_create_pos_from_suggestions_skips_retired_parts(db):
+    from partpilot.web.features.catalog import lifecycle
+    p, asm, wo = _setup_shortage(db)
+    lifecycle.retire_part(db, p)              # retired after the suggestions page was opened
+    assert repo.create_pos_from_suggestions(db, {p: 30}, "u") == []
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM purchase_orders").fetchone()[0] == 0

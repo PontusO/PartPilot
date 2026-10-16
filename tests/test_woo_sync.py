@@ -268,14 +268,13 @@ def test_one_bad_product_does_not_abort_run(db):
     assert repo.find_part_by_part_no(db, "99-2") is not None
 
 
-def test_retired_part_is_skipped_not_duplicated(db):
+def test_retired_part_still_reconciles_stock_and_is_not_duplicated(db):
+    """Retired = run out, don't restart: webshop sales must keep booking against the part."""
     from partpilot.web.features.catalog import lifecycle
     pid = _make_part(db, "99-100", 5)
     lifecycle.retire_part(db, pid)
     report = woo_sync.sync_from_woo(db, [_p("99-100", qty=10)])
-    assert report.skipped == 1
-    assert {"sku": "99-100", "action": "skipped", "detail": "part is retired"} in report.log
+    assert report.updated == 1 and report.skipped == 0 and report.created == 0
+    assert repo.get_part(db, pid)["total_qty"] == 10
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM parts WHERE part_no = '99-100'").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM stock_movements WHERE part_id = ?",
-                            (pid,)).fetchone()[0] == 1          # the opening movement only

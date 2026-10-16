@@ -261,6 +261,8 @@ def create_pos_from_suggestions(db: Database, selections: dict[tuple[int, int], 
         if not qty or qty <= 0:
             continue
         with db.connect() as conn:
+            if conn.execute("SELECT retired_at FROM parts WHERE id = ?", (part_id,)).fetchone()[0]:
+                continue   # retired since the suggestions page was opened: never re-buy
             sup = _default_supplier(conn, part_id)
         if sup is None or sup["supplier_id"] is None:
             continue

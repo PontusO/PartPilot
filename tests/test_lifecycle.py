@@ -107,7 +107,7 @@ def test_delete_assembly_removes_own_bom_lines(db):
 def test_delete_blocked_by_stock_movements(db):
     pid = _comp(db, "R-1", qty=5)                         # opening stock = a movement
     lifecycle.retire_part(db, pid)
-    with pytest.raises(ValueError, match=r"Cannot delete R-1: 1 stock movements\."):
+    with pytest.raises(ValueError, match=r"Cannot delete R-1: 5 units on hand, 1 stock movements\."):
         lifecycle.delete_part(db, pid)
     assert catrepo.get_part(db, pid) is not None
 
@@ -177,3 +177,15 @@ def test_format_blockers_lists_only_nonzero():
     text = lifecycle.format_blockers(
         "R-1", {"work orders": 3, "stock movements": 12, "assemblies using it": 2})
     assert text == "Cannot delete R-1: 3 work orders, 12 stock movements, used in 2 assemblies."
+
+
+def test_delete_blocked_by_units_on_hand_without_movements(db):
+    """Seeded stock has no ledger rows; physical stock must still block (it would vanish silently)."""
+    pid = _comp(db, "R-1")
+    with db.connect() as conn:
+        loc = conn.execute("SELECT MIN(id) FROM stock_locations").fetchone()[0]
+        conn.execute("INSERT INTO part_stock (part_id, location_id, on_hand) VALUES (?, ?, 500)", (pid, loc))
+        conn.commit()
+    lifecycle.retire_part(db, pid)
+    with pytest.raises(ValueError, match=r"Cannot delete R-1: 500 units on hand\."):
+        lifecycle.delete_part(db, pid)

@@ -36,4 +36,4 @@ def apply_import_plan(
         asm_repo.add_bom_line(db, assembly_id, child_id, item.get("qty") or 1, item.get("refdes"))
         lines_added += 1
     return {"created": res["created"], "lines_added": lines_added,
-            "skipped": res["skipped"], "review": res["review"]}
+            "skipped": res["skipped"], "review": res["review"], "retired": res["retired"]}
