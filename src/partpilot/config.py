@@ -105,3 +105,12 @@ def load_column_mappings(path: str | Path | None = None) -> dict:
     if candidate.exists():
         return yaml.safe_load(candidate.read_text()) or {}
     return {}
+
+
+def load_category_rules(path: str | Path | None = None) -> dict:
+    """``{"distributor": [[pattern, CATEGORY], ...], "refdes": {PREFIX: CATEGORY}}`` for the BOM
+    importer's category guess (``config/category_rules.yaml``). Missing file -> empty rules."""
+    candidate = Path(path) if path else DEFAULT_CONFIG_DIR / "category_rules.yaml"
+    data = (yaml.safe_load(candidate.read_text()) or {}) if candidate.exists() else {}
+    return {"distributor": list(data.get("distributor") or []),
+            "refdes": {str(k).upper(): str(v) for k, v in (data.get("refdes") or {}).items()}}

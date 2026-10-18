@@ -1,0 +1,83 @@
+# Category guess for parts the BOM importer creates. Evidence is weighed in this order:
+#   1. the resolver's component type (resistor / capacitor / inductor / crystal, from the BOM text),
+#   2. the distributor's category for the chosen part, matched against `distributor` below,
+#   3. the RefDes prefix, matched against `refdes` below (what is left for rows nobody resolved).
+# Category names must match the catalog's own vocabulary exactly (see the Parts list filter).
+# Anything no rule places stays blank.
+
+# Rows are [pattern, CATEGORY]; the pattern is matched case-insensitively at the start of a word
+# anywhere in the distributor's category path, so "connector" also hits "Connectors". The FIRST
+# matching row wins, so broad roots ("integrated circuit" is Digi-Key's root for every IC) come first.
+distributor:
+  - [integrated circuit, INTEGRATED CIRCUIT]
+  - [module, MODULE]
+  - [microcontroller, INTEGRATED CIRCUIT]
+  - [mcu, INTEGRATED CIRCUIT]
+  - [ics, INTEGRATED CIRCUIT]
+  - [memory, INTEGRATED CIRCUIT]
+  - [amplifier, INTEGRATED CIRCUIT]
+  - [regulator, INTEGRATED CIRCUIT]
+  - [logic, INTEGRATED CIRCUIT]
+  - [interface, INTEGRATED CIRCUIT]
+  - [transceiver, INTEGRATED CIRCUIT]
+  - [converter, INTEGRATED CIRCUIT]
+  - [driver, INTEGRATED CIRCUIT]
+  - [timer, INTEGRATED CIRCUIT]
+  - [processor, INTEGRATED CIRCUIT]
+  - [fpga, INTEGRATED CIRCUIT]
+  - [pmic, INTEGRATED CIRCUIT]
+  - [fuse, FUSE]
+  - [tvs, SEMICONDUCTOR]
+  - [diode, SEMICONDUCTOR]
+  - [rectifier, SEMICONDUCTOR]
+  - [transistor, SEMICONDUCTOR]
+  - [mosfet, SEMICONDUCTOR]
+  - [fet, SEMICONDUCTOR]
+  - [thyristor, SEMICONDUCTOR]
+  - [led, SEMICONDUCTOR]
+  - [optocoupler, SEMICONDUCTOR]
+  - [connector, CONNECTOR]
+  - [interconnect, CONNECTOR]
+  - [header, CONNECTOR]
+  - [terminal, CONNECTOR]
+  - [socket, CONNECTOR]
+  - [antenna, ANTENNA]
+  - [switch, SWITCH]
+  - [crystal, CRYSTAL]
+  - [oscillator, CRYSTAL]
+  - [resonator, CRYSTAL]
+  - [resistor, RESISTOR]
+  - [potentiometer, RESISTOR]
+  - [capacitor, CAPACITOR]
+  - [inductor, INDUCTOR]
+  - [ferrite, INDUCTOR]
+  - [choke, INDUCTOR]
+  - [coil, INDUCTOR]
+  - [batter, BATTERY]
+
+# RefDes prefix (the letters before the first digit or '$') -> CATEGORY. EAGLE conventions are
+# assumed where libraries disagree: X is a connector and Q a transistor (EAGLE crystals are caught
+# by the component type or the distributor first).
+refdes:
+  R: RESISTOR
+  C: CAPACITOR
+  L: INDUCTOR
+  FB: INDUCTOR
+  Y: CRYSTAL
+  U: INTEGRATED CIRCUIT
+  IC: INTEGRATED CIRCUIT
+  D: SEMICONDUCTOR
+  Q: SEMICONDUCTOR
+  T: SEMICONDUCTOR
+  LED: SEMICONDUCTOR
+  J: CONNECTOR
+  X: CONNECTOR
+  P: CONNECTOR
+  CN: CONNECTOR
+  CON: CONNECTOR
+  SW: SWITCH
+  S: SWITCH
+  F: FUSE
+  ANT: ANTENNA
+  BT: BATTERY
+  MOD: MODULE
