@@ -1,8 +1,50 @@
 {% extends "base.html" %}
 {% block title %}iLabs PartPilot{% endblock %}
 {% block content %}
-<div class="hero">
+<style>
+  .home-hero { padding:1.6rem 0 .6rem; text-align:center; }
+  .home-hero h1 { font-size:2.2rem; font-weight:700; margin:0; letter-spacing:.5px; }
+  .home-hero h1 span { color:var(--accent); }
+  .home-hero p { color:var(--muted); margin:.4rem 0 0; }
+  .cards a.card { text-decoration:none; color:inherit; min-width:9.5rem; }
+  .cards a.card:hover { border-color:var(--accent); }
+  .about { display:flex; flex-wrap:wrap; gap:1.5rem; align-items:flex-start; }
+  .about .changes { flex:1 1 22rem; }
+  .about .changes table { width:100%; }
+  .about .changes td.date { white-space:nowrap; color:var(--muted); }
+  .about .changes td.hash { white-space:nowrap; }
+  .versions { color:var(--muted); font-size:.85rem; margin-top:.8rem; }
+  .versions code { color:var(--fg); }
+</style>
+<div class="home-hero">
   <h1>iLabs <span>PartPilot</span></h1>
   <p>Select a category from the menu to get started.</p>
+</div>
+
+{% if stats %}
+<div class="cards" style="justify-content:center;">
+  {% for s in stats %}
+  <a class="card" href="{{ s.url }}"><b>{{ s.value }}</b><small>{{ s.label }}</small></a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="about">
+    {% if about.commits %}
+    <div class="changes">
+      <h2 style="margin-top:0;">Latest changes</h2>
+      <table>
+        <tbody>
+          {% for c in about.commits %}
+          <tr><td class="date">{{ c.date }}</td><td class="hash"><code>{{ c.hash }}</code></td><td>{{ c.subject }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  <p class="versions">PartPilot {{ about.version }}{% if about.commits %} · build <code>{{ about.commits[0].hash }}</code> ({{ about.commits[0].date }}){% endif %}
+    {% for name, v in about.tools.items() %} · {{ name }} {{ v }}{% endfor %}</p>
 </div>
 {% endblock %}

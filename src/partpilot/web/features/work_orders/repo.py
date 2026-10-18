@@ -12,6 +12,7 @@ from datetime import date
 
 from ...core import add_workdays, iso, parse_date, ref_no, sub_workdays, workdays_between
 from ...core.db import Database
+from ...core import HomeStat
 from ..catalog import devmgmt_outbox, stock
 from ..catalog import repo as catrepo
 
@@ -581,3 +582,10 @@ def cancel_work_order(db: Database, wo_id: int) -> None:
         conn.execute("UPDATE work_orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?",
                      (wo_id,))
         conn.commit()
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    with db.connect() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM work_orders "
+                         "WHERE status NOT IN ('finished', 'cancelled')").fetchone()[0]
+    return [HomeStat("Work orders open", n, "/work-orders")]

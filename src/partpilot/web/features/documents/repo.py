@@ -10,6 +10,7 @@ here — a document's ``code`` is allocated through the Article Register allocat
 from __future__ import annotations
 
 from ...core.db import Database
+from ...core import HomeStat
 
 # The document classes a document may be filed under: the Article Register 'document' category
 # (prefixes 50–59) plus '95' (software / source code, which is always a link).
@@ -227,3 +228,9 @@ def delete_document(db: Database, document_id: int) -> list[str]:
         conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
         conn.commit()
     return paths
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    with db.connect() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM documents WHERE retired = 0").fetchone()[0]
+    return [HomeStat("Documents", n, "/documents")]

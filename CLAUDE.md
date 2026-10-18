@@ -141,6 +141,11 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   features never edit the core. Order in that list matters: it controls migration order, so a
   feature whose tables have FKs into another's must be registered *after* it (see the comments in
   `app.py` — e.g. `customer_orders` before `work_orders`).
+- **Home page stat cards** come from `Feature.home_stats` (``fn(db) -> list[HomeStat]``, see
+  `core/registry.py`); the core collects them in nav order, gated by the feature's nav roles, and
+  skips a hook that raises. Put the function in the feature's `repo.py` next to `summary()`. The
+  technical panel (version, two latest commits, tool versions) is `core/about.py`, read once at
+  startup into `app.state.about`.
 - Each feature ships a `feature.py` exporting a `Feature` descriptor (`web/core/registry.py`):
   `router`, `nav` (a `NavItem` with role gating + sort `order`), `migrations`, `template_dir`.
   Conventional file layout per feature: `feature.py`, `router.py`, `repo.py` (all SQL — raw

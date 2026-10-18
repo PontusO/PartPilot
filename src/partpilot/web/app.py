@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import UserStore
 from .core import FeatureRegistry
+from .core.about import about_info
 from .core.db import Database
 from .core.deps import Forbidden, LoginRequired, current_user
 from .core.paths import data_dir as default_data_dir, db_path as default_db_path
@@ -143,6 +144,7 @@ def create_app(
     app.state.templates = templates
     app.state.jobs_dir = jobs_dir
     app.state.documents_dir = documents_dir
+    app.state.about = about_info(Path(__file__).resolve().parents[3])   # read once; see core/about.py
 
     # Static assets (vendored FullCalendar for the planning board). The app's only static mount.
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -219,9 +221,11 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
-        if current_user(request) is None:
+        user = current_user(request)
+        if user is None:
             return RedirectResponse("/login", status_code=303)
-        return templates.TemplateResponse(request, "home.html", {})
+        return templates.TemplateResponse(request, "home.html", {
+            "stats": registry.home_stats(database, user.role), "about": app.state.about})
 
     # ----- feature routes -----
 

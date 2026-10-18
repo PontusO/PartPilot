@@ -2024,3 +2024,30 @@ def test_assembly_lifecycle_routes(app):
     assert r.status_code == 303 and r.headers["location"] == "/assemblies"
     assert asmrepo.get_assembly(db, asm) is None
     assert catrepo.get_part(db, comp) is not None
+
+
+# ---- home page: stat cards + about panel -----------------------------------------------------
+
+def test_home_stat_cards_follow_nav_order(app):
+    labels = [s.label for s in app.state.registry.home_stats(app.state.database, "admin")]
+    assert labels == ["Parts", "Below minimum", "Documents", "Assemblies", "Customer orders open",
+                      "Work orders open", "Purchase orders on order", "Suppliers", "Customers",
+                      "Article numbers"]
+
+
+def test_home_shows_stat_cards_and_about_panel(app):
+    from partpilot import __version__
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    catrepo.create_part(db, part={"part_no": "HOME-1"}, supplier_lines=[])
+    asmrepo.create_assembly(db, {"part_no": "HOME-ASM"})
+    client = TestClient(app)
+    _login(client, "ware1", "pw")                      # the warehouse role sees the cards too
+    html = client.get("/").text
+    assert '<a class="card" href="/catalog"><b>1</b><small>Parts</small></a>' in html
+    assert '<a class="card" href="/assemblies"><b>1</b><small>Assemblies</small></a>' in html
+    for label in ("Documents", "Customer orders open", "Work orders open", "Purchase orders on order"):
+        assert f"<small>{label}</small>" in html, label
+    assert "Latest changes" in html                   # the repo under test has commits
+    assert f"PartPilot {__version__}" in html and "Python " in html and "SQLite " in html

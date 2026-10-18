@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ...core.db import Database, table_exists
+from ...core import HomeStat
 
 KINDS = ("supplier", "customer", "other")
 
@@ -203,3 +204,9 @@ def _apply_default_flags(conn, contact_id: int, address_id: int, data: dict) -> 
                          (contact_id,))
             conn.execute(f"UPDATE contact_addresses SET {default_col} = 1, {usage_col} = 1 "
                          "WHERE id = ?", (address_id,))
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    s = summary(db)
+    return [HomeStat("Suppliers", s["suppliers"], "/contacts?kind=supplier"),
+            HomeStat("Customers", s["customers"], "/contacts?kind=customer")]

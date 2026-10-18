@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ...core import Feature, NavItem
 from .migrations import MIGRATIONS
+from .repo import home_stats
 from .router import router
 
 feature = Feature(
@@ -13,5 +14,6 @@ feature = Feature(
     router=router,
     nav=NavItem(label="Purchase Orders", url="/purchase-orders", roles=None, icon="🧾", order=45),
     migrations=MIGRATIONS,
+    home_stats=home_stats,
     template_dir=Path(__file__).parent / "templates",
 )

@@ -6,6 +6,7 @@ import re
 from urllib.parse import quote
 
 from ...core.db import Database
+from ...core import HomeStat
 from . import pricing
 
 # Distributor part-search URLs, keyed by a normalized supplier-name substring. miniMRP
@@ -853,3 +854,9 @@ def recalc_sell_tiers_from_purchase(db: Database, part_id: int, anchor_qty: floa
             written += cur.rowcount
         conn.commit()
     return written
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    s = summary(db)
+    return [HomeStat("Parts", s["parts"], "/catalog"),
+            HomeStat("Below minimum", s["below_min"], "/catalog")]

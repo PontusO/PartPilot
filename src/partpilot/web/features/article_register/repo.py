@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 
 from ...core.db import Database
+from ...core import HomeStat
 from .codes import article_code, compose_description, normalize_prefix
 
 # Display order + human labels for the prefix categories (used to group the allocator dropdown).
@@ -401,3 +402,7 @@ def summary(db: Database) -> dict:
         families = conn.execute(
             "SELECT COUNT(DISTINCT running_no) FROM article_numbers").fetchone()[0]
     return {"total": total, "reserved": reserved, "retired": retired, "families": families}
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    return [HomeStat("Article numbers", summary(db)["total"], "/article-register")]

@@ -19,6 +19,18 @@ The left-hand sidebar is the menu. It highlights the section you are in and show
 role at the bottom, with **"Change password"** and **"Log out"**. **"Change password"** asks for
 your current password and the new one twice.
 
+### The home page
+
+Signing in lands on the home page. Under the title, a row of **stat cards** shows live counts for
+the sections you can open: **Parts** and **Below minimum**, **Documents**, **Assemblies**, **Customer
+orders open**, **Work orders open**, **Purchase orders on order**, **Suppliers**, **Customers** and
+**Article numbers**. Each card is a link to that list. Retired parts and assemblies are not counted.
+
+Below the cards, **Latest changes** lists the two most recent changes to the software with their
+date and short build id, and the line underneath shows the PartPilot version, the build id and the
+versions of Python, SQLite, FastAPI, Starlette and uvicorn it runs on. This is what to quote when
+reporting a problem.
+
 ### Roles
 
 Every signed-in user can read every screen (except Setup & Tools). What you can *change* depends on

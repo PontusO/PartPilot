@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ...core.db import Database
+from ...core import HomeStat
 
 
 def summary(db: Database) -> dict:
@@ -401,3 +402,7 @@ def delete_bom_line(db: Database, parent_id: int, line_id: int) -> None:
             "DELETE FROM bom_lines WHERE id = ? AND parent_id = ?", (line_id, parent_id)
         )
         conn.commit()
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    return [HomeStat("Assemblies", summary(db)["assemblies"], "/assemblies")]

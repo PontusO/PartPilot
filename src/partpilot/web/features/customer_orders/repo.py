@@ -11,6 +11,7 @@ import re
 
 from ...core import ref_no
 from ...core.db import Database
+from ...core import HomeStat
 from ..catalog import pricing, stock
 from ..catalog import repo as catrepo
 from ..setup import repo as setup_repo
@@ -559,3 +560,7 @@ def cancel_order(db: Database, order_id: int) -> None:
         conn.execute("UPDATE customer_orders SET status = 'cancelled', updated_at = datetime('now') "
                      "WHERE id = ?", (order_id,))
         conn.commit()
+
+
+def home_stats(db: Database) -> list[HomeStat]:
+    return [HomeStat("Customer orders open", summary(db)["open"], "/customer-orders")]
