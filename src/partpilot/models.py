@@ -68,6 +68,7 @@ class Candidate(BaseModel):
     supplier: str | None = None  # "Digi-Key" or "Mouser"
     mpn: str | None = None
     manufacturer: str | None = None
+    category: str | None = None  # distributor's category path, e.g. "Capacitors > Ceramic Capacitors"
     dk_part_number: str | None = None
     description: str | None = None
     datasheet_url: str | None = None

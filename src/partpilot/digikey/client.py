@@ -139,6 +139,17 @@ def _find_reel_variation(product: dict) -> dict:
     return {}
 
 
+def _category_path(category) -> str | None:
+    """'Capacitors > Ceramic Capacitors' from the v4 Category tree (Name + nested ChildCategories)."""
+    names: list[str] = []
+    node = category
+    while isinstance(node, dict) and node.get("Name"):
+        names.append(str(node["Name"]))
+        children = node.get("ChildCategories") or []
+        node = children[0] if children else None
+    return " > ".join(names) or None
+
+
 def product_to_candidate(product: dict) -> Candidate | None:
     if not product:
         return None
@@ -158,6 +169,7 @@ def product_to_candidate(product: dict) -> Candidate | None:
         supplier="Digi-Key",
         mpn=_first(product, "ManufacturerProductNumber", "ManufacturerPartNumber"),
         manufacturer=manufacturer.get("Name") if isinstance(manufacturer, dict) else manufacturer,
+        category=_category_path(product.get("Category")),
         dk_part_number=_first(variation, "DigiKeyProductNumber", "DigiKeyPartNumber")
         or _first(product, "DigiKeyProductNumber"),
         description=description.get("ProductDescription")

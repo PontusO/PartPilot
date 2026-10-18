@@ -135,6 +135,7 @@ def part_to_candidate(part: dict) -> Candidate | None:
         supplier="Mouser",
         mpn=part.get("ManufacturerPartNumber"),
         manufacturer=part.get("Manufacturer"),
+        category=(str(part.get("Category")).strip() or None) if part.get("Category") else None,
         dk_part_number=part.get("MouserPartNumber"),
         description=part.get("Description"),
         datasheet_url=part.get("DataSheetUrl"),
