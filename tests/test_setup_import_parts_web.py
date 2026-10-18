@@ -237,3 +237,24 @@ def test_setup_index_lists_tool(app):
     r = c.get("/setup")
     assert "/setup/import-parts" in r.text
 
+
+
+def test_mapped_manufacturer_column_lands_on_the_created_part(app, monkeypatch):
+    monkeypatch.setattr(setup_router, "resolve_bom_file", _fake_resolve)
+    from partpilot.web.features.catalog import repo as catrepo
+    csv = "Designator,Value,Maker,Qty\nR1,10k,Walsin,1\nX1,odd,Acme,1\n"
+    c = _admin(app)
+    r = c.post("/setup/import-parts", files={"file": ("bom.csv", csv, "text/csv")})
+    job_id = _job_id(r.text)
+    assert ">Manufacturer</option>" in _select(r.text, "map_2")
+    r = c.post("/setup/import-parts/resolve", data={
+        "job_id": job_id, "map_0": "refdes", "map_1": "value", "map_2": "manufacturer", "map_3": "qty"})
+    assert r.status_code == 200, r.text
+    r = c.post("/setup/import-parts/apply", data={"job_id": job_id, "accept": ["0", "1"]},
+               follow_redirects=False)
+    assert r.status_code == 303
+    db = app.state.database
+    new = catrepo.get_part(db, catrepo.find_part_id_by_mpn(db, "RES-10K"))
+    assert new["mfr_name"] == "Walsin"            # the file's maker, not the distributor's Yageo
+    bare = catrepo.get_part(db, catrepo.find_part_id_by_mpn(db, "odd"))
+    assert bare["mfr_name"] == "Acme"

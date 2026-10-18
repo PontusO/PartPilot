@@ -85,6 +85,8 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
                 plan.append(item)
                 continue
         value, missing = _value_for(ln)
+        # The BOM's own maker wins over the distributor's: the designer named it on purpose.
+        bom_mfr = (ln.line.manufacturer or "").strip() or None
         if existing_id is not None:
             item.update(status=IN_INVENTORY, part_id=existing_id, part_no=mpn, shelf_free=None)
             if stock_location_id:
@@ -94,7 +96,7 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
             c = ln.chosen
             item.update(
                 status=NEW, part_no=c.mpn, value=value, value_missing=missing,
-                category=_category(ln), mfr_name=c.manufacturer, mfr_pno=c.mpn,
+                category=_category(ln), mfr_name=bom_mfr or c.manufacturer, mfr_pno=c.mpn,
                 supplier_name=c.supplier, supplier_pno=c.dk_part_number, unit_cost=c.unit_price,
                 reel_qty=c.reel_qty or 1,
                 # Auto-captured supplier cost breaks (per-piece) -> cost tiers on the created part.
@@ -105,7 +107,7 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
         else:
             item.update(
                 status=UNRESOLVED, part_no=(ln.line.value or ln.line.device or "").strip() or None,
-                value=value, value_missing=missing, category=_category(ln),
+                value=value, value_missing=missing, category=_category(ln), mfr_name=bom_mfr,
             )
         plan.append(item)
     return plan

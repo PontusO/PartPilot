@@ -111,3 +111,41 @@ def test_apply_parts_plan_reports_retired_rows(db):
     res = import_parts.apply_parts_plan(db, plan, accepted={0, 1})
     assert res["skipped"] == 2 and res["part_ids"] == [None, None]
     assert res["retired"] == [{"refdes": "C1", "part_no": "RET-1"}]
+
+
+def _run_for(line):
+    from partpilot.web.features.purchasing.service import ResolvedRun
+    return ResolvedRun(resolved=[line], build_qty=1, currency="SEK", stock_checked=False,
+                       mouser_enabled=False, warnings=[], stock_shelf=None)
+
+
+def test_build_import_plan_prefers_the_boms_manufacturer_over_the_distributors(db):
+    from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+    line = ResolvedLine(
+        line=BomLine(refdes=["R1"], qty=1, value="RC0402FR-0710KL", manufacturer="Walsin"),
+        kind=LineKind.MPN, status=Status.RESOLVED, confidence=0.9,
+        chosen=Candidate(supplier="Digi-Key", mpn="RC0402FR-0710KL", manufacturer="Yageo",
+                         dk_part_number="X-ND"))
+    item = import_parts.build_import_plan(db, _run_for(line))[0]
+    assert item["status"] == "new" and item["mfr_name"] == "Walsin"
+
+
+def test_build_import_plan_falls_back_to_the_distributors_manufacturer(db):
+    from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+    line = ResolvedLine(
+        line=BomLine(refdes=["R1"], qty=1, value="RC0402FR-0710KL"),
+        kind=LineKind.MPN, status=Status.RESOLVED, confidence=0.9,
+        chosen=Candidate(supplier="Digi-Key", mpn="RC0402FR-0710KL", manufacturer="Yageo",
+                         dk_part_number="X-ND"))
+    item = import_parts.build_import_plan(db, _run_for(line))[0]
+    assert item["mfr_name"] == "Yageo"
+
+
+def test_build_import_plan_keeps_the_boms_manufacturer_on_unresolved_rows(db):
+    from partpilot.models import BomLine, LineKind, ResolvedLine, Status
+    line = ResolvedLine(line=BomLine(refdes=["U1"], qty=1, value="ODD-123", manufacturer="Acme"),
+                        kind=LineKind.MPN, status=Status.NOT_FOUND)
+    item = import_parts.build_import_plan(db, _run_for(line))[0]
+    assert item["status"] == "unresolved" and item["mfr_name"] == "Acme"
+    pid = import_parts.create_part_from_item(db, item)
+    assert catrepo.get_part(db, pid)["mfr_name"] == "Acme"

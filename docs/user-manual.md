@@ -273,11 +273,13 @@ you can unretire the part or add a replacement by hand.
 | Status | Meaning | What happens |
 |---|---|---|
 | in catalog | A part we already have, matched by part number or manufacturer part number. | Linked automatically. Shows how many are free on the chosen shelf. |
-| new | Found at Digi-Key or Mouser but not in our catalog. | Pre-ticked; will be created with supplier, price and quantity breaks. |
+| new | Found at Digi-Key or Mouser but not in our catalog. | Pre-ticked; will be created with supplier, price, quantity breaks and manufacturer. |
 | unresolved | Nothing found, but the line has a value or part number. | Tick to create it bare from the BOM text, then complete it by hand. |
 | manual | Too under-specified to resolve. | Cannot be imported. Fix the BOM or add the part yourself. |
 | skip | Do-not-populate or non-orderable (test points, fiducials). | Left out. |
 
+A BOM column headed **Manufacturer** (also Mfr, Mfg, Maker, Brand or Tillverkare) is picked up
+automatically: its name becomes the created part's manufacturer, overriding the distributor's name.
 The **iLabs value** column shows the value the importer composed; a **⚠ N** badge means fields are
 missing. Press **"Add to assembly"**. Ticked parts are created and every row with a part becomes a
 BOM line. If any created part has an incomplete value, a result page lists them under **Needs
@@ -659,7 +661,10 @@ days, so re-running the same BOM is free. Avoid resolving very large BOMs repeat
 Setup → **"Import parts from BOM"** (admin) is for part lists with unusual column layouts, or for
 loading parts without attaching them to an assembly. Upload, then **map columns**: for each file
 column pick the PartPilot field it feeds or leave it as ignore. At least **Value** or
-**Device / MPN** must be mapped. The mapping is remembered for files with the same header layout.
+**Device / MPN** must be mapped. Map a **Manufacturer** column when the file has one: its name is
+written to each created part's manufacturer field and wins over the name Digi-Key or Mouser
+reports, and parts created bare from unresolved rows get it too. The mapping is remembered for
+files with the same header layout.
 **"Resolve rows"** runs the resolver; the review and result pages work as for an assembly import.
 On the result page, **Wrap into an assembly** creates a new assembly whose BOM is every imported row
 that has a catalog part.
