@@ -30,3 +30,16 @@ def test_manufacturer_alias_does_not_steal_the_mpn_column():
     aliases = load_column_mappings()
     got = detect_columns(["Designator", "Value", "Manufacturer Part Number"], aliases)
     assert "manufacturer" not in got
+
+
+def test_compound_headers_are_not_fuzzy_matched_as_manufacturer():
+    """'Manufacturer PN' is a different column, not a typo of 'Manufacturer'."""
+    aliases = load_column_mappings()
+    for header in ("Manufacturer PN", "Manufacturer No", "Mfr Part #", "Manufacturer Part"):
+        got = detect_columns(["Designator", "Value", header], aliases)
+        assert "manufacturer" not in got, header
+
+
+def test_typo_in_manufacturer_header_still_matches():
+    got = detect_columns(["Designator", "Value", "Manufacurer"], load_column_mappings())
+    assert got.get("manufacturer") == "Manufacurer"

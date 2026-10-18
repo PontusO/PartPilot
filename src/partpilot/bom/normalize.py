@@ -29,11 +29,12 @@ def detect_columns(columns: list[str], mappings: dict) -> dict[str, str]:
         match = next(
             (c for c, n in normalized.items() if n in alias_norms and c not in used), None
         )
-        # 2) fuzzy fallback
+        # 2) fuzzy fallback — for typos and plural forms, not for compound headers: "Manufacturer PN"
+        #    scores high against "manufacturer" but is a different column.
         if match is None:
             best, best_score = None, 0
             for col, n in normalized.items():
-                if col in used:
+                if col in used or any(n.startswith(a) and len(n) > len(a) + 1 for a in alias_norms):
                     continue
                 score = max(fuzz.ratio(n, a) for a in alias_norms)
                 if score > best_score:
