@@ -1640,6 +1640,7 @@ def test_assembly_csv_import_flow(app, monkeypatch):
                     files={"file": ("bom.csv", b"refdes,value\nR1,10k\nU1,NEWCHIP\n", "text/csv")})
     assert r.status_code == 200
     assert "in inventory" in r.text and "NEWCHIP-XYZ" in r.text
+    assert "<th>Category</th>" in r.text
     job = re.search(r'name="job_id" value="([0-9a-f]+)"', r.text).group(1)
 
     # apply: accept the new line (index 1); the in-inventory line is added automatically

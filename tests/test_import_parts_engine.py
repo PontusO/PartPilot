@@ -149,3 +149,20 @@ def test_build_import_plan_keeps_the_boms_manufacturer_on_unresolved_rows(db):
     assert item["status"] == "unresolved" and item["mfr_name"] == "Acme"
     pid = import_parts.create_part_from_item(db, item)
     assert catrepo.get_part(db, pid)["mfr_name"] == "Acme"
+
+
+def test_build_import_plan_guesses_category_from_distributor_and_refdes(db):
+    from partpilot.models import BomLine, Candidate, LineKind, ResolvedLine, Status
+    found = ResolvedLine(
+        line=BomLine(refdes=["J1"], qty=1, value="USB4110-GF-A"), kind=LineKind.MPN,
+        status=Status.RESOLVED, confidence=0.9,
+        chosen=Candidate(supplier="Digi-Key", mpn="USB4110-GF-A", dk_part_number="U-ND",
+                         category="Connectors, Interconnects > USB, DVI, HDMI Connectors"))
+    bare = ResolvedLine(line=BomLine(refdes=["U1"], qty=1, value="ODD-1"), kind=LineKind.MPN,
+                        status=Status.NOT_FOUND)
+    plan = import_parts.build_import_plan(db, _run_for(found))
+    assert plan[0]["category"] == "CONNECTOR"
+    plan = import_parts.build_import_plan(db, _run_for(bare))
+    assert plan[0]["status"] == "unresolved" and plan[0]["category"] == "INTEGRATED CIRCUIT"
+    pid = import_parts.create_part_from_item(db, plan[0])
+    assert catrepo.get_part(db, pid)["category"] == "INTEGRATED CIRCUIT"

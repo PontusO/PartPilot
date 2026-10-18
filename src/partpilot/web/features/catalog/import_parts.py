@@ -8,12 +8,14 @@ is a plain JSON-serializable list so it can be saved between the review POST and
 
 from __future__ import annotations
 
-from partpilot.models import CompType, ResolvedLine, Status
+from partpilot.config import load_category_rules
+from partpilot.models import ResolvedLine, Status
 from partpilot.spec.ilabs_value import build_value_string
 
 from ...core.db import Database
 from ..purchasing.service import ResolvedRun
 from . import repo as catalog_repo
+from .import_category import guess_category
 
 # Per-line status on the review screen.
 IN_INVENTORY = "in_inventory"   # already a catalog part -> auto-linked
@@ -30,10 +32,9 @@ def _target_mpn(line: ResolvedLine) -> str | None:
     return line.stock_match  # IN_STOCK lines carry the matched stock MPN
 
 
-def _category(line: ResolvedLine) -> str | None:
-    if line.spec and line.spec.comp_type and line.spec.comp_type != CompType.OTHER:
-        return line.spec.comp_type.value.upper()
-    return None
+def _category(line: ResolvedLine, rules: dict) -> str | None:
+    """Catalog category for a part we are about to create; see ``import_category``."""
+    return guess_category(line, rules)
 
 
 def _value_for(line: ResolvedLine) -> tuple[str | None, list[str]]:
@@ -52,6 +53,7 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
     link to an existing catalog part also carry ``shelf_free`` — how many are free on the shelf the
     stock check ran against — so "in the catalog but not on this shelf" is visible."""
     from . import stock as stock_core
+    rules = load_category_rules()
     plan: list[dict] = []
     for ln in run.resolved:
         item = {
@@ -96,7 +98,7 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
             c = ln.chosen
             item.update(
                 status=NEW, part_no=c.mpn, value=value, value_missing=missing,
-                category=_category(ln), mfr_name=bom_mfr or c.manufacturer, mfr_pno=c.mpn,
+                category=_category(ln, rules), mfr_name=bom_mfr or c.manufacturer, mfr_pno=c.mpn,
                 supplier_name=c.supplier, supplier_pno=c.dk_part_number, unit_cost=c.unit_price,
                 reel_qty=c.reel_qty or 1,
                 # Auto-captured supplier cost breaks (per-piece) -> cost tiers on the created part.
@@ -107,7 +109,7 @@ def build_import_plan(db: Database, run: ResolvedRun, stock_location_id: int | N
         else:
             item.update(
                 status=UNRESOLVED, part_no=(ln.line.value or ln.line.device or "").strip() or None,
-                value=value, value_missing=missing, category=_category(ln), mfr_name=bom_mfr,
+                value=value, value_missing=missing, category=_category(ln, rules), mfr_name=bom_mfr,
             )
         plan.append(item)
     return plan

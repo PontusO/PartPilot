@@ -197,6 +197,8 @@ via the **Setup & Tools** feature (admin only) and `.env`. Tests mock them.
   `cli.py resolve()` resolves each value.
 - `config/column_mappings.yaml` (BOM column aliases) and `config/device_lookup.yaml` (device→MPN/query
   rules) tune resolution; overridable per-run with `--map` / `--lookup`.
+  `config/category_rules.yaml` drives the importer's category guess (`catalog/import_category.py`):
+  distributor-category keywords first match wins, then RefDes prefix; names must match the catalog vocabulary.
 - **Runtime data** lives under `data/` (git-ignored): `partpilot.db` (back this up),
   `jobs/` (uploaded BOMs + generated reports). Paths resolve via `web/core/paths.py` and honor
   `PARTPILOT_DATA_DIR` / `PARTPILOT_DB` env overrides.

@@ -241,6 +241,7 @@ defaults.**
 | `config/settings.yaml` (git-ignored, from `settings.example.yaml`) | resolver defaults: `build_qty`, `currency`, `reel_threshold`, `confidence_threshold`, match `weights`, default passive tolerance/dielectric/voltage, `dnp_values` |
 | `config/column_mappings.yaml` | BOM column aliases (which header means *Value*, *Device*, *Refdes*, …) |
 | `config/device_lookup.yaml` | device → MPN / query rules |
+| `config/category_rules.yaml` | BOM importer category guess: distributor-category keywords and RefDes prefixes → catalog category |
 | `data/partpilot.db` | the SQLite database (WAL mode) |
 | `data/documents/` | uploaded document revisions |
 | `data/jobs/` | uploaded BOMs and generated reports/carts |

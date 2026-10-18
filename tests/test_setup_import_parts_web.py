@@ -258,3 +258,20 @@ def test_mapped_manufacturer_column_lands_on_the_created_part(app, monkeypatch):
     assert new["mfr_name"] == "Walsin"            # the file's maker, not the distributor's Yageo
     bare = catrepo.get_part(db, catrepo.find_part_id_by_mpn(db, "odd"))
     assert bare["mfr_name"] == "Acme"
+
+
+def test_review_page_shows_the_guessed_category_and_it_lands_on_the_part(app, monkeypatch):
+    monkeypatch.setattr(setup_router, "resolve_bom_file", _fake_resolve)
+    from partpilot.web.features.catalog import repo as catrepo
+    csv = "Designator,Value,Qty\nR1,10k,1\nJ1,odd,1\n"
+    c = _admin(app)
+    r = c.post("/setup/import-parts", files={"file": ("bom.csv", csv, "text/csv")})
+    job_id = _job_id(r.text)
+    r = c.post("/setup/import-parts/resolve", data={"job_id": job_id, "map_0": "refdes", "map_1": "value", "map_2": "qty"})
+    assert r.status_code == 200
+    assert "<th>Category</th>" in r.text
+    assert "RESISTOR" in r.text and "CONNECTOR" in r.text
+    c.post("/setup/import-parts/apply", data={"job_id": job_id, "accept": ["0", "1"]})
+    db = app.state.database
+    assert catrepo.get_part(db, catrepo.find_part_id_by_mpn(db, "RES-10K"))["category"] == "RESISTOR"
+    assert catrepo.get_part(db, catrepo.find_part_id_by_mpn(db, "odd"))["category"] == "CONNECTOR"
