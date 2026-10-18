@@ -79,6 +79,7 @@ def normalize_frame(df: pd.DataFrame, mappings: dict | None = None) -> list[BomL
             package=cell(row, "package"),
             description=cell(row, "description"),
             comment=cell(row, "comment"),
+            manufacturer=cell(row, "manufacturer"),
             row_index=int(idx),
             raw={k: ("" if pd.isna(v) else str(v)) for k, v in row.items()},
         )

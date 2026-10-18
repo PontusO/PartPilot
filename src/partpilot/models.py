@@ -36,6 +36,7 @@ class BomLine(BaseModel):
     package: str | None = None
     description: str | None = None
     comment: str | None = None
+    manufacturer: str | None = None  # maker named in the BOM; wins over the distributor's name
     row_index: int = 0
     raw: dict = Field(default_factory=dict)
 
