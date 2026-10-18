@@ -8,12 +8,15 @@ and shows its nav entry to the right roles — the feature never edits the core.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
 from fastapi import APIRouter
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,15 @@ class Migration:
     sql: str | Callable[[sqlite3.Connection], None]
 
 
+@dataclass(frozen=True)
+class HomeStat:
+    """One stat card on the home page: a labelled count that links to the feature's list."""
+
+    label: str
+    value: int | float | str
+    url: str | None = None
+
+
 @dataclass
 class Feature:
     """Everything one feature module contributes to the platform."""
@@ -58,6 +70,9 @@ class Feature:
     # ``async def runner(database)`` that loops forever. Declaring them here keeps the loop inside
     # its feature — the core spawns whatever features declare, without importing feature internals.
     background_tasks: tuple = ()
+    # Home-page stat cards: ``fn(database) -> list[HomeStat]``. The core calls it for every signed-in
+    # user whose role may see the feature's nav entry, in nav order; a hook that raises is skipped.
+    home_stats: Callable[..., list[HomeStat]] | None = None
 
 
 class FeatureRegistry:
@@ -78,6 +93,22 @@ class FeatureRegistry:
 
     def template_dirs(self) -> list[Path]:
         return [f.template_dir for f in self._features if f.template_dir]
+
+    def home_stats(self, database, role: str | None) -> list[HomeStat]:
+        """Every feature's home-page stats the role may see, in nav order (features without a
+        nav entry come last). A failing hook is logged and left out so the page still renders."""
+        ordered = sorted(
+            (f for f in self._features if f.home_stats is not None),
+            key=lambda f: f.nav.order if f.nav else 10**6)
+        out: list[HomeStat] = []
+        for feature in ordered:
+            if feature.nav is not None and not feature.nav.visible_to(role):
+                continue
+            try:
+                out.extend(feature.home_stats(database))
+            except Exception:  # noqa: BLE001 — one broken count must not take the home page down
+                log.exception("home stats for feature %r failed", feature.name)
+        return out
 
     def nav_for(self, role: str | None) -> list[NavItem]:
         items = [f.nav for f in self._features if f.nav and f.nav.visible_to(role)]

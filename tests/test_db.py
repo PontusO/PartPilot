@@ -171,3 +171,48 @@ def test_rebuild_table_rolls_back_on_dangling_reference(tmp_path):
         assert [tuple(r) for r in conn.execute("SELECT parent_id FROM child ORDER BY id")] == [(1,), (1,)]
         assert not conn.execute("SELECT name FROM sqlite_master WHERE name='child__new'").fetchone()
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+# ---- home-page stats hook ------------------------------------------------------------------
+
+def test_home_stats_collected_in_nav_order_and_role_gated(tmp_path):
+    from partpilot.web.core import HomeStat, NavItem
+    from partpilot.web.core.db import Database
+    calls = []
+
+    def stats_a(db):
+        calls.append("a")
+        return [HomeStat("Purchase orders", 3, "/purchase-orders")]
+
+    def stats_b(db):
+        calls.append("b")
+        return [HomeStat("Parts", 10, "/catalog"), HomeStat("Below minimum", 2, "/catalog?low=1")]
+
+    reg = FeatureRegistry()
+    reg.register(
+        Feature(name="a", nav=NavItem("Purchasing", "/purchasing", roles=frozenset({"purchasing"}), order=50),
+                home_stats=stats_a),
+        Feature(name="b", nav=NavItem("Parts", "/catalog", roles=None, order=10), home_stats=stats_b),
+        Feature(name="c", nav=NavItem("Manual", "/help", roles=None, order=75)),      # no hook
+    )
+    db = Database(tmp_path / "x.db")
+    everyone = reg.home_stats(db, "warehouse")
+    assert [s.label for s in everyone] == ["Parts", "Below minimum"]
+    buyer = reg.home_stats(db, "purchasing")
+    assert [s.label for s in buyer] == ["Parts", "Below minimum", "Purchase orders"]   # nav order, not registration order
+    assert buyer[2].value == 3 and buyer[2].url == "/purchase-orders"
+
+
+def test_home_stats_skips_a_hook_that_raises(tmp_path):
+    from partpilot.web.core import HomeStat, NavItem
+    from partpilot.web.core.db import Database
+
+    def broken(db):
+        raise RuntimeError("no such table")
+
+    reg = FeatureRegistry()
+    reg.register(
+        Feature(name="bad", nav=NavItem("Bad", "/bad", order=1), home_stats=broken),
+        Feature(name="ok", nav=NavItem("Ok", "/ok", order=2), home_stats=lambda db: [HomeStat("Ok", 1, "/ok")]),
+    )
+    assert [s.label for s in reg.home_stats(Database(tmp_path / "x.db"), "admin")] == ["Ok"]
