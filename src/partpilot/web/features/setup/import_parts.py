@@ -23,6 +23,7 @@ from . import repo
 TARGETS: list[tuple[str, str]] = [
     ("refdes", "RefDes"), ("qty", "Qty"), ("value", "Value"), ("device", "Device / MPN"),
     ("package", "Package"), ("description", "Description"), ("comment", "Comment"),
+    ("manufacturer", "Manufacturer"),
 ]
 TARGET_FIELDS = {f for f, _ in TARGETS}
 IGNORE = "ignore"

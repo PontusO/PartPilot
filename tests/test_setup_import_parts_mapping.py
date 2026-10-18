@@ -82,3 +82,14 @@ def test_read_headers_dedupes_duplicate_names(tmp_path):
     headers, samples = ip.read_headers(p)
     assert headers == ["Qty", "Value", "Description", "Description (2)"]
     assert samples[3] == ["extra"]
+
+
+def test_manufacturer_is_a_mapping_target():
+    assert dict(ip.TARGETS)["manufacturer"] == "Manufacturer"
+    m = ip.parse_mapping({"map_0": "value", "map_1": "manufacturer"}, ["Value", "Mfr"])
+    assert m == {"value": "Value", "manufacturer": "Mfr"}
+
+
+def test_guess_mapping_prefills_manufacturer():
+    m = ip.guess_mapping(["Designator", "Value", "Manufacturer", "Manufacturer Part Number"])
+    assert m["manufacturer"] == "Manufacturer"
