@@ -2135,3 +2135,18 @@ def test_home_entry_labels_cap_long_descriptions(app):
     stat = next(s for s in app.state.registry.home_stats(db, "admin") if s.label == "Parts")
     label = stat.newest[0].label
     assert label.startswith("LONG-1 Webshop text") and len(label) == len("LONG-1 ") + 80
+
+
+# ---- supplier lookup ignores punctuation/case so "Digi-Key" and "Digikey" are one contact -------
+
+def test_supplier_lookup_matches_name_ignoring_punctuation_and_case(app):
+    from partpilot.web.features.catalog import repo as catrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    db = app.state.database
+    existing = conrepo.create_contact(db, {"kind": "supplier", "name": "Digikey"})
+    with db.connect() as conn:
+        assert catrepo._get_or_create_supplier(conn, "Digi-Key") == existing
+        assert catrepo._get_or_create_supplier(conn, " DIGI KEY ") == existing
+        assert catrepo._get_or_create_supplier(conn, "Mouser") != existing   # a new name still creates
+        n = conn.execute("SELECT COUNT(*) FROM contacts WHERE kind = 'supplier'").fetchone()[0]
+    assert n == 2

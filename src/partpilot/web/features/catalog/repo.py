@@ -510,15 +510,21 @@ def find_part_by_part_no(db: Database, part_no: str | None) -> dict | None:
     return dict(row) if row else None
 
 
+def _supplier_key(name: str | None) -> str:
+    """Matching key for a supplier name: letters and digits only, lower case — so "Digi-Key",
+    "Digikey" and "DIGI KEY" are the same supplier."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
 def _get_or_create_supplier(conn, name: str) -> int:
-    """Id of the supplier contact called ``name`` (trimmed, case-insensitive), creating a bare one
-    ("+ New supplier…" on the part form, or the resolver meeting Digi-Key for the first time)."""
+    """Id of the supplier contact called ``name`` — matched on ``_supplier_key`` (case, spaces and
+    punctuation ignored; lowest id wins) — creating a bare one when no contact matches ("+ New
+    supplier…" on the part form, or the resolver meeting a distributor for the first time)."""
     name = (name or "").strip()
-    row = conn.execute(
-        "SELECT id FROM contacts WHERE kind = 'supplier' AND lower(trim(name)) = lower(?) "
-        "ORDER BY id LIMIT 1", (name,)).fetchone()
-    if row:
-        return row["id"]
+    key = _supplier_key(name)
+    for row in conn.execute("SELECT id, name FROM contacts WHERE kind = 'supplier' ORDER BY id"):
+        if _supplier_key(row["name"]) == key:
+            return row["id"]
     return conn.execute(
         "INSERT INTO contacts (kind, name, source) VALUES ('supplier', ?, 'ui')", (name,)).lastrowid
 

@@ -159,7 +159,8 @@ runner, and the shared Jinja template environment. Everything else is a **featur
   database the runner writes `data/backups/partpilot-<ts>.db`; a failed backup aborts startup.
 - **Suppliers live only in Contacts** (`contacts.kind = 'supplier'`, since 2026-10-16). There is no
   `suppliers` table; `part_suppliers`, `purchase_orders` and `goods_receipts` reference `contacts(id)`.
-  Supplier dropdowns come from `catalog.repo.suppliers()`; `_get_or_create_supplier` creates a bare
+  Supplier dropdowns come from `catalog.repo.suppliers()`; `_get_or_create_supplier` matches names ignoring case,
+  spaces and punctuation ("Digi-Key" = "Digikey") and otherwise creates a bare
   supplier contact. Never reintroduce a parallel supplier table.
 - **Routers depend only on `web/core/deps.py`**, not on `create_app`. Get platform services from
   `request.app.state` (`store`, `registry`, `database`, `templates`, `jobs_dir`). Gate actions with

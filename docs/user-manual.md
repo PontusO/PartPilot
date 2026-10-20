@@ -131,7 +131,9 @@ Press **"+ Add component"** on the list or **"Edit"** on a part.
 On an existing part the same section adjusts our stock with an ADJUST movement; customer-shelf
 stock is never touched from the form.
 
-**Suppliers.** Add one row per source: **Supplier** (pick one, or "+ New supplier…"), **Supplier
+**Suppliers.** Add one row per source: **Supplier** (pick one, or "+ New supplier…" — a typed name
+that differs from an existing supplier only in case, spaces or punctuation, such as "Digi-Key" and
+"Digikey", is treated as that existing supplier; the BOM importer follows the same rule), **Supplier
 P/N**, **Unit price** per piece, **Reel/UOM qty**, **MOQ**, **Lead (days)**, and tick **Default**.
 The default supplier's unit price becomes the part's unit cost and is what purchase suggestions
 use. A supplier added here becomes a supplier contact with only a name; complete its address in
