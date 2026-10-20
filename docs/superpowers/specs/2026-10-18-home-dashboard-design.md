@@ -24,7 +24,7 @@ CSS grid `.home-grid`, `repeat(4, minmax(0, 1fr))`, equal-width cards, two rows 
 | Parts | active components (`kind != 'ASSY'`, `retired_at IS NULL`) | "N below minimum" | `part_no` + description (or value) | `/catalog/{id}` |
 | Documents | `documents.retired = 0` | | `code title` | `/documents/{id}` |
 | Assemblies | active assemblies | | `part_no` + description (or value) | `/assemblies/{id}` |
-| Customer orders open | status not complete/cancelled | | `order_ref` | `/customer-orders/{id}` |
+| Customer orders open | status not complete/cancelled | | `order_ref`, coloured: in progress blue, complete green, cancelled red | `/customer-orders/{id}` |
 | Work orders open | status not finished/cancelled | | `wo_no` | `/work-orders/{id}` |
 | Purchase orders on order | `summary()["ordered"]` | | `po_no` | `/purchase-orders/{id}` |
 | Suppliers | contacts kind=supplier | | `name` | `/contacts/{id}` |
@@ -54,8 +54,8 @@ git or a repository the commit list is empty and the version line stays. The pac
   `Feature.home_stats: fn(db) -> list[HomeStat]`. `FeatureRegistry.home_stats(db, role)` collects in
   nav order, skips features whose nav the role cannot see, and logs + skips a hook that raises so the
   page always renders.
-- `core/home.py`: `HomeEntry(label, url, when)` and `recent_entries(conn, *, table, label, url,
-  where, key, limit)` — the one implementation of the New/Edited rule, parameterised by SQL label
+- `core/home.py`: `HomeEntry(label, url, when, tone)` and `recent_entries(conn, *, table, label, url,
+  where, key, tone, limit)` (`tone` = optional SQL expression → colour token per row) — the one implementation of the New/Edited rule, parameterised by SQL label
   expression, filter, key column and URL prefix.
 - Each feature's `repo.py` has `home_stats(db)` next to `summary()`; `feature.py` passes it to the
   descriptor. Features never touch `home.html`.

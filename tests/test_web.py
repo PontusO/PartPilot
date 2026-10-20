@@ -2079,6 +2079,27 @@ def test_home_cards_list_newest_and_last_edited(app):
     assert "P-2</a>" not in html                       # neither new enough nor edited
 
 
+def test_home_customer_order_entries_coloured_by_status(app):
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    db = app.state.database
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Acme"})
+    o_open = corepo.create_order(db, {"customer_id": cust, "order_ref": "CO-OPEN"})
+    o_done = corepo.create_order(db, {"customer_id": cust, "order_ref": "CO-DONE"})
+    o_cxl = corepo.create_order(db, {"customer_id": cust, "order_ref": "CO-CXL"})
+    with db.connect() as conn:                        # statuses are action-owned; set them directly
+        conn.execute("UPDATE customer_orders SET status = 'complete' WHERE id = ?", (o_done,))
+        conn.execute("UPDATE customer_orders SET status = 'cancelled' WHERE id = ?", (o_cxl,))
+    stat = next(s for s in app.state.registry.home_stats(db, "admin") if s.label == "Customer orders open")
+    assert {e.label: e.tone for e in stat.newest} == {"CO-OPEN": "accent", "CO-DONE": "ok", "CO-CXL": "bad"}
+    client = TestClient(app)
+    _login(client, "ware1", "pw")
+    html = client.get("/").text
+    assert f'<a class="ok" href="/customer-orders/{o_done}">CO-DONE</a>' in html
+    assert f'<a class="bad" href="/customer-orders/{o_cxl}">CO-CXL</a>' in html
+    assert f'<a class="accent" href="/customer-orders/{o_open}">CO-OPEN</a>' in html
+
+
 def test_home_entry_labels_cap_long_descriptions(app):
     from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database

@@ -29,3 +29,16 @@ def test_recent_entries_limit_and_custom_key():
     from partpilot.web.core.home import recent_entries
     newest, _ = recent_entries(_conn(), table="t", label="'row ' || id", url="/x?id=", key="name", limit=2)
     assert [(e.label, e.url) for e in newest] == [("row 6", "/x?id=n6"), ("row 5", "/x?id=n5")]
+
+
+def test_recent_entries_tone_expression_colours_each_row():
+    from partpilot.web.core.home import recent_entries
+    conn = _conn()
+    conn.execute("ALTER TABLE t ADD COLUMN status TEXT DEFAULT 'open'")
+    conn.execute("UPDATE t SET status = 'done' WHERE id = 5")
+    conn.execute("UPDATE t SET status = 'cancelled' WHERE id = 4")
+    newest, _ = recent_entries(conn, table="t", label="name", url="/t/", where="dead = 0",
+                               tone="CASE status WHEN 'done' THEN 'ok' WHEN 'cancelled' THEN 'bad' ELSE 'accent' END")
+    assert [e.tone for e in newest] == ["ok", "bad", "accent", "accent"]
+    plain, _ = recent_entries(conn, table="t", label="name", url="/t/")
+    assert plain[0].tone is None                        # no tone expression → uncoloured

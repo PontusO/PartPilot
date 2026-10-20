@@ -562,9 +562,14 @@ def cancel_order(db: Database, order_id: int) -> None:
         conn.commit()
 
 
+# Home page entry colour by status: complete = green, cancelled = red, anything in progress
+# (draft, confirmed, shipped) = blue.
+_HOME_TONE = "CASE status WHEN 'complete' THEN 'ok' WHEN 'cancelled' THEN 'bad' ELSE 'accent' END"
+
+
 def home_stats(db: Database) -> list[HomeStat]:
     with db.connect() as conn:
         newest, edited = recent_entries(conn, table="customer_orders", label="order_ref",
-                                        url="/customer-orders/")
+                                        url="/customer-orders/", tone=_HOME_TONE)
     return [HomeStat("Customer orders open", summary(db)["open"], "/customer-orders",
                      newest=newest, edited=edited)]

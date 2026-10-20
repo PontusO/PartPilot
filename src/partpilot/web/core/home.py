@@ -20,7 +20,8 @@ class HomeEntry:
 
     label: str
     url: str
-    when: str          # ISO date (YYYY-MM-DD)
+    when: str                 # ISO date (YYYY-MM-DD)
+    tone: str | None = None   # colour token: accent (in progress) | ok | warn | bad | muted, or None
 
 
 def recent_entries(
@@ -31,6 +32,7 @@ def recent_entries(
     url: str,
     where: str = "1 = 1",
     key: str = "id",
+    tone: str | None = None,
     limit: int = RECENT_SHOWN,
 ) -> tuple[tuple[HomeEntry, ...], tuple[HomeEntry, ...]]:
     """Return ``(newest, edited)`` for ``table``.
@@ -38,15 +40,17 @@ def recent_entries(
     ``label`` and ``key`` are SQL expressions; ``url`` is a prefix the key is appended to
     (``"/catalog/"`` → ``/catalog/42``). ``newest`` is ordered by ``created_at`` descending; ``edited``
     holds only rows whose ``updated_at`` is later than their ``created_at``, newest edit first. A row
-    can appear in both lists. ``where`` narrows both (retired rows, a contact kind, ...).
+    can appear in both lists. ``where`` narrows both (retired rows, a contact kind, ...). ``tone``,
+    when given, is a SQL expression yielding a colour token per row (``'accent'``/``'ok'``/``'bad'``…),
+    typically a ``CASE status …`` — the template colours the entry's link with it.
     """
 
     def fetch(order_col: str, extra: str) -> tuple[HomeEntry, ...]:
         rows = conn.execute(
-            f"SELECT {label}, {key}, {order_col} FROM {table} WHERE ({where}){extra} "
+            f"SELECT {label}, {key}, {order_col}, {tone or 'NULL'} FROM {table} WHERE ({where}){extra} "
             f"ORDER BY {order_col} DESC, id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        return tuple(HomeEntry(str(r[0]), f"{url}{r[1]}", str(r[2] or "")[:10]) for r in rows)
+        return tuple(HomeEntry(str(r[0]), f"{url}{r[1]}", str(r[2] or "")[:10], r[3]) for r in rows)
 
     return (fetch("created_at", ""), fetch("updated_at", " AND updated_at > created_at"))
