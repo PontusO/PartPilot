@@ -37,6 +37,8 @@ def recent_entries(
 ) -> tuple[tuple[HomeEntry, ...], tuple[HomeEntry, ...]]:
     """Return ``(newest, edited)`` for ``table``.
 
+    ``table`` is a table name or a parenthesised subquery (to join in a related name — see the
+    purchase_orders and work_orders hooks); it must expose ``id``, ``created_at`` and ``updated_at``.
     ``label`` and ``key`` are SQL expressions; ``url`` is a prefix the key is appended to
     (``"/catalog/"`` → ``/catalog/42``). ``newest`` is ordered by ``created_at`` descending; ``edited``
     holds only rows whose ``updated_at`` is later than their ``created_at``, newest edit first. A row

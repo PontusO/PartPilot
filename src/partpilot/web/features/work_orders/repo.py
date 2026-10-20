@@ -584,9 +584,19 @@ def cancel_work_order(db: Database, wo_id: int) -> None:
         conn.commit()
 
 
+# Home page rows: the WO with the customer it is built for, via its customer-order line (bare
+# number for a stock build).
+_HOME_ROWS = ("(SELECT w.id, w.wo_no, w.created_at, w.updated_at, c.name AS customer "
+              "FROM work_orders w "
+              "LEFT JOIN customer_order_lines col ON col.id = w.customer_order_line_id "
+              "LEFT JOIN customer_orders co ON co.id = col.order_id "
+              "LEFT JOIN contacts c ON c.id = co.customer_id)")
+
+
 def home_stats(db: Database) -> list[HomeStat]:
     with db.connect() as conn:
         n = conn.execute("SELECT COUNT(*) FROM work_orders "
                          "WHERE status NOT IN ('finished', 'cancelled')").fetchone()[0]
-        newest, edited = recent_entries(conn, table="work_orders", label="wo_no", url="/work-orders/")
+        newest, edited = recent_entries(conn, table=_HOME_ROWS, url="/work-orders/",
+                                        label="wo_no || COALESCE(' · ' || customer, '')")
     return [HomeStat("Work orders open", n, "/work-orders", newest=newest, edited=edited)]

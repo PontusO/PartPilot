@@ -30,7 +30,8 @@ their minimum stock. Retired parts and assemblies are not counted or listed.
 Each card then lists **New** — the four most recently created records — and **Edited** — the four
 most recently changed records, each with the date and a link to its page. Parts and assemblies show
 their part number followed by the description (or the value when there is no description), documents
-their number and title. Customer orders are coloured by status: blue while in progress (Draft,
+their number and title, purchase orders their number and supplier, work orders their number and
+the customer they are built for (a stock build shows the number alone). Customer orders are coloured by status: blue while in progress (Draft,
 Confirmed, Shipped), green when Complete, red when Cancelled. A record counts as edited
 only when it was changed after it was created; a stock adjustment or a version release counts as a
 change to a part. Records created on the day the catalog was first loaded into PartPilot carry that

@@ -25,8 +25,8 @@ CSS grid `.home-grid`, `repeat(4, minmax(0, 1fr))`, equal-width cards, two rows 
 | Documents | `documents.retired = 0` | | `code title` | `/documents/{id}` |
 | Assemblies | active assemblies | | `part_no` + description (or value) | `/assemblies/{id}` |
 | Customer orders open | status not complete/cancelled | | `order_ref`, coloured: in progress blue, complete green, cancelled red | `/customer-orders/{id}` |
-| Work orders open | status not finished/cancelled | | `wo_no` | `/work-orders/{id}` |
-| Purchase orders on order | `summary()["ordered"]` | | `po_no` | `/purchase-orders/{id}` |
+| Work orders open | status not finished/cancelled | | `wo_no · customer` (via CO line; bare for stock builds) | `/work-orders/{id}` |
+| Purchase orders on order | `summary()["ordered"]` | | `po_no · supplier` | `/purchase-orders/{id}` |
 | Suppliers | contacts kind=supplier | | `name` | `/contacts/{id}` |
 | Customers | contacts kind=customer | | `name` | `/contacts/{id}` |
 

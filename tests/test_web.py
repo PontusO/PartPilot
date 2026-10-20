@@ -2100,6 +2100,33 @@ def test_home_customer_order_entries_coloured_by_status(app):
     assert f'<a class="accent" href="/customer-orders/{o_open}">CO-OPEN</a>' in html
 
 
+def test_home_po_entries_name_the_supplier_and_wo_entries_the_customer(app):
+    from partpilot.web.features.assemblies import repo as asmrepo
+    from partpilot.web.features.contacts import repo as conrepo
+    from partpilot.web.features.customer_orders import repo as corepo
+    from partpilot.web.features.purchase_orders import repo as porepo
+    from partpilot.web.features.work_orders import repo as worepo
+    db = app.state.database
+    sup = conrepo.create_contact(db, {"kind": "supplier", "name": "Acme Supplies"})
+    cust = conrepo.create_contact(db, {"kind": "customer", "name": "Beta Corp"})
+    po_sup = porepo.create_po(db, {"po_no": "PO-SUP", "supplier_id": sup})
+    po_none = porepo.create_po(db, {"po_no": "PO-NONE"})
+    asm = asmrepo.create_assembly(db, {"part_no": "BOARD-1"})
+    oid = corepo.create_order(db, {"customer_id": cust, "order_ref": "CO-1"})
+    corepo.add_line(db, oid, asm, 2, 50.0, None)
+    with db.connect() as conn:
+        line_id = conn.execute("SELECT id FROM customer_order_lines WHERE order_id = ?", (oid,)).fetchone()[0]
+    wo_cust = worepo.create_work_order(db, {"assembly_id": asm, "qty": 2, "customer_order_line_id": line_id})
+    wo_stock = worepo.create_work_order(db, {"assembly_id": asm, "qty": 5})
+    stats = {s.label: s for s in app.state.registry.home_stats(db, "admin")}
+    po_labels = {e.url: e.label for e in stats["Purchase orders on order"].newest}
+    assert po_labels[f"/purchase-orders/{po_sup}"] == "PO-SUP · Acme Supplies"
+    assert po_labels[f"/purchase-orders/{po_none}"] == "PO-NONE"              # no supplier → bare number
+    wo_labels = {e.url: e.label for e in stats["Work orders open"].newest}
+    assert wo_labels[f"/work-orders/{wo_cust}"].endswith(" · Beta Corp")
+    assert " · " not in wo_labels[f"/work-orders/{wo_stock}"]                   # stock build → bare number
+
+
 def test_home_entry_labels_cap_long_descriptions(app):
     from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database

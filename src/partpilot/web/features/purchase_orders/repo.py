@@ -534,9 +534,14 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
     return grn_id
 
 
+# Home page rows: the PO with its supplier's name (bare number when none is set).
+_HOME_ROWS = ("(SELECT po.id, po.po_no, po.created_at, po.updated_at, s.name AS supplier "
+              "FROM purchase_orders po LEFT JOIN contacts s ON s.id = po.supplier_id)")
+
+
 def home_stats(db: Database) -> list[HomeStat]:
     with db.connect() as conn:
-        newest, edited = recent_entries(conn, table="purchase_orders", label="po_no",
-                                        url="/purchase-orders/")
+        newest, edited = recent_entries(conn, table=_HOME_ROWS, url="/purchase-orders/",
+                                        label="po_no || COALESCE(' · ' || supplier, '')")
     return [HomeStat("Purchase orders on order", summary(db)["ordered"], "/purchase-orders",
                      newest=newest, edited=edited)]
