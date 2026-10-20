@@ -25,6 +25,11 @@
 <div class="panel">
   <p class="note"><a href="{{ back_url }}">← Back</a></p>
   <h1>{{ heading }}</h1>
+  {% if show_bom_import and current_user and current_user.role == 'admin' %}
+  <div class="act-bar">
+    <a class="act-btn secondary" href="/setup/import-parts">Import parts from BOM</a>
+  </div>
+  {% endif %}
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
   <form method="post" action="{{ action }}">

@@ -2155,3 +2155,26 @@ def test_supplier_lookup_matches_name_ignoring_punctuation_and_case(app):
 def test_nav_lists_documents_right_after_assemblies(app):
     labels = [item.label for item in app.state.registry.nav_for("admin")]
     assert labels.index("Documents") == labels.index("Assemblies") + 1
+
+
+# ---- "Import parts from BOM" shortcut button on Parts and New assembly (admin only) ---------------
+
+def test_import_parts_button_on_parts_list_and_new_assembly_for_admin(app):
+    app.state.store.create_user("adm1", "pw", role="admin")
+    client = TestClient(app)
+    _login(client, "adm1", "pw")
+    button = '<a class="act-btn secondary" href="/setup/import-parts">Import parts from BOM</a>'
+    assert button in client.get("/catalog").text
+    assert button in client.get("/assemblies/new").text
+
+
+def test_import_parts_button_hidden_from_non_admins(app):
+    from partpilot.web.features.assemblies import repo as asmrepo
+    aid = asmrepo.create_assembly(app.state.database, {"part_no": "EDIT-ME"})
+    client = TestClient(app)
+    _login(client, "buyer1", "pw")                    # purchasing may add parts/assemblies but not run Setup tools
+    assert "/setup/import-parts" not in client.get("/catalog").text
+    assert "/setup/import-parts" not in client.get("/assemblies/new").text
+    app.state.store.create_user("adm1", "pw", role="admin")
+    _login(client, "adm1", "pw")
+    assert "/setup/import-parts" not in client.get(f"/assemblies/{aid}/edit").text   # edit form: no shortcut

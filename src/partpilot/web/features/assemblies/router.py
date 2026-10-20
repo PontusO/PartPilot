@@ -77,12 +77,15 @@ def _parse_assembly(form) -> dict:
 
 def _render_assembly_form(request, *, action, heading, submit_label, back_url, values,
                           hint=None, error=None, status=200, created_parts=None,
-                          created_docs=None):
+                          created_docs=None, show_bom_import=False):
+    # show_bom_import: the New assembly page offers admins the Setup "Import parts from BOM" tool,
+    # which can also create the assembly from the imported file; the edit form does not.
     return request.app.state.templates.TemplateResponse(
         request, "assembly_form.html",
         {"action": action, "heading": heading, "submit_label": submit_label,
          "back_url": back_url, "values": values or {}, "hint": hint, "error": error,
-         "created_parts": created_parts or [], "created_docs": created_docs or []},
+         "created_parts": created_parts or [], "created_docs": created_docs or [],
+         "show_bom_import": show_bom_import},
         status_code=status,
     )
 
@@ -114,7 +117,7 @@ def new_assembly_form(request: Request, part_no: str | None = None, desc: str | 
         for code in [c.strip() for c in docs.split(",") if c.strip()]:
             created_docs.append(documents_repo.document_for_code(db, code) or {"code": code})
     return _render_assembly_form(
-        request, action="/assemblies/new", heading="New assembly",
+        request, action="/assemblies/new", heading="New assembly", show_bom_import=True,
         submit_label="Create assembly", back_url="/assemblies", values=values,
         hint="After creating, add components to its BOM from the assembly page.",
         created_parts=created_parts, created_docs=created_docs,
@@ -128,7 +131,7 @@ async def create_assembly(request: Request):
     part = _parse_assembly(form)
     if not part["part_no"]:
         return _render_assembly_form(
-            request, action="/assemblies/new", heading="New assembly",
+            request, action="/assemblies/new", heading="New assembly", show_bom_import=True,
             submit_label="Create assembly", back_url="/assemblies", values=dict(form),
             error="Part number is required.", status=400,
         )
