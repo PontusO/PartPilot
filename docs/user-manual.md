@@ -22,7 +22,7 @@ your current password and the new one twice.
 ### The home page
 
 Signing in lands on the home page. Under the title, a grid of equal-width **stat cards**, four to a
-row, shows a live count for each section you can open: **Parts**, **Documents**, **Assemblies**,
+row, shows a live count for each section you can open: **Parts**, **Assemblies**, **Documents**,
 **Customer orders open**, **Work orders open**, **Purchase orders on order**, **Suppliers** and
 **Customers**. The count is a link to that list; the Parts card also notes how many parts are below
 their minimum stock. Retired parts and assemblies are not counted or listed.

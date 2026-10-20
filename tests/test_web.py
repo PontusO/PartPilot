@@ -2030,7 +2030,7 @@ def test_assembly_lifecycle_routes(app):
 
 def test_home_stat_cards_follow_nav_order(app):
     labels = [s.label for s in app.state.registry.home_stats(app.state.database, "admin")]
-    assert labels == ["Parts", "Documents", "Assemblies", "Customer orders open",
+    assert labels == ["Parts", "Assemblies", "Documents", "Customer orders open",
                       "Work orders open", "Purchase orders on order", "Suppliers", "Customers"]
     assert len(labels) == 8                            # an even grid of two rows of four
 
@@ -2150,3 +2150,8 @@ def test_supplier_lookup_matches_name_ignoring_punctuation_and_case(app):
         assert catrepo._get_or_create_supplier(conn, "Mouser") != existing   # a new name still creates
         n = conn.execute("SELECT COUNT(*) FROM contacts WHERE kind = 'supplier'").fetchone()[0]
     assert n == 2
+
+
+def test_nav_lists_documents_right_after_assemblies(app):
+    labels = [item.label for item in app.state.registry.nav_for("admin")]
+    assert labels.index("Documents") == labels.index("Assemblies") + 1
