@@ -253,7 +253,8 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   filter form (same pattern as "Normally stocked only").
 - **2026-10-18** — **Home page stat cards.** The landing page renders a `.home-grid` (CSS grid,
   `repeat(4, minmax(0, 1fr))`, collapsing to 2 and 1 columns on narrow screens) of equal-width
-  `.card.home-card` cards, one per `HomeStat` a feature declares through `Feature.home_stats`
+  `.card.home-card` cards (panel background `--panel`, same as the technical panel below, not the
+  darker `.card` default), one per `HomeStat` a feature declares through `Feature.home_stats`
   (core/registry.py), in nav order and gated by the feature's nav roles. Each card holds a
   `<a class="count">` (`<b>value</b><small>Label</small>`, links to the list), an optional muted
   `.note`, then two `<h4>` sections **New** and **Edited** listing up to four `HomeEntry` rows as
