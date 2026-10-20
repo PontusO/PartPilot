@@ -2077,3 +2077,13 @@ def test_home_cards_list_newest_and_last_edited(app):
     assert html.index("<h4>New</h4>") < html.index(f'<a href="/catalog/{ids[5]}">P-6 0u1/16V</a>')
     assert f'<a href="/catalog/{ids[0]}">P-1</a>' in html
     assert "P-2</a>" not in html                       # neither new enough nor edited
+
+
+def test_home_entry_labels_cap_long_descriptions(app):
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    long = "Webshop text " * 40                           # ~520 chars, as some imported parts carry
+    catrepo.create_part(db, part={"part_no": "LONG-1", "description": "  " + long}, supplier_lines=[])
+    stat = next(s for s in app.state.registry.home_stats(db, "admin") if s.label == "Parts")
+    label = stat.newest[0].label
+    assert label.startswith("LONG-1 Webshop text") and len(label) == len("LONG-1 ") + 80

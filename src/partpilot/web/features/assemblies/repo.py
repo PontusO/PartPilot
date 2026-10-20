@@ -404,9 +404,15 @@ def delete_bom_line(db: Database, parent_id: int, line_id: int) -> None:
         conn.commit()
 
 
+# Home page entry label: part number, then the description (or the value for passives) cut to one
+# line — some imported descriptions are whole webshop pages.
+_HOME_LABEL = ("part_no || COALESCE(' ' || NULLIF(substr(TRIM(replace(replace(COALESCE(description, value), "
+               "char(10), ' '), char(13), ' ')), 1, 80), ''), '')")
+
+
 def home_stats(db: Database) -> list[HomeStat]:
     with db.connect() as conn:
-        newest, edited = recent_entries(conn, table="parts", url="/assemblies/", label="part_no || COALESCE(' ' || NULLIF(COALESCE(description, value), ''), '')",
+        newest, edited = recent_entries(conn, table="parts", url="/assemblies/", label=_HOME_LABEL,
                                         where="kind = 'ASSY' AND retired_at IS NULL")
     return [HomeStat("Assemblies", summary(db)["assemblies"], "/assemblies",
                      newest=newest, edited=edited)]

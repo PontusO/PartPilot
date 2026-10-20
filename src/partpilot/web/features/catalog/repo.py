@@ -856,10 +856,16 @@ def recalc_sell_tiers_from_purchase(db: Database, part_id: int, anchor_qty: floa
     return written
 
 
+# Home page entry label: part number, then the description (or the value for passives) cut to one
+# line — some imported descriptions are whole webshop pages.
+_HOME_LABEL = ("part_no || COALESCE(' ' || NULLIF(substr(TRIM(replace(replace(COALESCE(description, value), "
+               "char(10), ' '), char(13), ' ')), 1, 80), ''), '')")
+
+
 def home_stats(db: Database) -> list[HomeStat]:
     s = summary(db)
     with db.connect() as conn:
-        newest, edited = recent_entries(conn, table="parts", url="/catalog/", label="part_no || COALESCE(' ' || NULLIF(COALESCE(description, value), ''), '')",
+        newest, edited = recent_entries(conn, table="parts", url="/catalog/", label=_HOME_LABEL,
                                         where="kind != 'ASSY' AND retired_at IS NULL")
     return [HomeStat("Parts", s["parts"], "/catalog", note=f"{s['below_min']} below minimum",
                      newest=newest, edited=edited)]
