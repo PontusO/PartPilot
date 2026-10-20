@@ -251,10 +251,15 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `badge muted` **Retired** in its `<h1>` and as a `retired` pill on BOM and work-order lines that
   still reference it. Lists hide retired rows behind a **Show retired** checkbox that re-submits the
   filter form (same pattern as "Normally stocked only").
-- **2026-10-18** — **Home page stat cards.** The landing page renders one `.cards` row of
-  clickable `<a class="card" href=…><b>value</b><small>Label</small></a>` cards, one per count a
-  feature declares through `Feature.home_stats` (core/registry.py), in nav order and gated by the
-  feature's nav roles. Labels are sentence case and name the state ("Work orders open", not
-  "Open"). Under the cards one `.panel` holds **Latest changes** (two commits: date · `hash` ·
-  subject) and a muted `.versions` line. Features add a card by returning a `HomeStat`; they never
-  edit `home.html`.
+- **2026-10-18** — **Home page stat cards.** The landing page renders a `.home-grid` (CSS grid,
+  `repeat(4, minmax(0, 1fr))`, collapsing to 2 and 1 columns on narrow screens) of equal-width
+  `.card.home-card` cards, one per `HomeStat` a feature declares through `Feature.home_stats`
+  (core/registry.py), in nav order and gated by the feature's nav roles. Each card holds a
+  `<a class="count">` (`<b>value</b><small>Label</small>`, links to the list), an optional muted
+  `.note`, then two `<h4>` sections **New** and **Edited** listing up to four `HomeEntry` rows as
+  `<li><a href=…>label</a><time>date</time></li>` (long labels truncate with an ellipsis). These
+  lists are navigation, so plain links are correct here — the no-text-links rule is about actions
+  in table rows. Labels are sentence case and name the state ("Work orders open", not "Open").
+  Under the cards one `.panel` holds **Latest changes** (two commits: date · `hash` · subject) and
+  a muted `.versions` line. Features add a card by returning a `HomeStat` (lists come from
+  `core.home.recent_entries`); they never edit `home.html`.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...core.db import Database
-from ...core import HomeStat
+from ...core import HomeStat, recent_entries
 
 
 def summary(db: Database) -> dict:
@@ -405,4 +405,8 @@ def delete_bom_line(db: Database, parent_id: int, line_id: int) -> None:
 
 
 def home_stats(db: Database) -> list[HomeStat]:
-    return [HomeStat("Assemblies", summary(db)["assemblies"], "/assemblies")]
+    with db.connect() as conn:
+        newest, edited = recent_entries(conn, table="parts", label="part_no", url="/assemblies/",
+                                        where="kind = 'ASSY' AND retired_at IS NULL")
+    return [HomeStat("Assemblies", summary(db)["assemblies"], "/assemblies",
+                     newest=newest, edited=edited)]

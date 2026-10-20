@@ -16,6 +16,8 @@ from typing import Callable, Iterable, Iterator
 
 from fastapi import APIRouter
 
+from .home import HomeEntry
+
 log = logging.getLogger(__name__)
 
 
@@ -49,11 +51,15 @@ class Migration:
 
 @dataclass(frozen=True)
 class HomeStat:
-    """One stat card on the home page: a labelled count that links to the feature's list."""
+    """One stat card on the home page: a labelled count linking to the feature's list, an optional
+    muted ``note`` under it, and the ``newest`` / ``edited`` rows (see ``core.home.recent_entries``)."""
 
     label: str
     value: int | float | str
     url: str | None = None
+    note: str | None = None
+    newest: tuple[HomeEntry, ...] = ()
+    edited: tuple[HomeEntry, ...] = ()
 
 
 @dataclass

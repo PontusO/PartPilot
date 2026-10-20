@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ...core import ref_no
 from ...core.db import Database
-from ...core import HomeStat
+from ...core import HomeStat, recent_entries
 from ..catalog import cost_refresh, pricing, stock
 from ..catalog import repo as catrepo
 from ..setup import repo as setup_repo
@@ -535,4 +535,8 @@ def receive_po(db: Database, po_id: int, receipts: dict[int, float], user=None,
 
 
 def home_stats(db: Database) -> list[HomeStat]:
-    return [HomeStat("Purchase orders on order", summary(db)["ordered"], "/purchase-orders")]
+    with db.connect() as conn:
+        newest, edited = recent_entries(conn, table="purchase_orders", label="po_no",
+                                        url="/purchase-orders/")
+    return [HomeStat("Purchase orders on order", summary(db)["ordered"], "/purchase-orders",
+                     newest=newest, edited=edited)]

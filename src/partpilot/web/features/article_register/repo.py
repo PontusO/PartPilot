@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 
 from ...core.db import Database
-from ...core import HomeStat
+from ...core import HomeStat, recent_entries
 from .codes import article_code, compose_description, normalize_prefix
 
 # Display order + human labels for the prefix categories (used to group the allocator dropdown).
@@ -405,4 +405,8 @@ def summary(db: Database) -> dict:
 
 
 def home_stats(db: Database) -> list[HomeStat]:
-    return [HomeStat("Article numbers", summary(db)["total"], "/article-register")]
+    with db.connect() as conn:
+        newest, edited = recent_entries(conn, table="article_numbers", label="code", key="running_no",
+                                        url="/article-register/", where="retired = 0")
+    return [HomeStat("Article numbers", summary(db)["total"], "/article-register",
+                     newest=newest, edited=edited)]

@@ -6,8 +6,10 @@ functionality is added as bounded *feature modules* rather than edits to a monol
 """
 
 from .refs import ref_no
+from .home import HomeEntry, recent_entries
 from .registry import Feature, FeatureRegistry, HomeStat, Migration, NavItem
 from .workdays import add_workdays, iso, parse_date, sub_workdays, workdays_between
 
-__all__ = ["Feature", "FeatureRegistry", "HomeStat", "Migration", "NavItem", "ref_no",
+__all__ = ["Feature", "FeatureRegistry", "HomeEntry", "HomeStat", "Migration", "NavItem",
+           "recent_entries", "ref_no",
            "add_workdays", "sub_workdays", "workdays_between", "parse_date", "iso"]

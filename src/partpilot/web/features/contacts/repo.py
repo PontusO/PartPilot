@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...core.db import Database, table_exists
-from ...core import HomeStat
+from ...core import HomeStat, recent_entries
 
 KINDS = ("supplier", "customer", "other")
 
@@ -208,5 +208,10 @@ def _apply_default_flags(conn, contact_id: int, address_id: int, data: dict) -> 
 
 def home_stats(db: Database) -> list[HomeStat]:
     s = summary(db)
-    return [HomeStat("Suppliers", s["suppliers"], "/contacts?kind=supplier"),
-            HomeStat("Customers", s["customers"], "/contacts?kind=customer")]
+    with db.connect() as conn:
+        sup = recent_entries(conn, table="contacts", label="name", url="/contacts/",
+                             where="kind = 'supplier'")
+        cus = recent_entries(conn, table="contacts", label="name", url="/contacts/",
+                             where="kind = 'customer'")
+    return [HomeStat("Suppliers", s["suppliers"], "/contacts?kind=supplier", newest=sup[0], edited=sup[1]),
+            HomeStat("Customers", s["customers"], "/contacts?kind=customer", newest=cus[0], edited=cus[1])]

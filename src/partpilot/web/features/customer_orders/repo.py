@@ -11,7 +11,7 @@ import re
 
 from ...core import ref_no
 from ...core.db import Database
-from ...core import HomeStat
+from ...core import HomeStat, recent_entries
 from ..catalog import pricing, stock
 from ..catalog import repo as catrepo
 from ..setup import repo as setup_repo
@@ -563,4 +563,8 @@ def cancel_order(db: Database, order_id: int) -> None:
 
 
 def home_stats(db: Database) -> list[HomeStat]:
-    return [HomeStat("Customer orders open", summary(db)["open"], "/customer-orders")]
+    with db.connect() as conn:
+        newest, edited = recent_entries(conn, table="customer_orders", label="order_ref",
+                                        url="/customer-orders/")
+    return [HomeStat("Customer orders open", summary(db)["open"], "/customer-orders",
+                     newest=newest, edited=edited)]

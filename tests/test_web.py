@@ -2030,7 +2030,7 @@ def test_assembly_lifecycle_routes(app):
 
 def test_home_stat_cards_follow_nav_order(app):
     labels = [s.label for s in app.state.registry.home_stats(app.state.database, "admin")]
-    assert labels == ["Parts", "Below minimum", "Documents", "Assemblies", "Customer orders open",
+    assert labels == ["Parts", "Documents", "Assemblies", "Customer orders open",
                       "Work orders open", "Purchase orders on order", "Suppliers", "Customers",
                       "Article numbers"]
 
@@ -2040,14 +2040,38 @@ def test_home_shows_stat_cards_and_about_panel(app):
     from partpilot.web.features.assemblies import repo as asmrepo
     from partpilot.web.features.catalog import repo as catrepo
     db = app.state.database
-    catrepo.create_part(db, part={"part_no": "HOME-1"}, supplier_lines=[])
-    asmrepo.create_assembly(db, {"part_no": "HOME-ASM"})
+    pid = catrepo.create_part(db, part={"part_no": "HOME-1", "min_qty": 5}, supplier_lines=[])
+    aid = asmrepo.create_assembly(db, {"part_no": "HOME-ASM"})
     client = TestClient(app)
     _login(client, "ware1", "pw")                      # the warehouse role sees the cards too
     html = client.get("/").text
-    assert '<a class="card" href="/catalog"><b>1</b><small>Parts</small></a>' in html
-    assert '<a class="card" href="/assemblies"><b>1</b><small>Assemblies</small></a>' in html
+    assert '<div class="home-grid">' in html             # equal-width cards, four per row
+    assert '<a class="count" href="/catalog"><b>1</b><small>Parts</small></a>' in html
+    assert '<a class="count" href="/assemblies"><b>1</b><small>Assemblies</small></a>' in html
+    assert "1 below minimum" in html                     # folded into the Parts card
     for label in ("Documents", "Customer orders open", "Work orders open", "Purchase orders on order"):
         assert f"<small>{label}</small>" in html, label
+    assert f'<a href="/catalog/{pid}">HOME-1</a>' in html          # newest parts list
+    assert f'<a href="/assemblies/{aid}">HOME-ASM</a>' in html     # newest assemblies list
     assert "Latest changes" in html                   # the repo under test has commits
     assert f"PartPilot {__version__}" in html and "Python " in html and "SQLite " in html
+
+
+def test_home_cards_list_newest_and_last_edited(app):
+    from partpilot.web.features.catalog import repo as catrepo
+    db = app.state.database
+    ids = [catrepo.create_part(db, part={"part_no": f"P-{i}"}, supplier_lines=[]) for i in range(1, 7)]
+    with db.connect() as conn:                        # spread creation times, oldest first
+        for i, pid in enumerate(ids, start=1):
+            conn.execute("UPDATE parts SET created_at = ?, updated_at = ? WHERE id = ?",
+                         (f"2026-01-0{i} 08:00:00", f"2026-01-0{i} 08:00:00", pid))
+    catrepo.update_part(db, ids[0], part={"part_no": "P-1", "notes": "edited"}, supplier_lines=[])
+    stat = next(s for s in app.state.registry.home_stats(db, "admin") if s.label == "Parts")
+    assert [e.label for e in stat.newest] == ["P-6", "P-5", "P-4", "P-3"]
+    assert [e.label for e in stat.edited] == ["P-1"]
+    client = TestClient(app)
+    _login(client, "ware1", "pw")
+    html = client.get("/").text
+    assert html.index("<h4>New</h4>") < html.index(f'<a href="/catalog/{ids[5]}">P-6</a>')
+    assert f'<a href="/catalog/{ids[0]}">P-1</a>' in html
+    assert "P-2</a>" not in html                       # neither new enough nor edited
