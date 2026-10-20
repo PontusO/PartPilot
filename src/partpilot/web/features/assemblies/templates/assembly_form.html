@@ -25,11 +25,6 @@
 <div class="panel">
   <p class="note"><a href="{{ back_url }}">← Back</a></p>
   <h1>{{ heading }}</h1>
-  {% if show_bom_import and current_user and current_user.role == 'admin' %}
-  <div class="act-bar">
-    <a class="act-btn secondary" href="/setup/import-parts">Import parts from BOM</a>
-  </div>
-  {% endif %}
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
   <form method="post" action="{{ action }}">
@@ -51,6 +46,13 @@
                   onclick="location.href='/article-register/from-template?return_to=/assemblies/new'">
             ＋ From template
           </button>
+          {% if show_bom_import and current_user and current_user.role == 'admin' %}
+          <button type="button" class="ghost" title="Bulk-load the parts from a BOM file, then create the assembly from them (Setup tool)"
+                  style="white-space:nowrap;"
+                  onclick="location.href='/setup/import-parts'">
+            Create Assembly from BOM import
+          </button>
+          {% endif %}
           {% endif %}
         </div>
       </div>

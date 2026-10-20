@@ -690,7 +690,8 @@ days, so re-running the same BOM is free. Avoid resolving very large BOMs repeat
 
 Setup → **"Import parts from BOM"** (admin) is for part lists with unusual column layouts, or for
 loading parts without attaching them to an assembly. Admins also reach it with the
-**"Import parts from BOM"** button on the Parts list and on the **New assembly** page. Upload, then **map columns**: for each file
+**"Import parts from BOM"** button on the Parts list, and from the **New assembly** page with
+**"Create Assembly from BOM import"** next to the part-number field. Upload, then **map columns**: for each file
 column pick the PartPilot field it feeds or leave it as ignore. At least **Value** or
 **Device / MPN** must be mapped. Map a **Manufacturer** column when the file has one: its name is
 written to each created part's manufacturer field and wins over the name Digi-Key or Mouser

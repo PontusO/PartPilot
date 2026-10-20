@@ -2163,9 +2163,12 @@ def test_import_parts_button_on_parts_list_and_new_assembly_for_admin(app):
     app.state.store.create_user("adm1", "pw", role="admin")
     client = TestClient(app)
     _login(client, "adm1", "pw")
-    button = '<a class="act-btn secondary" href="/setup/import-parts">Import parts from BOM</a>'
-    assert button in client.get("/catalog").text
-    assert button in client.get("/assemblies/new").text
+    assert '<a class="act-btn" href="/setup/import-parts">Import parts from BOM</a>' in client.get("/catalog").text
+    html = client.get("/assemblies/new").text
+    i = html.index("Create Assembly from BOM import")        # blue in-row button, right of "+ From template"
+    assert html.index("＋ From template") < i
+    assert "location.href='/setup/import-parts'" in html[i - 300:i]
+    assert 'class="ghost"' in html[i - 300:i]
 
 
 def test_import_parts_button_hidden_from_non_admins(app):

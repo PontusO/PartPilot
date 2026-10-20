@@ -14,7 +14,7 @@
   <div class="act-bar">
     <a class="act-btn" href="/catalog/new">+ Add component</a>
     {% if current_user and current_user.role == 'admin' %}
-    <a class="act-btn secondary" href="/setup/import-parts">Import parts from BOM</a>
+    <a class="act-btn" href="/setup/import-parts">Import parts from BOM</a>
     {% endif %}
   </div>
   {% endif %}

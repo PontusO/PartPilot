@@ -251,10 +251,12 @@ the same height (2.5rem) and radius (9px)** regardless of whether it's an `<a>`,
   `badge muted` **Retired** in its `<h1>` and as a `retired` pill on BOM and work-order lines that
   still reference it. Lists hide retired rows behind a **Show retired** checkbox that re-submits the
   filter form (same pattern as "Normally stocked only").
-- **2026-10-20** — **Setup-tool shortcuts.** A page may offer a shortcut into a Setup tool as an
-  `.act-btn.secondary` in its `.act-bar`, gated in the template on `current_user.role == 'admin'`
-  (the tool's own role). First use: **"Import parts from BOM"** on the Parts list and the New
-  assembly form (the form gained an `.act-bar` under its `<h1>` for this; the edit form has none).
+- **2026-10-20** — **Setup-tool shortcuts.** A page may offer a shortcut into a Setup tool as a
+  normal blue button (`.act-btn` in an `.act-bar`, or `button.ghost` in an in-form button row),
+  gated in the template on `current_user.role == 'admin'` (the tool's own role) — never the grey
+  `secondary` style, which is for cancel/back-type actions. First uses: **"Import parts from BOM"**
+  in the Parts list action bar, and **"Create Assembly from BOM import"** as the last `button.ghost`
+  in the New assembly part-number row, after "＋ New product" and "＋ From template" (edit form: none).
 - **2026-10-18** — **Home page stat cards.** The landing page renders a `.home-grid` (CSS grid,
   `repeat(4, minmax(0, 1fr))`, collapsing to 2 and 1 columns on narrow screens) of equal-width
   `.card.home-card` cards (panel background `--panel`, same as the technical panel below, not the
