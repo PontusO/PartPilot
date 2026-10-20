@@ -859,7 +859,7 @@ def recalc_sell_tiers_from_purchase(db: Database, part_id: int, anchor_qty: floa
 def home_stats(db: Database) -> list[HomeStat]:
     s = summary(db)
     with db.connect() as conn:
-        newest, edited = recent_entries(conn, table="parts", label="part_no", url="/catalog/",
+        newest, edited = recent_entries(conn, table="parts", url="/catalog/", label="part_no || COALESCE(' ' || NULLIF(COALESCE(description, value), ''), '')",
                                         where="kind != 'ASSY' AND retired_at IS NULL")
     return [HomeStat("Parts", s["parts"], "/catalog", note=f"{s['below_min']} below minimum",
                      newest=newest, edited=edited)]

@@ -23,12 +23,14 @@ your current password and the new one twice.
 
 Signing in lands on the home page. Under the title, a grid of equal-width **stat cards**, four to a
 row, shows a live count for each section you can open: **Parts**, **Documents**, **Assemblies**,
-**Customer orders open**, **Work orders open**, **Purchase orders on order**, **Suppliers**,
-**Customers** and **Article numbers**. The count is a link to that list; the Parts card also notes
-how many parts are below their minimum stock. Retired parts and assemblies are not counted or listed.
+**Customer orders open**, **Work orders open**, **Purchase orders on order**, **Suppliers** and
+**Customers**. The count is a link to that list; the Parts card also notes how many parts are below
+their minimum stock. Retired parts and assemblies are not counted or listed.
 
 Each card then lists **New** — the four most recently created records — and **Edited** — the four
-most recently changed records, each with the date and a link to its page. A record counts as edited
+most recently changed records, each with the date and a link to its page. Parts and assemblies show
+their part number followed by the description (or the value when there is no description), documents
+their number and title. A record counts as edited
 only when it was changed after it was created; a stock adjustment or a version release counts as a
 change to a part. Records created on the day the catalog was first loaded into PartPilot carry that
 day as their creation date.
